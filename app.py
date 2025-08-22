@@ -419,7 +419,7 @@ def process_single_session(api, my_uid, session):
 
 def monitor_messages():
     """监控消息的主循环（增强稳定性版本）"""
-    global monitoring, message_cache, last_message_times, last_send_time
+    global monitoring, message_cache, last_message_times, last_send_time, monitor_thread
     
     if not config.get('sessdata') or not config.get('bili_jct'):
         add_log("未配置登录信息，无法启动监控", 'error')
@@ -656,27 +656,88 @@ def monitor_messages():
                     if current_time_check - last_reply_time >= 5:
                         add_log(f"🔄 已连续 {current_time_check - last_reply_time} 秒无回复消息，执行自动重启", 'warning')
                         
-                        try:
-                            # 重新初始化系统
-                            message_cache = {}
-                            last_message_times = defaultdict(int)
-                            last_send_time = 0
-                            last_reply_time = current_time_check
-                            
-                            # 重新创建API对象
-                            api = BilibiliAPI(config['sessdata'], config['bili_jct'])
-                            my_uid = api.get_my_uid()
-                            
-                            if not my_uid:
-                                add_log("重启后获取用户信息失败", 'error')
-                                monitoring = False
-                                break
-                            
-                            # 重新预编译规则
-                            precompile_rules()
-                            add_log("✅ 系统重启完成，继续监控", 'success')
-                        except Exception as e:
-                            add_log(f"自动重启异常: {e}", 'error')
+                        # 增强的重启机制
+                        restart_success = False
+                        restart_attempts = 0
+                        max_restart_attempts = 3
+                        
+                        while not restart_success and restart_attempts < max_restart_attempts:
+                            restart_attempts += 1
+                            try:
+                                add_log(f"尝试重启 ({restart_attempts}/{max_restart_attempts})", 'info')
+                                
+                                # 清理所有缓存和状态
+                                message_cache.clear()
+                                last_message_times.clear()
+                                last_send_time = 0
+                                
+                                # 强制垃圾回收
+                                import gc
+                                gc.collect()
+                                
+                                # 等待一下让系统稳定
+                                time.sleep(1)
+                                
+                                # 重新创建API对象，增加重试机制
+                                api_created = False
+                                for api_attempt in range(3):
+                                    try:
+                                        api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+                                        # 测试API连接
+                                        test_sessions = api.get_sessions()
+                                        if test_sessions and test_sessions.get('code') == 0:
+                                            api_created = True
+                                            break
+                                        else:
+                                            add_log(f"API测试失败，尝试 {api_attempt + 1}/3", 'warning')
+                                            time.sleep(2)
+                                    except Exception as api_e:
+                                        add_log(f"API创建失败 {api_attempt + 1}/3: {api_e}", 'warning')
+                                        time.sleep(2)
+                                
+                                if not api_created:
+                                    raise Exception("无法创建有效的API连接")
+                                
+                                # 获取用户信息，增加重试
+                                my_uid = None
+                                for uid_attempt in range(3):
+                                    try:
+                                        my_uid = api.get_my_uid()
+                                        if my_uid:
+                                            break
+                                        else:
+                                            add_log(f"获取用户信息失败，尝试 {uid_attempt + 1}/3", 'warning')
+                                            time.sleep(1)
+                                    except Exception as uid_e:
+                                        add_log(f"获取用户信息异常 {uid_attempt + 1}/3: {uid_e}", 'warning')
+                                        time.sleep(1)
+                                
+                                if not my_uid:
+                                    raise Exception("无法获取用户信息，可能是登录状态失效")
+                                
+                                # 重新预编译规则
+                                precompile_rules()
+                                
+                                # 重置时间戳
+                                last_reply_time = current_time_check
+                                last_cleanup = current_time_check
+                                last_api_reset = current_time_check
+                                last_heartbeat = current_time_check
+                                
+                                restart_success = True
+                                add_log(f"✅ 系统重启成功 (用户UID: {my_uid})，继续监控", 'success')
+                                
+                            except Exception as e:
+                                add_log(f"重启尝试 {restart_attempts} 失败: {e}", 'error')
+                                if restart_attempts < max_restart_attempts:
+                                    add_log(f"等待 {restart_attempts * 2} 秒后重试", 'info')
+                                    time.sleep(restart_attempts * 2)
+                        
+                        # 如果重启失败，停止监控
+                        if not restart_success:
+                            add_log("❌ 多次重启失败，停止监控。请检查网络连接和登录状态", 'error')
+                            monitoring = False
+                            break
                     
                     # 固定循环间隔
                     elapsed = time.time() - loop_start
@@ -760,14 +821,29 @@ def handle_rules():
 def start_monitoring():
     global monitoring, monitor_thread
     
-    if monitoring and monitor_thread and monitor_thread.is_alive():
-        return jsonify({'success': False, 'error': '监控已在运行中'})
+    # 检查配置
+    if not config.get('sessdata') or not config.get('bili_jct'):
+        return jsonify({'success': False, 'error': '请先配置登录信息'})
     
-    # 确保之前的线程已停止
+    # 强制重置状态，确保可以重新启动
     if monitor_thread and monitor_thread.is_alive():
+        add_log("强制停止旧的监控线程", 'warning')
         monitoring = False
-        monitor_thread.join(timeout=2)
+        monitor_thread.join(timeout=3)
+        if monitor_thread.is_alive():
+            add_log("旧线程未能正常停止，但继续启动新线程", 'warning')
     
+    # 重置所有状态
+    monitoring = False  # 先设为False，避免竞态条件
+    monitor_thread = None
+    
+    # 清理全局状态
+    global message_cache, last_message_times, last_send_time
+    message_cache = {}
+    last_message_times = defaultdict(int)
+    last_send_time = 0
+    
+    # 启动新的监控线程
     monitoring = True
     monitor_thread = threading.Thread(target=monitor_messages)
     monitor_thread.daemon = True
@@ -780,22 +856,36 @@ def start_monitoring():
 def stop_monitoring():
     global monitoring, monitor_thread
     
-    if not monitoring:
-        return jsonify({'success': False, 'error': '监控未运行'})
-    
+    # 强制停止，不管当前状态
     monitoring = False
     add_log("停止监控私信", 'warning')
     
     # 等待线程结束
     if monitor_thread and monitor_thread.is_alive():
         monitor_thread.join(timeout=3)
+        if monitor_thread.is_alive():
+            add_log("监控线程未能在3秒内停止，但状态已重置", 'warning')
+    
+    # 清理线程引用
+    monitor_thread = None
     
     return jsonify({'success': True})
 
 @app.route('/api/status')
 def get_status():
+    global monitoring, monitor_thread
+    
+    # 检查实际状态，确保状态同步
+    actual_monitoring = monitoring and monitor_thread and monitor_thread.is_alive()
+    
+    # 如果状态不一致，自动修正
+    if monitoring and (not monitor_thread or not monitor_thread.is_alive()):
+        monitoring = False
+        monitor_thread = None
+        add_log("检测到状态不一致，已自动修正", 'warning')
+    
     return jsonify({
-        'monitoring': monitoring,
+        'monitoring': actual_monitoring,
         'rules_count': len(rules),
         'config_set': bool(config.get('sessdata') and config.get('bili_jct'))
     })
