@@ -418,7 +418,7 @@ def process_single_session(api, my_uid, session):
         return []
 
 def monitor_messages():
-    """监控消息的主循环（带自动重启机制）"""
+    """监控消息的主循环（增强稳定性版本）"""
     global monitoring, message_cache, last_message_times, last_send_time
     
     if not config.get('sessdata') or not config.get('bili_jct'):
@@ -426,224 +426,297 @@ def monitor_messages():
         monitoring = False
         return
     
-    try:
-        api = BilibiliAPI(config['sessdata'], config['bili_jct'])
-        my_uid = api.get_my_uid()
-        
-        if not my_uid:
-            add_log("获取用户信息失败，请检查登录配置", 'error')
-            monitoring = False
-            return
-        
-        add_log(f"监控已启动，用户UID: {my_uid}，固定1秒发送间隔 + 5秒无回复自动重启", 'success')
-        
-        # 预编译规则
-        precompile_rules()
-        
-        # 初始化全局变量
-        message_cache = {}
-        last_message_times = defaultdict(int)
-        last_send_time = 0
-        
-        last_cleanup = int(time.time())
-        last_api_reset = int(time.time())
-        last_reply_time = int(time.time())  # 记录最后一次回复时间
-        processed_count = 0
-        error_count = 0
-        consecutive_errors = 0
-        
-        while monitoring:
-            try:
-                loop_start = time.time()
-                current_time = int(time.time())
-                
-                # 每5分钟强制清理缓存（更频繁清理）
-                if current_time - last_cleanup > 300:
-                    cleanup_cache()
-                    precompile_rules()
-                    last_cleanup = current_time
-                    add_log(f"定期维护: 已处理 {processed_count} 条消息，错误 {error_count} 次，活跃会话 {len(last_message_times)} 个", 'info')
-                
-                # 每30分钟重新创建API对象，防止连接问题
-                if current_time - last_api_reset > 1800:
-                    add_log("重新初始化API连接", 'info')
-                    api = BilibiliAPI(config['sessdata'], config['bili_jct'])
-                    last_api_reset = current_time
-                
-                # 获取会话列表
-                sessions_data = api.get_sessions()
-                if not sessions_data:
-                    consecutive_errors += 1
-                    if consecutive_errors > 5:
-                        add_log("连续获取会话失败，重新初始化API", 'warning')
-                        api = BilibiliAPI(config['sessdata'], config['bili_jct'])
-                        consecutive_errors = 0
-                    time.sleep(1)
+    # 增加重试机制和异常恢复
+    max_retries = 3
+    retry_count = 0
+    
+    while monitoring and retry_count < max_retries:
+        try:
+            api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+            my_uid = api.get_my_uid()
+            
+            if not my_uid:
+                add_log("获取用户信息失败，请检查登录配置", 'error')
+                retry_count += 1
+                if retry_count < max_retries:
+                    add_log(f"重试获取用户信息 ({retry_count}/{max_retries})", 'warning')
+                    time.sleep(5)
                     continue
-                
-                if sessions_data.get('code') != 0:
-                    error_msg = sessions_data.get('message', '未知错误')
-                    add_log(f"API返回错误: {error_msg}", 'warning')
-                    consecutive_errors += 1
+                else:
+                    monitoring = False
+                    return
+            
+            # 重置重试计数
+            retry_count = 0
+            
+            add_log(f"监控已启动，用户UID: {my_uid}，固定1秒发送间隔 + 5秒无回复自动重启", 'success')
+            
+            # 预编译规则
+            precompile_rules()
+            
+            # 初始化全局变量
+            message_cache = {}
+            last_message_times = defaultdict(int)
+            last_send_time = 0
+            
+            last_cleanup = int(time.time())
+            last_api_reset = int(time.time())
+            last_reply_time = int(time.time())  # 记录最后一次回复时间
+            last_heartbeat = int(time.time())  # 心跳检测
+            processed_count = 0
+            error_count = 0
+            consecutive_errors = 0
+            
+            while monitoring:
+                try:
+                    loop_start = time.time()
+                    current_time = int(time.time())
                     
-                    # 如果是认证相关错误，重新初始化
-                    if sessions_data.get('code') in [-101, -111, -400, -403]:
-                        add_log("认证错误，重新初始化API", 'warning')
-                        api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+                    # 心跳检测 - 每60秒输出一次状态
+                    if current_time - last_heartbeat >= 60:
+                        add_log(f"💓 系统运行正常: 处理{processed_count}条消息, 错误{error_count}次, 活跃会话{len(last_message_times)}个", 'info')
+                        last_heartbeat = current_time
                     
-                    time.sleep(2)
-                    continue
-                
-                consecutive_errors = 0  # 重置连续错误计数
-                
-                sessions = sessions_data.get('data', {}).get('session_list', [])
-                if not sessions:
-                    time.sleep(0.5)
-                    continue
-                
-                # 按最后消息时间排序
-                sessions.sort(key=lambda x: x.get('last_msg', {}).get('timestamp', 0), reverse=True)
-                
-                # 筛选需要检查的会话（扩大范围确保不遗漏）
-                check_sessions = []
-                debug_info = []
-                
-                for session in sessions[:30]:  # 检查前30个会话
-                    talker_id = session.get('talker_id')
-                    if not talker_id:
+                    # 每5分钟强制清理缓存（更频繁清理）
+                    if current_time - last_cleanup > 300:
+                        try:
+                            cleanup_cache()
+                            precompile_rules()
+                            last_cleanup = current_time
+                            add_log(f"定期维护: 已处理 {processed_count} 条消息，错误 {error_count} 次，活跃会话 {len(last_message_times)} 个", 'info')
+                        except Exception as e:
+                            add_log(f"缓存清理异常: {e}", 'warning')
+                    
+                    # 每30分钟重新创建API对象，防止连接问题
+                    if current_time - last_api_reset > 1800:
+                        try:
+                            add_log("重新初始化API连接", 'info')
+                            api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+                            # 验证新API对象
+                            test_uid = api.get_my_uid()
+                            if test_uid:
+                                last_api_reset = current_time
+                                add_log("API重新初始化成功", 'success')
+                            else:
+                                add_log("API重新初始化失败，继续使用旧连接", 'warning')
+                        except Exception as e:
+                            add_log(f"API重新初始化异常: {e}", 'warning')
+                    
+                    # 获取会话列表 - 增加重试机制
+                    sessions_data = None
+                    for attempt in range(3):
+                        try:
+                            sessions_data = api.get_sessions()
+                            if sessions_data:
+                                break
+                        except Exception as e:
+                            add_log(f"获取会话列表尝试 {attempt+1}/3 失败: {e}", 'warning')
+                            if attempt < 2:
+                                time.sleep(1)
+                    
+                    if not sessions_data:
+                        consecutive_errors += 1
+                        if consecutive_errors > 5:
+                            add_log("连续获取会话失败，重新初始化API", 'warning')
+                            try:
+                                api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+                                consecutive_errors = 0
+                            except Exception as e:
+                                add_log(f"API重新初始化失败: {e}", 'error')
+                        time.sleep(2)
                         continue
                     
-                    last_msg_time = session.get('last_msg', {}).get('timestamp', 0)
-                    recorded_time = last_message_times.get(talker_id, 0)
-                    
-                    # 检查有新消息的会话
-                    if last_msg_time > recorded_time:
-                        check_sessions.append(session)
-                        debug_info.append(f"用户{talker_id}: 新消息 {last_msg_time} > {recorded_time}")
-                    # 或者最近5分钟内活跃的会话
-                    elif current_time - last_msg_time < 300:
-                        check_sessions.append(session)
-                        debug_info.append(f"用户{talker_id}: 活跃会话 {current_time - last_msg_time}s前")
-                    else:
-                        debug_info.append(f"用户{talker_id}: 跳过 {last_msg_time} <= {recorded_time}")
-                
-                # 每30秒输出一次调试信息
-                if current_time % 30 == 0 and debug_info:
-                    add_log(f"会话检查: {len(check_sessions)}/{len(sessions)} 个会话需要处理", 'debug')
-                
-                if not check_sessions:
-                    time.sleep(0.2)
-                    continue
-                
-                # 单线程顺序处理所有会话
-                reply_count = 0
-                
-                for session in check_sessions:
-                    if not monitoring:
-                        break
-                    
-                    try:
-                        results = process_single_session(api, my_uid, session)
+                    if sessions_data.get('code') != 0:
+                        error_msg = sessions_data.get('message', '未知错误')
+                        add_log(f"API返回错误: {error_msg}", 'warning')
+                        consecutive_errors += 1
                         
-                        for result in results:
-                            # 发送回复（固定1秒间隔 + 发送成功验证）
+                        # 如果是认证相关错误，重新初始化
+                        if sessions_data.get('code') in [-101, -111, -400, -403]:
+                            add_log("认证错误，重新初始化API", 'warning')
                             try:
-                                reply_result = api.send_msg(result['talker_id'], content=result['rule']['reply'])
-                                
-                                if reply_result and reply_result.get('code') == 0:
-                                    # 验证发送是否真正成功
-                                    time.sleep(0.5)  # 等待消息发送完成
-                                    verification_success = api.verify_message_sent(result['talker_id'], result['rule']['reply'])
-                                    
-                                    if verification_success:
-                                        add_log(f"✅ 已成功回复用户 {result['talker_id']} (规则: {result['rule']['title']}) 内容: {result['rule']['reply'][:20]}...", 'success')
-                                        reply_count += 1
-                                        processed_count += 1
-                                    else:
-                                        add_log(f"⚠️ 用户 {result['talker_id']} 发送验证失败，消息可能未送达", 'warning')
-                                        error_count += 1
-                                    
-                                elif reply_result and reply_result.get('code') == -412:
-                                    add_log(f"🚫 用户 {result['talker_id']} 触发频率限制: {reply_result.get('message', '')}", 'warning')
-                                    error_count += 1
-                                    
-                                elif reply_result and reply_result.get('code') == -101:
-                                    add_log("🔐 登录状态失效，请重新配置登录信息", 'error')
-                                    monitoring = False
-                                    break
-                                    
-                                else:
-                                    error_msg = reply_result.get('message', '未知错误') if reply_result else '网络错误'
-                                    error_code = reply_result.get('code', 'N/A') if reply_result else 'N/A'
-                                    add_log(f"❌ 回复用户 {result['talker_id']} 失败 [错误码:{error_code}]: {error_msg}", 'warning')
-                                    error_count += 1
-                                    
+                                api = BilibiliAPI(config['sessdata'], config['bili_jct'])
                             except Exception as e:
-                                add_log(f"💥 发送回复异常: {e}", 'error')
-                                error_count += 1
+                                add_log(f"认证错误后API重新初始化失败: {e}", 'error')
+                        
+                        time.sleep(2)
+                        continue
                     
-                    except Exception as e:
-                        add_log(f"处理会话异常: {e}", 'error')
-                        error_count += 1
-                
-                # 每处理10轮后，强制清理一次缓存
-                if processed_count > 0 and processed_count % 10 == 0:
-                    add_log(f"🔄 已处理{processed_count}条消息，执行缓存清理", 'info')
-                    cleanup_cache()
-                
-                # 记录处理结果和更新最后回复时间
-                if reply_count > 0:
-                    last_reply_time = int(time.time())  # 更新最后回复时间
-                    add_log(f"📊 本轮回复了 {reply_count} 条消息，总计处理 {processed_count} 条", 'info')
-                
-                # 检查是否需要自动重启（5秒无回复）
-                current_time_check = int(time.time())
-                if current_time_check - last_reply_time >= 5:
-                    add_log(f"🔄 已连续 {current_time_check - last_reply_time} 秒无回复消息，执行自动重启", 'warning')
+                    consecutive_errors = 0  # 重置连续错误计数
                     
-                    # 重新初始化系统
-                    message_cache = {}
-                    last_message_times = defaultdict(int)
-                    last_send_time = 0
-                    last_reply_time = current_time_check
+                    sessions = sessions_data.get('data', {}).get('session_list', [])
+                    if not sessions:
+                        time.sleep(0.5)
+                        continue
                     
-                    # 重新创建API对象
-                    api = BilibiliAPI(config['sessdata'], config['bili_jct'])
-                    my_uid = api.get_my_uid()
+                    # 按最后消息时间排序
+                    sessions.sort(key=lambda x: x.get('last_msg', {}).get('timestamp', 0), reverse=True)
                     
-                    if not my_uid:
-                        add_log("重启后获取用户信息失败", 'error')
-                        monitoring = False
-                        break
+                    # 筛选需要检查的会话（扩大范围确保不遗漏）
+                    check_sessions = []
+                    debug_info = []
                     
-                    # 重新预编译规则
-                    precompile_rules()
-                    add_log("✅ 系统重启完成，继续监控", 'success')
-                
-                # 固定循环间隔
-                elapsed = time.time() - loop_start
-                sleep_time = max(0.3, 0.5 - elapsed)  # 保持稳定的循环速度
-                time.sleep(sleep_time)
-                
-            except Exception as e:
-                add_log(f"监控循环异常: {e}", 'error')
-                error_count += 1
-                consecutive_errors += 1
-                
-                # 如果连续错误太多，重新初始化
-                if consecutive_errors > 10:
-                    add_log("连续错误过多，重新初始化系统", 'warning')
-                    api = BilibiliAPI(config['sessdata'], config['bili_jct'])
-                    consecutive_errors = 0
-                    time.sleep(5)
-                else:
-                    time.sleep(2)
+                    for session in sessions[:30]:  # 检查前30个会话
+                        talker_id = session.get('talker_id')
+                        if not talker_id:
+                            continue
+                        
+                        last_msg_time = session.get('last_msg', {}).get('timestamp', 0)
+                        recorded_time = last_message_times.get(talker_id, 0)
+                        
+                        # 检查有新消息的会话
+                        if last_msg_time > recorded_time:
+                            check_sessions.append(session)
+                            debug_info.append(f"用户{talker_id}: 新消息 {last_msg_time} > {recorded_time}")
+                        # 或者最近5分钟内活跃的会话
+                        elif current_time - last_msg_time < 300:
+                            check_sessions.append(session)
+                            debug_info.append(f"用户{talker_id}: 活跃会话 {current_time - last_msg_time}s前")
+                        else:
+                            debug_info.append(f"用户{talker_id}: 跳过 {last_msg_time} <= {recorded_time}")
+                    
+                    # 每30秒输出一次调试信息
+                    if current_time % 30 == 0 and debug_info:
+                        add_log(f"会话检查: {len(check_sessions)}/{len(sessions)} 个会话需要处理", 'debug')
+                    
+                    if not check_sessions:
+                        time.sleep(0.2)
+                        continue
+                    
+                    # 单线程顺序处理所有会话
+                    reply_count = 0
+                    
+                    for session in check_sessions:
+                        if not monitoring:
+                            break
+                        
+                        try:
+                            results = process_single_session(api, my_uid, session)
+                            
+                            for result in results:
+                                # 发送回复（固定1秒间隔 + 发送成功验证）
+                                try:
+                                    reply_result = api.send_msg(result['talker_id'], content=result['rule']['reply'])
+                                    
+                                    if reply_result and reply_result.get('code') == 0:
+                                        # 验证发送是否真正成功
+                                        time.sleep(0.5)  # 等待消息发送完成
+                                        try:
+                                            verification_success = api.verify_message_sent(result['talker_id'], result['rule']['reply'])
+                                        except Exception as e:
+                                            add_log(f"验证消息发送状态异常: {e}", 'warning')
+                                            verification_success = True  # 假设发送成功，避免卡住
+                                        
+                                        if verification_success:
+                                            add_log(f"✅ 已成功回复用户 {result['talker_id']} (规则: {result['rule']['title']}) 内容: {result['rule']['reply'][:20]}...", 'success')
+                                            reply_count += 1
+                                            processed_count += 1
+                                        else:
+                                            add_log(f"⚠️ 用户 {result['talker_id']} 发送验证失败，消息可能未送达", 'warning')
+                                            error_count += 1
+                                        
+                                    elif reply_result and reply_result.get('code') == -412:
+                                        add_log(f"🚫 用户 {result['talker_id']} 触发频率限制: {reply_result.get('message', '')}", 'warning')
+                                        error_count += 1
+                                        
+                                    elif reply_result and reply_result.get('code') == -101:
+                                        add_log("🔐 登录状态失效，请重新配置登录信息", 'error')
+                                        monitoring = False
+                                        break
+                                        
+                                    else:
+                                        error_msg = reply_result.get('message', '未知错误') if reply_result else '网络错误'
+                                        error_code = reply_result.get('code', 'N/A') if reply_result else 'N/A'
+                                        add_log(f"❌ 回复用户 {result['talker_id']} 失败 [错误码:{error_code}]: {error_msg}", 'warning')
+                                        error_count += 1
+                                        
+                                except Exception as e:
+                                    add_log(f"💥 发送回复异常: {e}", 'error')
+                                    error_count += 1
+                        
+                        except Exception as e:
+                            add_log(f"处理会话异常: {e}", 'error')
+                            error_count += 1
+                    
+                    # 每处理10轮后，强制清理一次缓存
+                    if processed_count > 0 and processed_count % 10 == 0:
+                        try:
+                            add_log(f"🔄 已处理{processed_count}条消息，执行缓存清理", 'info')
+                            cleanup_cache()
+                        except Exception as e:
+                            add_log(f"缓存清理异常: {e}", 'warning')
+                    
+                    # 记录处理结果和更新最后回复时间
+                    if reply_count > 0:
+                        last_reply_time = int(time.time())  # 更新最后回复时间
+                        add_log(f"📊 本轮回复了 {reply_count} 条消息，总计处理 {processed_count} 条", 'info')
+                    
+                    # 检查是否需要自动重启（5秒无回复）
+                    current_time_check = int(time.time())
+                    if current_time_check - last_reply_time >= 5:
+                        add_log(f"🔄 已连续 {current_time_check - last_reply_time} 秒无回复消息，执行自动重启", 'warning')
+                        
+                        try:
+                            # 重新初始化系统
+                            message_cache = {}
+                            last_message_times = defaultdict(int)
+                            last_send_time = 0
+                            last_reply_time = current_time_check
+                            
+                            # 重新创建API对象
+                            api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+                            my_uid = api.get_my_uid()
+                            
+                            if not my_uid:
+                                add_log("重启后获取用户信息失败", 'error')
+                                monitoring = False
+                                break
+                            
+                            # 重新预编译规则
+                            precompile_rules()
+                            add_log("✅ 系统重启完成，继续监控", 'success')
+                        except Exception as e:
+                            add_log(f"自动重启异常: {e}", 'error')
+                    
+                    # 固定循环间隔
+                    elapsed = time.time() - loop_start
+                    sleep_time = max(0.3, 0.5 - elapsed)  # 保持稳定的循环速度
+                    time.sleep(sleep_time)
+                    
+                except KeyboardInterrupt:
+                    add_log("收到停止信号", 'warning')
+                    monitoring = False
+                    break
+                except Exception as e:
+                    add_log(f"监控循环异常: {e}", 'error')
+                    error_count += 1
+                    consecutive_errors += 1
+                    
+                    # 如果连续错误太多，重新初始化
+                    if consecutive_errors > 10:
+                        add_log("连续错误过多，重新初始化系统", 'warning')
+                        try:
+                            api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+                            consecutive_errors = 0
+                        except Exception as init_e:
+                            add_log(f"系统重新初始化失败: {init_e}", 'error')
+                            break
+                        time.sleep(5)
+                    else:
+                        time.sleep(2)
+        
+        except Exception as e:
+            add_log(f"监控系统异常: {e}", 'error')
+            retry_count += 1
+            if retry_count < max_retries and monitoring:
+                add_log(f"尝试重新启动监控系统 ({retry_count}/{max_retries})", 'warning')
+                time.sleep(10)  # 等待更长时间再重试
+            else:
+                break
     
-    except Exception as e:
-        add_log(f"监控系统异常: {e}", 'error')
-    finally:
-        monitoring = False
-        add_log("监控已停止", 'warning')
+    # 确保监控状态正确设置
+    monitoring = False
+    add_log("监控已停止", 'warning')
 
 # 路由定义
 @app.route('/')
