@@ -9,7 +9,132 @@ document.addEventListener('DOMContentLoaded', function() {
     loadConfig();
     loadRules(); // loadRules内部会调用updateRulesDisplay()
     checkServerStatus();
+    initMobileOptimizations();
 });
+
+// 移动端优化初始化
+function initMobileOptimizations() {
+    // 防止iOS Safari缩放
+    document.addEventListener('gesturestart', function (e) {
+        e.preventDefault();
+    });
+    
+    // 优化触摸滚动
+    if ('ontouchstart' in window) {
+        document.body.style.webkitOverflowScrolling = 'touch';
+    }
+    
+    // 添加触摸反馈
+    addTouchFeedback();
+    
+    // 优化输入框体验
+    optimizeInputs();
+    
+    // 添加下拉刷新功能
+    addPullToRefresh();
+}
+
+// 添加触摸反馈
+function addTouchFeedback() {
+    const buttons = document.querySelectorAll('button');
+    buttons.forEach(button => {
+        button.addEventListener('touchstart', function() {
+            this.style.transform = 'scale(0.95)';
+            this.style.opacity = '0.8';
+        });
+        
+        button.addEventListener('touchend', function() {
+            this.style.transform = 'scale(1)';
+            this.style.opacity = '1';
+        });
+        
+        button.addEventListener('touchcancel', function() {
+            this.style.transform = 'scale(1)';
+            this.style.opacity = '1';
+        });
+    });
+}
+
+// 优化输入框体验
+function optimizeInputs() {
+    const inputs = document.querySelectorAll('input, textarea');
+    inputs.forEach(input => {
+        // 防止iOS Safari在聚焦时缩放
+        input.addEventListener('focus', function() {
+            if (window.innerWidth < 768) {
+                document.querySelector('meta[name=viewport]').setAttribute('content', 
+                    'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+            }
+        });
+        
+        input.addEventListener('blur', function() {
+            if (window.innerWidth < 768) {
+                document.querySelector('meta[name=viewport]').setAttribute('content', 
+                    'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no');
+            }
+        });
+    });
+}
+
+// 添加下拉刷新功能
+function addPullToRefresh() {
+    let startY = 0;
+    let currentY = 0;
+    let pullDistance = 0;
+    let isPulling = false;
+    let refreshThreshold = 80;
+    
+    document.addEventListener('touchstart', function(e) {
+        if (window.scrollY === 0) {
+            startY = e.touches[0].clientY;
+            isPulling = true;
+        }
+    });
+    
+    document.addEventListener('touchmove', function(e) {
+        if (!isPulling) return;
+        
+        currentY = e.touches[0].clientY;
+        pullDistance = currentY - startY;
+        
+        if (pullDistance > 0 && window.scrollY === 0) {
+            e.preventDefault();
+            
+            // 添加视觉反馈
+            if (pullDistance > refreshThreshold) {
+                document.body.style.transform = `translateY(${Math.min(pullDistance * 0.5, 50)}px)`;
+                document.body.style.opacity = '0.8';
+            }
+        }
+    });
+    
+    document.addEventListener('touchend', function(e) {
+        if (!isPulling) return;
+        
+        isPulling = false;
+        document.body.style.transform = '';
+        document.body.style.opacity = '';
+        
+        if (pullDistance > refreshThreshold) {
+            // 执行刷新
+            refreshData();
+        }
+        
+        startY = 0;
+        currentY = 0;
+        pullDistance = 0;
+    });
+}
+
+// 刷新数据
+function refreshData() {
+    showToast('正在刷新数据...', 'info');
+    loadRules();
+    checkServerStatus();
+    setTimeout(() => {
+        showToast('刷新完成', 'success');
+    }, 1000);
+}
 
 // 显示提示消息
 function showToast(message, type = 'info') {
@@ -462,7 +587,20 @@ function editRule(id) {
     document.getElementById('edit-reply').value = rule.reply || '';
     
     // 显示模态框
-    document.getElementById('edit-modal').style.display = 'block';
+    const modal = document.getElementById('edit-modal');
+    modal.style.display = 'block';
+    
+    // 移动端优化：防止背景滚动
+    if (window.innerWidth <= 768) {
+        document.body.style.overflow = 'hidden';
+        document.body.style.position = 'fixed';
+        document.body.style.width = '100%';
+        
+        // 聚焦到第一个输入框
+        setTimeout(() => {
+            document.getElementById('edit-rule-title').focus();
+        }, 300);
+    }
 }
 
 // 保存编辑的规则
@@ -514,6 +652,13 @@ function closeEditModal() {
     document.getElementById('edit-modal').style.display = 'none';
     editingRuleId = null;
     
+    // 移动端优化：恢复背景滚动
+    if (window.innerWidth <= 768) {
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.width = '';
+    }
+    
     // 清空表单
     document.getElementById('edit-rule-title').value = '';
     document.getElementById('edit-keywords').value = '';
@@ -526,4 +671,100 @@ window.onclick = function(event) {
     if (event.target === modal) {
         closeEditModal();
     }
+}
+
+// 键盘事件处理
+document.addEventListener('keydown', function(event) {
+    // ESC键关闭模态框
+    if (event.key === 'Escape') {
+        const modal = document.getElementById('edit-modal');
+        if (modal.style.display === 'block') {
+            closeEditModal();
+        }
+    }
+    
+    // Enter键提交表单（在非textarea元素中）
+    if (event.key === 'Enter' && event.target.tagName !== 'TEXTAREA') {
+        if (event.target.closest('#edit-modal')) {
+            event.preventDefault();
+            saveEditRule();
+        } else if (event.target.closest('.keyword-panel')) {
+            event.preventDefault();
+            addRule();
+        } else if (event.target.closest('.config-panel')) {
+            event.preventDefault();
+            saveConfig();
+        } else if (event.target.closest('.default-reply-panel')) {
+            event.preventDefault();
+            saveDefaultReply();
+        }
+    }
+});
+
+// 移动端虚拟键盘处理
+function handleVirtualKeyboard() {
+    let initialViewportHeight = window.innerHeight;
+    
+    window.addEventListener('resize', function() {
+        const currentHeight = window.innerHeight;
+        const heightDifference = initialViewportHeight - currentHeight;
+        
+        // 如果高度减少超过150px，认为是虚拟键盘弹出
+        if (heightDifference > 150) {
+            document.body.classList.add('keyboard-open');
+            
+            // 调整模态框位置
+            const modal = document.querySelector('.modal-content');
+            if (modal && document.getElementById('edit-modal').style.display === 'block') {
+                modal.style.position = 'absolute';
+                modal.style.top = '10px';
+                modal.style.marginTop = '0';
+            }
+        } else {
+            document.body.classList.remove('keyboard-open');
+            
+            // 恢复模态框位置
+            const modal = document.querySelector('.modal-content');
+            if (modal) {
+                modal.style.position = '';
+                modal.style.top = '';
+                modal.style.marginTop = '';
+            }
+        }
+    });
+}
+
+// 添加长按删除功能
+function addLongPressDelete() {
+    let pressTimer;
+    
+    document.addEventListener('touchstart', function(e) {
+        if (e.target.closest('.delete-btn')) {
+            pressTimer = setTimeout(function() {
+                // 长按删除确认
+                const ruleItem = e.target.closest('.rule-item');
+                const ruleTitle = ruleItem.querySelector('.rule-title').textContent;
+                
+                if (confirm(`确定要删除规则"${ruleTitle.replace(/[✓✗]\s*/, '')}"吗？`)) {
+                    const deleteBtn = e.target.closest('.delete-btn');
+                    const ruleId = deleteBtn.getAttribute('onclick').match(/\d+/)[0];
+                    deleteRule(parseInt(ruleId));
+                }
+            }, 1000); // 长按1秒
+        }
+    });
+    
+    document.addEventListener('touchend', function(e) {
+        clearTimeout(pressTimer);
+    });
+    
+    document.addEventListener('touchmove', function(e) {
+        clearTimeout(pressTimer);
+    });
+}
+
+// 初始化移动端功能
+if (window.innerWidth <= 768) {
+    handleVirtualKeyboard();
+    addLongPressDelete();
 }

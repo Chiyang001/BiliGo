@@ -561,8 +561,13 @@ footer a:hover {
 
 /* 响应式设计 */
 @media (max-width: 768px) {
+    .container {
+        padding: 15px;
+    }
+    
     .main-content {
         grid-template-columns: 1fr;
+        gap: 15px;
     }
     
     .control-panel, .config-panel, .keyword-panel, .rules-panel, .log-panel, .default-reply-panel {
@@ -573,9 +578,200 @@ footer a:hover {
         flex-direction: column;
         gap: 15px;
         align-items: flex-start;
+        margin-bottom: 20px;
     }
     
     .status-indicator {
         align-self: flex-start;
+    }
+    
+    h1 {
+        font-size: 20px;
+    }
+    
+    section {
+        padding: 15px;
+    }
+    
+    h2 {
+        font-size: 16px;
+        margin-bottom: 12px;
+    }
+    
+    .button-group {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    button {
+        width: 100%;
+        padding: 12px 16px;
+        font-size: 15px;
+    }
+    
+    .btn-icon {
+        width: auto;
+        padding: 8px 12px;
+    }
+    
+    input, textarea {
+        padding: 12px 12px 12px 36px;
+        font-size: 16px; /* 防止iOS缩放 */
+    }
+    
+    textarea {
+        padding-left: 12px;
+        height: 120px;
+    }
+    
+    .rule-actions {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .rule-actions button {
+        width: 100%;
+    }
+    
+    .modal-content {
+        margin: 5% auto;
+        width: 95%;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+    
+    .modal-body {
+        padding: 15px;
+    }
+    
+    .modal-footer {
+        padding: 15px;
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .modal-footer button {
+        width: 100%;
+    }
+    
+    #toast-container {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+        max-width: none;
+    }
+    
+    .toast {
+        margin: 0 auto;
+        max-width: 100%;
+    }
+    
+    .pagination {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    
+    #log-container {
+        max-height: 200px;
+    }
+}
+
+@media (max-width: 480px) {
+    .container {
+        padding: 10px;
+    }
+    
+    section {
+        padding: 12px;
+    }
+    
+    h1 {
+        font-size: 18px;
+    }
+    
+    h2 {
+        font-size: 15px;
+    }
+    
+    .status-indicator {
+        font-size: 13px;
+        padding: 5px 10px;
+    }
+    
+    input, textarea {
+        padding: 10px 10px 10px 32px;
+        font-size: 16px;
+    }
+    
+    textarea {
+        padding-left: 10px;
+        height: 100px;
+    }
+    
+    button {
+        padding: 10px 14px;
+        font-size: 14px;
+    }
+    
+    .rule-item {
+        padding: 12px;
+    }
+    
+    .rule-title {
+        font-size: 15px;
+    }
+    
+    .rule-keywords, .rule-reply {
+        font-size: 13px;
+    }
+    
+    .modal-content {
+        margin: 2% auto;
+        width: 98%;
+    }
+    
+    .modal-header, .modal-body, .modal-footer {
+        padding: 12px;
+    }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+    button {
+        min-height: 44px; /* iOS推荐的最小触摸目标 */
+    }
+    
+    .btn-icon {
+        min-height: 36px;
+        min-width: 36px;
+    }
+    
+    input, textarea {
+        min-height: 44px;
+    }
+    
+    .rule-item {
+        padding: 16px;
+    }
+    
+    .close-btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
+
+/* 横屏模式优化 */
+@media (max-width: 768px) and (orientation: landscape) {
+    .modal-content {
+        margin: 2% auto;
+        max-height: 95vh;
+    }
+    
+    #log-container {
+        max-height: 150px;
+    }
+    
+    textarea {
+        height: 80px;
     }
 }
