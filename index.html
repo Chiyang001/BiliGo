@@ -68,14 +68,42 @@
                     </div>
                     <p class="help-text">当用户消息未匹配任何关键词时，自动回复默认消息</p>
                 </div>
+                
                 <div class="form-row">
+                    <label>回复类型:</label>
+                    <div class="radio-group">
+                        <div class="radio-wrapper">
+                            <input type="radio" id="default-reply-text" name="default-reply-type" value="text" checked>
+                            <label for="default-reply-text">文字回复</label>
+                        </div>
+                        <div class="radio-wrapper">
+                            <input type="radio" id="default-reply-image" name="default-reply-type" value="image">
+                            <label for="default-reply-image">图片回复</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="default-text-content" class="form-row">
                     <label for="default-reply-message">默认回复内容:</label>
                     <textarea id="default-reply-message" placeholder="请输入默认回复内容，例如：您好，我现在不在，稍后会回复您的消息。"></textarea>
                 </div>
+                
+                <div id="default-image-content" class="form-row" style="display: none;">
+                    <label for="default-reply-image-path">选择图片:</label>
+                    <div class="image-selector">
+                        <input type="text" id="default-reply-image-path" placeholder="请选择图片文件" readonly>
+                        <button type="button" class="btn-secondary" onclick="openImageBrowser('default')">
+                            <i class="bi bi-folder2-open"></i> 选择图片
+                        </button>
+                    </div>
+                    <div id="default-image-preview" class="image-preview" style="display: none;"></div>
+                </div>
+                
                 <button class="btn-primary" onclick="saveDefaultReply()">
                     <i class="bi bi-save-fill"></i> 保存默认回复设置
                 </button>
             </section>
+
 
             <section class="keyword-panel">
                 <h2><i class="bi bi-chat-square-text-fill"></i> 关键词回复设置</h2>
@@ -93,10 +121,37 @@
                         <input type="text" id="keywords" placeholder="例如：你好，帮助，问题">
                     </div>
                 </div>
+                
                 <div class="form-row">
+                    <label>回复类型:</label>
+                    <div class="radio-group">
+                        <div class="radio-wrapper">
+                            <input type="radio" id="rule-reply-text" name="rule-reply-type" value="text" checked>
+                            <label for="rule-reply-text">文字回复</label>
+                        </div>
+                        <div class="radio-wrapper">
+                            <input type="radio" id="rule-reply-image" name="rule-reply-type" value="image">
+                            <label for="rule-reply-image">图片回复</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="rule-text-content" class="form-row">
                     <label for="reply">回复内容:</label>
                     <textarea id="reply" placeholder="请输入回复内容"></textarea>
                 </div>
+                
+                <div id="rule-image-content" class="form-row" style="display: none;">
+                    <label for="rule-reply-image-path">选择图片:</label>
+                    <div class="image-selector">
+                        <input type="text" id="rule-reply-image-path" placeholder="请选择图片文件" readonly>
+                        <button type="button" class="btn-secondary" onclick="openImageBrowser('rule')">
+                            <i class="bi bi-folder2-open"></i> 选择图片
+                        </button>
+                    </div>
+                    <div id="rule-image-preview" class="image-preview" style="display: none;"></div>
+                </div>
+                
                 <button class="btn-primary" onclick="addRule()">
                     <i class="bi bi-plus-circle-fill"></i> 添加规则
                 </button>
@@ -138,6 +193,41 @@
         </footer>
     </div>
 
+    <!-- 图片浏览器模态框 -->
+    <div id="image-browser-modal" class="modal">
+        <div class="modal-content image-browser-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-folder2-open"></i> 选择图片</h3>
+                <button class="close-btn" onclick="closeImageBrowser()">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="browser-toolbar">
+                    <div class="current-path">
+                        <i class="bi bi-folder-fill"></i>
+                        <span id="current-path-text">加载中...</span>
+                    </div>
+                    <div class="quick-nav">
+                        <button class="btn-secondary btn-sm" onclick="goToHomeDirectory()">
+                            <i class="bi bi-house-fill"></i> 主目录
+                        </button>
+                    </div>
+                </div>
+                <div id="file-list" class="file-list">
+                    <div class="loading">
+                        <i class="bi bi-arrow-clockwise spin"></i> 加载中...
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeImageBrowser()">
+                    <i class="bi bi-x"></i> 取消
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- 编辑规则模态框 -->
     <div id="edit-modal" class="modal">
         <div class="modal-content">
@@ -162,9 +252,35 @@
                         <input type="text" id="edit-keywords" placeholder="例如：你好，帮助，问题">
                     </div>
                 </div>
+                
                 <div class="form-row">
+                    <label>回复类型:</label>
+                    <div class="radio-group">
+                        <div class="radio-wrapper">
+                            <input type="radio" id="edit-reply-text" name="edit-reply-type" value="text" checked>
+                            <label for="edit-reply-text">文字回复</label>
+                        </div>
+                        <div class="radio-wrapper">
+                            <input type="radio" id="edit-reply-image" name="edit-reply-type" value="image">
+                            <label for="edit-reply-image">图片回复</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="edit-text-content" class="form-row">
                     <label for="edit-reply">回复内容:</label>
                     <textarea id="edit-reply" placeholder="请输入回复内容"></textarea>
+                </div>
+                
+                <div id="edit-image-content" class="form-row" style="display: none;">
+                    <label for="edit-reply-image-path">选择图片:</label>
+                    <div class="image-selector">
+                        <input type="text" id="edit-reply-image-path" placeholder="请选择图片文件" readonly>
+                        <button type="button" class="btn-secondary" onclick="openImageBrowser('edit')">
+                            <i class="bi bi-folder2-open"></i> 选择图片
+                        </button>
+                    </div>
+                    <div id="edit-image-preview" class="image-preview" style="display: none;"></div>
                 </div>
             </div>
             <div class="modal-footer">

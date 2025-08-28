@@ -10,7 +10,82 @@ document.addEventListener('DOMContentLoaded', function() {
     loadRules(); // loadRules内部会调用updateRulesDisplay()
     checkServerStatus();
     initMobileOptimizations();
+    initReplyTypeHandlers();
 });
+
+// 全局变量
+let currentImageBrowserTarget = null; // 当前图片浏览器的目标
+let currentBrowserPath = '';
+let selectedImagePath = '';
+
+// 初始化回复类型处理器
+function initReplyTypeHandlers() {
+    // 默认回复类型切换
+    const defaultRadios = document.querySelectorAll('input[name="default-reply-type"]');
+    defaultRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            toggleDefaultReplyContent(this.value);
+        });
+    });
+    
+    // 规则回复类型切换
+    const ruleRadios = document.querySelectorAll('input[name="rule-reply-type"]');
+    ruleRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            toggleRuleReplyContent(this.value);
+        });
+    });
+    
+    // 编辑回复类型切换
+    const editRadios = document.querySelectorAll('input[name="edit-reply-type"]');
+    editRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            toggleEditReplyContent(this.value);
+        });
+    });
+}
+
+// 切换默认回复内容显示
+function toggleDefaultReplyContent(type) {
+    const textContent = document.getElementById('default-text-content');
+    const imageContent = document.getElementById('default-image-content');
+    
+    if (type === 'text') {
+        textContent.style.display = 'block';
+        imageContent.style.display = 'none';
+    } else {
+        textContent.style.display = 'none';
+        imageContent.style.display = 'block';
+    }
+}
+
+// 切换规则回复内容显示
+function toggleRuleReplyContent(type) {
+    const textContent = document.getElementById('rule-text-content');
+    const imageContent = document.getElementById('rule-image-content');
+    
+    if (type === 'text') {
+        textContent.style.display = 'block';
+        imageContent.style.display = 'none';
+    } else {
+        textContent.style.display = 'none';
+        imageContent.style.display = 'block';
+    }
+}
+
+// 切换编辑回复内容显示
+function toggleEditReplyContent(type) {
+    const textContent = document.getElementById('edit-text-content');
+    const imageContent = document.getElementById('edit-image-content');
+    
+    if (type === 'text') {
+        textContent.style.display = 'block';
+        imageContent.style.display = 'none';
+    } else {
+        textContent.style.display = 'none';
+        imageContent.style.display = 'block';
+    }
+}
 
 // 移动端优化初始化
 function initMobileOptimizations() {
@@ -215,7 +290,19 @@ function loadConfig() {
         // 加载默认回复设置
         if (document.getElementById('default-reply-enabled')) {
             document.getElementById('default-reply-enabled').checked = data.default_reply_enabled || false;
+            
+            // 设置回复类型
+            const replyType = data.default_reply_type || 'text';
+            document.querySelector(`input[name="default-reply-type"][value="${replyType}"]`).checked = true;
+            toggleDefaultReplyContent(replyType);
+            
+            // 设置内容
             document.getElementById('default-reply-message').value = data.default_reply_message || '您好，我现在不在，稍后会回复您的消息。';
+            
+            if (data.default_reply_image) {
+                document.getElementById('default-reply-image-path').value = data.default_reply_image;
+                showImagePreview('default', data.default_reply_image);
+            }
         }
     })
     .catch(error => {
@@ -226,11 +313,29 @@ function loadConfig() {
 // 保存默认回复设置
 function saveDefaultReply() {
     const enabled = document.getElementById('default-reply-enabled').checked;
-    const message = document.getElementById('default-reply-message').value.trim();
+    const replyType = document.querySelector('input[name="default-reply-type"]:checked').value;
     
-    if (!message) {
-        showToast('请填写默认回复内容', 'warning');
-        return;
+    let configData = {
+        default_reply_enabled: enabled,
+        default_reply_type: replyType
+    };
+    
+    if (replyType === 'text') {
+        const message = document.getElementById('default-reply-message').value.trim();
+        if (!message) {
+            showToast('请填写默认回复内容', 'warning');
+            return;
+        }
+        configData.default_reply_message = message;
+        configData.default_reply_image = '';
+    } else {
+        const imagePath = document.getElementById('default-reply-image-path').value.trim();
+        if (!imagePath) {
+            showToast('请选择默认回复图片', 'warning');
+            return;
+        }
+        configData.default_reply_image = imagePath;
+        configData.default_reply_message = '';
     }
     
     fetch('/api/config', {
@@ -238,10 +343,7 @@ function saveDefaultReply() {
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-            default_reply_enabled: enabled,
-            default_reply_message: message
-        })
+        body: JSON.stringify(configData)
     })
     .then(response => response.json())
     .then(data => {
@@ -259,26 +361,45 @@ function saveDefaultReply() {
     });
 }
 
+
 // 添加回复规则
 function addRule() {
     const name = document.getElementById('rule-title').value.trim();
     const keywords = document.getElementById('keywords').value.trim();
-    const reply = document.getElementById('reply').value.trim();
+    const replyType = document.querySelector('input[name="rule-reply-type"]:checked').value;
     
-    if (!name || !keywords || !reply) {
-        showToast('请填写完整的规则信息（标题、关键词、回复内容）', 'warning');
+    if (!name || !keywords) {
+        showToast('请填写规则标题和关键词', 'warning');
         return;
     }
     
-    const rule = {
+    let rule = {
         id: Date.now(),
         name: name,
         keyword: keywords,  // keywords.json 使用 keyword 字段存储逗号分隔的关键词
-        reply: reply,
+        reply_type: replyType,
         enabled: true,
         use_regex: false,
         created_at: new Date().toISOString()
     };
+    
+    if (replyType === 'text') {
+        const reply = document.getElementById('reply').value.trim();
+        if (!reply) {
+            showToast('请填写回复内容', 'warning');
+            return;
+        }
+        rule.reply = reply;
+        rule.reply_image = '';
+    } else {
+        const imagePath = document.getElementById('rule-reply-image-path').value.trim();
+        if (!imagePath) {
+            showToast('请选择回复图片', 'warning');
+            return;
+        }
+        rule.reply = '[图片回复]';
+        rule.reply_image = imagePath;
+    }
     
     rules.push(rule);
     saveRules();
@@ -288,6 +409,10 @@ function addRule() {
     document.getElementById('rule-title').value = '';
     document.getElementById('keywords').value = '';
     document.getElementById('reply').value = '';
+    document.getElementById('rule-reply-image-path').value = '';
+    document.querySelector('input[name="rule-reply-type"][value="text"]').checked = true;
+    toggleRuleReplyContent('text');
+    hideImagePreview('rule');
     
     showToast(`规则"${name}"添加成功`, 'success');
     addLog(`添加规则成功: ${name}`, 'success');
@@ -387,13 +512,25 @@ function updateRulesDisplay() {
     const currentRules = sortedRules.slice(startIndex, endIndex);
     
     container.innerHTML = currentRules.map(rule => {
-        const replyText = rule.reply.length > 100 ? rule.reply.substring(0, 100) + '...' : rule.reply;
         const enabledStatus = rule.enabled ? '<i class="bi bi-check-circle-fill" style="color: #2ed573;"></i>' : '<i class="bi bi-x-circle-fill" style="color: #ff4757;"></i>';
+        
+        // 根据回复类型显示不同的内容
+        let replyContent = '';
+        const replyType = rule.reply_type || 'text';
+        
+        if (replyType === 'image') {
+            const imageName = rule.reply_image ? rule.reply_image.split(/[/\\]/).pop() : '未选择图片';
+            replyContent = `<i class="bi bi-image-fill" style="color: #007bff;"></i> 图片回复: ${imageName}`;
+        } else {
+            const replyText = rule.reply && rule.reply.length > 100 ? rule.reply.substring(0, 100) + '...' : (rule.reply || '');
+            replyContent = `<i class="bi bi-chat-text-fill" style="color: #28a745;"></i> 文字回复: ${replyText}`;
+        }
+        
         return `
         <div class="rule-item">
             <div class="rule-title">${enabledStatus} ${rule.name || '未命名规则'}</div>
             <div class="rule-keywords">关键词: ${rule.keyword || ''}</div>
-            <div class="rule-reply" title="${rule.reply}">回复: ${replyText}</div>
+            <div class="rule-reply" title="${rule.reply || rule.reply_image || ''}">${replyContent}</div>
             <div class="rule-actions">
                 <button class="edit-btn" onclick="editRule(${rule.id})"><i class="bi bi-pencil-fill"></i> 编辑</button>
                 <button class="delete-btn" onclick="deleteRule(${rule.id})"><i class="bi bi-trash-fill"></i> 删除</button>
@@ -584,7 +721,20 @@ function editRule(id) {
     // 填充编辑表单
     document.getElementById('edit-rule-title').value = rule.name || '';
     document.getElementById('edit-keywords').value = rule.keyword || '';
-    document.getElementById('edit-reply').value = rule.reply || '';
+    
+    // 设置回复类型
+    const replyType = rule.reply_type || 'text';
+    document.querySelector(`input[name="edit-reply-type"][value="${replyType}"]`).checked = true;
+    toggleEditReplyContent(replyType);
+    
+    if (replyType === 'text') {
+        document.getElementById('edit-reply').value = rule.reply || '';
+    } else {
+        document.getElementById('edit-reply-image-path').value = rule.reply_image || '';
+        if (rule.reply_image) {
+            showImagePreview('edit', rule.reply_image);
+        }
+    }
     
     // 显示模态框
     const modal = document.getElementById('edit-modal');
@@ -607,11 +757,35 @@ function editRule(id) {
 function saveEditRule() {
     const name = document.getElementById('edit-rule-title').value.trim();
     const keywords = document.getElementById('edit-keywords').value.trim();
-    const reply = document.getElementById('edit-reply').value.trim();
+    const replyType = document.querySelector('input[name="edit-reply-type"]:checked').value;
     
-    if (!name || !keywords || !reply) {
-        showToast('请填写完整的规则信息（标题、关键词、回复内容）', 'warning');
+    if (!name || !keywords) {
+        showToast('请填写规则标题和关键词', 'warning');
         return;
+    }
+    
+    let updateData = {
+        name: name,
+        keyword: keywords,
+        reply_type: replyType
+    };
+    
+    if (replyType === 'text') {
+        const reply = document.getElementById('edit-reply').value.trim();
+        if (!reply) {
+            showToast('请填写回复内容', 'warning');
+            return;
+        }
+        updateData.reply = reply;
+        updateData.reply_image = '';
+    } else {
+        const imagePath = document.getElementById('edit-reply-image-path').value.trim();
+        if (!imagePath) {
+            showToast('请选择回复图片', 'warning');
+            return;
+        }
+        updateData.reply = '[图片回复]';
+        updateData.reply_image = imagePath;
     }
     
     // 更新规则
@@ -619,9 +793,7 @@ function saveEditRule() {
     if (ruleIndex !== -1) {
         rules[ruleIndex] = {
             ...rules[ruleIndex],
-            name: name,
-            keyword: keywords,
-            reply: reply
+            ...updateData
         };
         
         saveRules();
@@ -663,6 +835,248 @@ function closeEditModal() {
     document.getElementById('edit-rule-title').value = '';
     document.getElementById('edit-keywords').value = '';
     document.getElementById('edit-reply').value = '';
+    document.getElementById('edit-reply-image-path').value = '';
+    document.querySelector('input[name="edit-reply-type"][value="text"]').checked = true;
+    toggleEditReplyContent('text');
+    hideImagePreview('edit');
+}
+
+// 打开图片浏览器
+function openImageBrowser(target) {
+    currentImageBrowserTarget = target;
+    selectedImagePath = '';
+    
+    // 显示模态框
+    const modal = document.getElementById('image-browser-modal');
+    modal.style.display = 'block';
+    
+    // 获取主目录并开始浏览
+    fetch('/api/get-home-directory')
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // 优先显示图片目录，如果没有则显示主目录
+            const startPath = data.common_directories.length > 0 ? 
+                data.common_directories[0].path : data.home_directory;
+            browsePath(startPath);
+        } else {
+            showToast('获取主目录失败: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        showToast('获取主目录失败: ' + error, 'error');
+    });
+}
+
+// 浏览指定路径
+function browsePath(path) {
+    currentBrowserPath = path;
+    document.getElementById('current-path-text').textContent = path;
+    
+    const fileList = document.getElementById('file-list');
+    fileList.innerHTML = '<div class="loading"><i class="bi bi-arrow-clockwise spin"></i> 加载中...</div>';
+    
+    fetch('/api/browse-images', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            folder_path: path
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            displayFileList(data.items);
+        } else {
+            fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);"><i class="bi bi-exclamation-circle"></i> ${data.error}</div>`;
+        }
+    })
+    .catch(error => {
+        fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);"><i class="bi bi-exclamation-circle"></i> 加载失败: ${error}</div>`;
+    });
+}
+
+// 显示文件列表
+function displayFileList(items) {
+    const fileList = document.getElementById('file-list');
+    
+    if (items.length === 0) {
+        fileList.innerHTML = '<div class="loading">此文件夹为空</div>';
+        return;
+    }
+    
+    fileList.innerHTML = items.map(item => {
+        let icon, details = '';
+        
+        if (item.type === 'directory') {
+            icon = item.name === '..' ? 'bi-arrow-up' : 'bi-folder-fill';
+        } else {
+            icon = 'bi-file-earmark-image';
+            details = `${item.extension} • ${item.size}`;
+        }
+        
+        // 对路径进行编码，避免特殊字符问题
+        const encodedPath = encodeURIComponent(item.path);
+        // 对显示的文件名进行HTML转义
+        const escapedName = escapeHtml(item.name);
+        
+        return `
+            <div class="file-item ${item.type}" onclick="selectFileItem('${encodedPath}', '${item.type}', this)">
+                <i class="bi ${icon} file-icon"></i>
+                <div class="file-info">
+                    <div class="file-name">${escapedName}</div>
+                    ${details ? `<div class="file-details">${details}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// HTML转义函数
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 选择文件项
+function selectFileItem(path, type, element) {
+    // 解码路径，处理转义字符
+    const decodedPath = decodeURIComponent(path);
+    
+    if (type === 'directory') {
+        // 如果是目录，进入该目录
+        browsePath(decodedPath);
+    } else {
+        // 如果是图片，选择该图片
+        selectedImagePath = decodedPath;
+        
+        // 更新选中状态
+        document.querySelectorAll('.file-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+        element.classList.add('selected');
+        
+        // 确认选择
+        confirmImageSelection();
+    }
+}
+
+// 确认图片选择
+function confirmImageSelection() {
+    if (!selectedImagePath) {
+        showToast('请选择一张图片', 'warning');
+        return;
+    }
+    
+    // 根据目标设置图片路径
+    if (currentImageBrowserTarget === 'default') {
+        document.getElementById('default-reply-image-path').value = selectedImagePath;
+        showImagePreview('default', selectedImagePath);
+    } else if (currentImageBrowserTarget === 'rule') {
+        document.getElementById('rule-reply-image-path').value = selectedImagePath;
+        showImagePreview('rule', selectedImagePath);
+    } else if (currentImageBrowserTarget === 'edit') {
+        document.getElementById('edit-reply-image-path').value = selectedImagePath;
+        showImagePreview('edit', selectedImagePath);
+    }
+    
+    closeImageBrowser();
+    showToast('图片选择成功', 'success');
+}
+
+// 关闭图片浏览器
+function closeImageBrowser() {
+    document.getElementById('image-browser-modal').style.display = 'none';
+    currentImageBrowserTarget = null;
+    selectedImagePath = '';
+}
+
+// 跳转到主目录
+function goToHomeDirectory() {
+    fetch('/api/get-home-directory')
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            browsePath(data.home_directory);
+        } else {
+            showToast('获取主目录失败: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        showToast('获取主目录失败: ' + error, 'error');
+    });
+}
+
+// 显示图片预览
+function showImagePreview(target, imagePath) {
+    const previewId = target + '-image-preview';
+    const preview = document.getElementById(previewId);
+    
+    if (!preview) return;
+    
+    const fileName = imagePath.split(/[/\\]/).pop();
+    
+    // 通过后端API获取图片预览
+    fetch('/api/preview-image', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            image_path: imagePath
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            preview.innerHTML = `
+                <img src="data:${data.mime_type};base64,${data.image_data}" alt="预览图片" style="max-width: 200px; max-height: 150px; border-radius: 8px;">
+                <div class="image-info">
+                    <i class="bi bi-file-earmark-image"></i> ${fileName}
+                    <br><small>${data.file_size}</small>
+                </div>
+            `;
+        } else {
+            preview.innerHTML = `
+                <div style="color: var(--text-light); text-align: center; padding: 20px;">
+                    <i class="bi bi-image" style="font-size: 24px; margin-bottom: 8px;"></i>
+                    <div>无法预览图片</div>
+                    <small>${data.error || '未知错误'}</small>
+                </div>
+                <div class="image-info">
+                    <i class="bi bi-file-earmark-image"></i> ${fileName}
+                </div>
+            `;
+        }
+        preview.style.display = 'block';
+    })
+    .catch(error => {
+        preview.innerHTML = `
+            <div style="color: var(--text-light); text-align: center; padding: 20px;">
+                <i class="bi bi-image" style="font-size: 24px; margin-bottom: 8px;"></i>
+                <div>无法预览图片</div>
+                <small>网络错误</small>
+            </div>
+            <div class="image-info">
+                <i class="bi bi-file-earmark-image"></i> ${fileName}
+            </div>
+        `;
+        preview.style.display = 'block';
+    });
+}
+
+// 隐藏图片预览
+function hideImagePreview(target) {
+    const previewId = target + '-image-preview';
+    const preview = document.getElementById(previewId);
+    
+    if (preview) {
+        preview.style.display = 'none';
+        preview.innerHTML = '';
+    }
 }
 
 // 点击模态框外部关闭

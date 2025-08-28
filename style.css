@@ -534,6 +534,223 @@ footer a:hover {
     grid-column: span 2;
 }
 
+/* 单选按钮组样式 */
+.radio-group {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 10px;
+}
+
+.radio-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.radio-wrapper input[type="radio"] {
+    width: auto;
+    margin: 0;
+    cursor: pointer;
+}
+
+.radio-wrapper label {
+    margin: 0;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+/* 图片选择器样式 */
+.image-selector {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.image-selector input {
+    flex: 1;
+    padding-left: 10px;
+}
+
+.image-selector button {
+    white-space: nowrap;
+}
+
+/* 图片预览样式 */
+.image-preview {
+    margin-top: 10px;
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background-color: #f9f9f9;
+    text-align: center;
+}
+
+.image-preview img {
+    max-width: 200px;
+    max-height: 150px;
+    border-radius: var(--radius);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.image-preview .image-info {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-light);
+}
+
+/* 图片浏览器样式 */
+.image-browser-content {
+    max-width: 700px;
+    max-height: 80vh;
+}
+
+.browser-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 15px;
+}
+
+.current-path {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text-color);
+    flex: 1;
+    min-width: 0;
+}
+
+.current-path span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quick-nav {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+.file-list {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 15px;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.file-item:hover {
+    background-color: #f8f9fa;
+}
+
+.file-item:last-child {
+    border-bottom: none;
+}
+
+.file-item.directory {
+    color: var(--primary-color);
+}
+
+.file-item.image {
+    color: var(--text-color);
+}
+
+.file-item.selected {
+    background-color: #e3f2fd;
+    border-left: 3px solid var(--primary-color);
+}
+
+.file-icon {
+    margin-right: 10px;
+    font-size: 16px;
+    width: 20px;
+    text-align: center;
+}
+
+.file-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.file-name {
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-details {
+    font-size: 12px;
+    color: var(--text-light);
+    margin-top: 2px;
+}
+
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-light);
+}
+
+.spin {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* 测试结果样式 */
+.test-result {
+    margin-top: 15px;
+    padding: 12px;
+    border-radius: var(--radius);
+    border-left: 4px solid;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.test-result.success {
+    background-color: #f0f9f0;
+    border-left-color: var(--success-color);
+    color: #2d5a2d;
+}
+
+.test-result.error {
+    background-color: #fdf2f2;
+    border-left-color: var(--danger-color);
+    color: #7a2e2e;
+}
+
+.test-result i {
+    margin-right: 8px;
+    font-size: 16px;
+}
+
+.test-result.success i {
+    color: var(--success-color);
+}
+
+.test-result.error i {
+    color: var(--danger-color);
+}
+
 .checkbox-wrapper {
     display: flex;
     align-items: center;
@@ -572,6 +789,51 @@ footer a:hover {
     
     .control-panel, .config-panel, .keyword-panel, .rules-panel, .log-panel, .default-reply-panel {
         grid-column: span 1;
+    }
+    
+    .radio-group {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .image-selector {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .image-selector button {
+        width: 100%;
+    }
+    
+    .image-browser-content {
+        width: 95%;
+        max-height: 85vh;
+    }
+    
+    .browser-toolbar {
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch;
+    }
+    
+    .current-path {
+        font-size: 13px;
+    }
+    
+    .file-list {
+        max-height: 300px;
+    }
+    
+    .file-item {
+        padding: 12px 10px;
+    }
+    
+    .file-name {
+        font-size: 14px;
+    }
+    
+    .file-details {
+        font-size: 11px;
     }
     
     header {

@@ -8,6 +8,10 @@ from datetime import datetime
 import logging
 import hashlib
 from collections import defaultdict
+import base64
+import mimetypes
+from werkzeug.utils import secure_filename
+from flask import Flask, render_template, request, jsonify, send_from_directory
 
 app = Flask(__name__)
 
@@ -18,8 +22,31 @@ logger = logging.getLogger(__name__)
 # 全局变量
 config = {
     'default_reply_enabled': False,
-    'default_reply_message': '您好，我现在不在，稍后会回复您的消息。'
+    'default_reply_message': '您好，我现在不在，稍后会回复您的消息。',
+    'default_reply_type': 'text',  # 'text' 或 'image'
+    'default_reply_image': ''  # 默认回复图片路径
 }
+from flask import Flask, render_template, request, jsonify, send_from_directory
+import json
+import os
+import threading
+import time
+import requests
+from datetime import datetime
+import logging
+import hashlib
+from collections import defaultdict
+import base64
+import mimetypes
+from werkzeug.utils import secure_filename
+from flask import Flask, render_template, request, jsonify, send_from_directory
+
+app = Flask(__name__)
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 rules = []
 monitoring = False
 monitor_thread = None
@@ -113,7 +140,7 @@ class BilibiliAPI:
             'msg[receiver_type]': 1,
             'msg[msg_type]': msg_type,
             'msg[msg_status]': 0,
-            'msg[content]': json.dumps({"content": content}),
+            'msg[content]': json.dumps({"content": content}) if msg_type == 1 else content,
             'msg[timestamp]': int(time.time()),
             'msg[new_face_version]': 0,
             'msg[dev_id]': 'B1994F2C-C5C9-4C0E-8F4C-F8E5F7E8F9E0',
@@ -143,6 +170,207 @@ class BilibiliAPI:
         except Exception as e:
             logger.error(f"发送消息失败: {e}")
             last_send_time = time.time()  # 即使失败也更新时间，避免卡住
+            return None
+    
+    def upload_image(self, image_path):
+        """模拟浏览器上传图片到B站"""
+        try:
+            if not os.path.exists(image_path):
+                add_log(f"图片文件不存在: {image_path}", 'error')
+                return None
+            
+            # 检查文件大小（B站限制通常为20MB）
+            file_size = os.path.getsize(image_path)
+            if file_size > 20 * 1024 * 1024:
+                add_log(f"图片文件过大: {file_size / 1024 / 1024:.1f}MB", 'error')
+                return None
+            
+            # 模拟浏览器完整的上传流程
+            file_name = os.path.basename(image_path)
+            mime_type = mimetypes.guess_type(image_path)[0] or 'image/png'
+            
+            # 第一步：获取上传凭证
+            upload_info = self._get_upload_info()
+            if not upload_info:
+                add_log("获取上传凭证失败", 'error')
+                return None
+            
+            # 第二步：上传到BFS服务器
+            bfs_result = self._upload_to_bfs(image_path, upload_info)
+            if not bfs_result:
+                # 如果BFS上传失败，尝试直接上传
+                return self._direct_upload_image(image_path)
+            
+            add_log(f"图片上传成功: {file_name}", 'success')
+            return bfs_result
+                    
+        except Exception as e:
+            add_log(f"图片上传异常: {e}", 'error')
+            return None
+    
+    def _get_upload_info(self):
+        """获取上传凭证信息"""
+        try:
+            url = 'https://member.bilibili.com/preupload'
+            params = {
+                'name': 'image.png',
+                'size': 1024,
+                'r': 'upos',
+                'profile': 'ugcupos/bup',
+                'ssl': '0',
+                'version': '2.10.4',
+                'build': '2100400'
+            }
+            
+            response = self.session.get(url, params=params, timeout=10.0)
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('OK') == 1:
+                    return result
+            return None
+        except:
+            return None
+    
+    def _upload_to_bfs(self, image_path, upload_info):
+        """上传到BFS服务器"""
+        try:
+            if not upload_info or 'upos_uri' not in upload_info:
+                return None
+            
+            # 构造BFS上传URL
+            upos_uri = upload_info['upos_uri']
+            upload_url = f"https:{upos_uri}"
+            
+            with open(image_path, 'rb') as f:
+                image_data = f.read()
+            
+            # 模拟分片上传
+            headers = {
+                'Content-Type': 'application/octet-stream',
+                'User-Agent': self.session.headers.get('User-Agent'),
+                'Referer': 'https://message.bilibili.com/'
+            }
+            
+            response = self.session.put(upload_url, data=image_data, headers=headers, timeout=30.0)
+            
+            if response.status_code == 200:
+                # 返回图片信息
+                return {
+                    'image_url': upload_url.replace('upos-sz-mirrorks3.bilivideo.com', 'i0.hdslb.com'),
+                    'image_width': 0,
+                    'image_height': 0
+                }
+            
+            return None
+        except:
+            return None
+    
+    def _direct_upload_image(self, image_path):
+        """直接上传图片（备用方案）"""
+        try:
+            file_name = os.path.basename(image_path)
+            
+            # 尝试多个上传接口，模拟真实浏览器行为
+            upload_configs = [
+                {
+                    'url': 'https://api.vc.bilibili.com/api/v1/drawImage/upload',
+                    'data': {
+                        'biz': 'im',
+                        'category': 'daily',
+                        'csrf': self.bili_jct
+                    },
+                    'headers': {
+                        'Origin': 'https://message.bilibili.com',
+                        'Referer': 'https://message.bilibili.com/',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                },
+                {
+                    'url': 'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs',
+                    'data': {
+                        'biz': 'new_dyn',
+                        'category': 'daily',
+                        'csrf': self.bili_jct
+                    },
+                    'headers': {
+                        'Origin': 'https://t.bilibili.com',
+                        'Referer': 'https://t.bilibili.com/',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                }
+            ]
+            
+            with open(image_path, 'rb') as f:
+                image_data = f.read()
+            
+            for config in upload_configs:
+                try:
+                    # 准备文件数据
+                    files = {
+                        'file_up': (file_name, image_data, mimetypes.guess_type(image_path)[0])
+                    }
+                    
+                    # 更新session headers
+                    original_headers = dict(self.session.headers)
+                    self.session.headers.update(config['headers'])
+                    
+                    add_log(f"尝试直接上传到: {config['url']}", 'debug')
+                    response = self.session.post(
+                        config['url'], 
+                        files=files, 
+                        data=config['data'], 
+                        timeout=15.0
+                    )
+                    
+                    # 恢复原始headers
+                    self.session.headers.clear()
+                    self.session.headers.update(original_headers)
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get('code') == 0:
+                            image_info = result.get('data', {})
+                            add_log(f"直接上传成功: {file_name}", 'success')
+                            return image_info
+                        else:
+                            add_log(f"接口返回错误: {result.get('message', '未知错误')}", 'debug')
+                    else:
+                        add_log(f"HTTP状态码: {response.status_code}", 'debug')
+                        
+                except Exception as e:
+                    add_log(f"上传尝试失败: {e}", 'debug')
+                    continue
+            
+            add_log("所有直接上传方法都失败", 'error')
+            return None
+            
+        except Exception as e:
+            add_log(f"直接上传异常: {e}", 'error')
+            return None
+    
+    def send_image_msg(self, receiver_id, image_path):
+        """发送图片消息"""
+        try:
+            # 先上传图片
+            image_info = self.upload_image(image_path)
+            if not image_info:
+                return None
+            
+            # 构造图片消息内容
+            image_content = {
+                "url": image_info.get('image_url', ''),
+                "height": image_info.get('image_height', 0),
+                "width": image_info.get('image_width', 0),
+                "imageType": "jpeg",
+                "original": 1,
+                "size": image_info.get('image_size', 0)
+            }
+            
+            # 发送图片消息（msg_type=2表示图片消息）
+            return self.send_msg(receiver_id, msg_type=2, content=json.dumps(image_content))
+            
+        except Exception as e:
+            add_log(f"发送图片消息失败: {e}", 'error')
             return None
     
     def get_my_uid(self):
@@ -272,6 +500,8 @@ def precompile_rules():
             rule_matcher_cache[i] = {
                 'keywords': keywords,
                 'reply': rule.get('reply', ''),
+                'reply_type': rule.get('reply_type', 'text'),  # 'text' 或 'image'
+                'reply_image': rule.get('reply_image', ''),  # 图片路径
                 'title': rule.get('name', f'规则{i+1}')  # keywords.json 使用 'name' 字段
             }
 
@@ -284,6 +514,36 @@ def check_keywords_fast(message):
             if keyword in message_lower:
                 return rule_data
     return None
+
+def get_random_image_from_folder(folder_path):
+    """从指定文件夹随机获取一张图片"""
+    try:
+        if not os.path.exists(folder_path):
+            add_log(f"图片文件夹不存在: {folder_path}", 'error')
+            return None
+        
+        # 支持的图片格式
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+        
+        # 获取文件夹中所有图片文件
+        image_files = []
+        for file in os.listdir(folder_path):
+            if os.path.splitext(file.lower())[1] in image_extensions:
+                image_files.append(os.path.join(folder_path, file))
+        
+        if not image_files:
+            add_log(f"文件夹中没有找到图片文件: {folder_path}", 'warning')
+            return None
+        
+        # 随机选择一张图片
+        import random
+        selected_image = random.choice(image_files)
+        add_log(f"随机选择图片: {os.path.basename(selected_image)}", 'info')
+        return selected_image
+        
+    except Exception as e:
+        add_log(f"获取随机图片失败: {e}", 'error')
+        return None
 
 def check_keywords(message, keywords):
     """检查消息是否包含关键词（兼容版本）"""
@@ -398,17 +658,34 @@ def process_single_session(api, my_uid, session):
             }]
         else:
             # 如果启用了默认回复功能且没有匹配到关键词
-            if config.get('default_reply_enabled', False) and config.get('default_reply_message'):
-                add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认回复", 'info')
-                return [{
-                    'talker_id': talker_id,
-                    'rule': {
-                        'title': '默认回复',
-                        'reply': config.get('default_reply_message')
-                    },
-                    'message': message_text,
-                    'timestamp': msg_timestamp
-                }]
+            if config.get('default_reply_enabled', False):
+                default_type = config.get('default_reply_type', 'text')
+                
+                if default_type == 'text' and config.get('default_reply_message'):
+                    add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认文字回复", 'info')
+                    return [{
+                        'talker_id': talker_id,
+                        'rule': {
+                            'title': '默认回复',
+                            'reply': config.get('default_reply_message'),
+                            'reply_type': 'text'
+                        },
+                        'message': message_text,
+                        'timestamp': msg_timestamp
+                    }]
+                elif default_type == 'image' and config.get('default_reply_image'):
+                    add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认图片回复", 'info')
+                    return [{
+                        'talker_id': talker_id,
+                        'rule': {
+                            'title': '默认回复',
+                            'reply': '[图片回复]',
+                            'reply_type': 'image',
+                            'reply_image': config.get('default_reply_image')
+                        },
+                        'message': message_text,
+                        'timestamp': msg_timestamp
+                    }]
             else:
                 add_log(f"❌ 用户{talker_id} 消息'{message_text}' 未匹配任何关键词", 'debug')
                 return []
@@ -596,19 +873,44 @@ def monitor_messages():
                             for result in results:
                                 # 发送回复（固定1秒间隔 + 发送成功验证）
                                 try:
-                                    reply_result = api.send_msg(result['talker_id'], content=result['rule']['reply'])
+                                    reply_result = None
+                                    reply_content = result['rule']['reply']
+                                    
+                                    # 检查回复类型
+                                    reply_type = result['rule'].get('reply_type', 'text')
+                                    
+                                    if reply_type == 'image':
+                                        # 发送图片回复
+                                        image_path = result['rule'].get('reply_image', '')
+                                        if image_path and os.path.exists(image_path):
+                                            add_log(f"发送图片回复给用户 {result['talker_id']}: {os.path.basename(image_path)}", 'info')
+                                            reply_result = api.send_image_msg(result['talker_id'], image_path)
+                                            
+                                            # 如果图片发送失败，尝试发送备用文字回复
+                                            if not reply_result:
+                                                # 使用默认文字回复或通用回复
+                                                fallback_message = config.get('default_reply_message', '您好，感谢您的消息！')
+                                                add_log(f"图片发送失败，发送备用文字回复给用户 {result['talker_id']}: {fallback_message}", 'warning')
+                                                reply_result = api.send_msg(result['talker_id'], fallback_message)
+                                            reply_content = f"[图片] {os.path.basename(image_path)}"
+                                        else:
+                                            add_log(f"图片文件不存在，跳过回复用户 {result['talker_id']}", 'warning')
+                                            continue
+                                    else:
+                                        # 发送文字回复
+                                        reply_result = api.send_msg(result['talker_id'], content=result['rule']['reply'])
                                     
                                     if reply_result and reply_result.get('code') == 0:
                                         # 验证发送是否真正成功
                                         time.sleep(0.5)  # 等待消息发送完成
                                         try:
-                                            verification_success = api.verify_message_sent(result['talker_id'], result['rule']['reply'])
+                                            verification_success = api.verify_message_sent(result['talker_id'], reply_content)
                                         except Exception as e:
                                             add_log(f"验证消息发送状态异常: {e}", 'warning')
                                             verification_success = True  # 假设发送成功，避免卡住
                                         
                                         if verification_success:
-                                            add_log(f"✅ 已成功回复用户 {result['talker_id']} (规则: {result['rule']['title']}) 内容: {result['rule']['reply'][:20]}...", 'success')
+                                            add_log(f"✅ 已成功回复用户 {result['talker_id']} (规则: {result['rule']['title']}) 内容: {reply_content[:20]}...", 'success')
                                             reply_count += 1
                                             processed_count += 1
                                         else:
@@ -895,9 +1197,224 @@ def get_logs():
     recent_logs = logs[-10:] if len(logs) > 10 else logs
     return jsonify({'logs': recent_logs})
 
+@app.route('/api/image-config', methods=['GET', 'POST'])
+def handle_image_config():
+    global config
+    
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        # 更新图片回复配置
+        if 'image_reply_enabled' in data:
+            config['image_reply_enabled'] = data['image_reply_enabled']
+        
+        if 'image_folder_path' in data:
+            folder_path = data['image_folder_path'].strip()
+            if folder_path and not os.path.exists(folder_path):
+                return jsonify({'success': False, 'error': '指定的图片文件夹不存在'})
+            config['image_folder_path'] = folder_path
+        
+        save_config()
+        add_log("图片回复配置已更新", 'success')
+        return jsonify({'success': True})
+    else:
+        return jsonify({
+            'image_reply_enabled': config.get('image_reply_enabled', False),
+            'image_folder_path': config.get('image_folder_path', '')
+        })
+
+@app.route('/api/browse-images', methods=['POST'])
+def browse_images():
+    """浏览指定目录下的图片文件"""
+    data = request.get_json()
+    folder_path = data.get('folder_path', '').strip()
+    
+    # 如果没有提供路径，使用用户主目录
+    if not folder_path:
+        folder_path = os.path.expanduser('~')
+    
+    # 规范化路径，兼容Windows和Linux
+    folder_path = os.path.normpath(os.path.abspath(folder_path))
+    
+    # 调试日志
+    add_log(f"浏览路径: {folder_path}", 'debug')
+    
+    if not os.path.exists(folder_path):
+        add_log(f"路径不存在: {folder_path}", 'error')
+        return jsonify({'success': False, 'error': f'文件夹不存在: {folder_path}'})
+    
+    if not os.path.isdir(folder_path):
+        add_log(f"路径不是文件夹: {folder_path}", 'error')
+        return jsonify({'success': False, 'error': '路径不是文件夹'})
+    
+    try:
+        # 支持的图片格式
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+        
+        items = []
+        
+        # 添加上级目录选项（除非是根目录）
+        parent_dir = os.path.dirname(folder_path)
+        if parent_dir != folder_path:  # 不是根目录
+            items.append({
+                'name': '..',
+                'type': 'directory',
+                'path': os.path.normpath(parent_dir)
+            })
+        
+        # 列出当前目录内容
+        try:
+            for item in sorted(os.listdir(folder_path)):
+                item_path = os.path.normpath(os.path.join(folder_path, item))
+                
+                try:
+                    if os.path.isdir(item_path):
+                        items.append({
+                            'name': item,
+                            'type': 'directory',
+                            'path': item_path
+                        })
+                    elif os.path.isfile(item_path):
+                        ext = os.path.splitext(item.lower())[1]
+                        if ext in image_extensions:
+                            # 获取文件大小
+                            size = os.path.getsize(item_path)
+                            size_str = format_file_size(size)
+                            
+                            items.append({
+                                'name': item,
+                                'type': 'image',
+                                'path': item_path,
+                                'size': size_str,
+                                'extension': ext[1:].upper()
+                            })
+                except (OSError, IOError) as e:
+                    # 跳过无法访问的文件/文件夹
+                    add_log(f"跳过无法访问的项目 {item}: {e}", 'warning')
+                    continue
+        except (OSError, IOError) as e:
+            add_log(f"读取目录内容失败 {folder_path}: {e}", 'error')
+            return jsonify({'success': False, 'error': f'读取目录失败: {str(e)}'})
+        
+        return jsonify({
+            'success': True,
+            'current_path': folder_path,
+            'items': items
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'读取文件夹失败: {str(e)}'})
+
+def format_file_size(size_bytes):
+    """格式化文件大小"""
+    if size_bytes == 0:
+        return "0 B"
+    
+    size_names = ["B", "KB", "MB", "GB"]
+    i = 0
+    while size_bytes >= 1024 and i < len(size_names) - 1:
+        size_bytes /= 1024.0
+        i += 1
+    
+    return f"{size_bytes:.1f} {size_names[i]}"
+
+@app.route('/api/get-home-directory', methods=['GET'])
+def get_home_directory():
+    """获取用户主目录路径"""
+    try:
+        home_dir = os.path.normpath(os.path.expanduser('~'))
+        # 常用的图片目录
+        common_dirs = []
+        
+        # Windows系统
+        if os.name == 'nt':
+            pictures_dir = os.path.normpath(os.path.join(home_dir, 'Pictures'))
+            desktop_dir = os.path.normpath(os.path.join(home_dir, 'Desktop'))
+            if os.path.exists(pictures_dir):
+                common_dirs.append({'name': '图片', 'path': pictures_dir})
+            if os.path.exists(desktop_dir):
+                common_dirs.append({'name': '桌面', 'path': desktop_dir})
+        else:
+            # Linux/Mac系统
+            pictures_dir = os.path.normpath(os.path.join(home_dir, 'Pictures'))
+            desktop_dir = os.path.normpath(os.path.join(home_dir, 'Desktop'))
+            if os.path.exists(pictures_dir):
+                common_dirs.append({'name': 'Pictures', 'path': pictures_dir})
+            if os.path.exists(desktop_dir):
+                common_dirs.append({'name': 'Desktop', 'path': desktop_dir})
+        
+        add_log(f"获取主目录成功: {home_dir}", 'debug')
+        
+        return jsonify({
+            'success': True,
+            'home_directory': home_dir,
+            'common_directories': common_dirs
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'获取主目录失败: {str(e)}'})
+
 if __name__ == '__main__':
     # 启动时加载配置和规则
     load_config()
+@app.route('/api/preview-image', methods=['POST'])
+def preview_image():
+    """获取图片预览数据"""
+    try:
+        data = request.get_json()
+        image_path = data.get('image_path', '').strip()
+        
+        if not image_path:
+            return jsonify({'success': False, 'error': '图片路径为空'})
+        
+        # 规范化路径
+        image_path = os.path.normpath(image_path)
+        
+        if not os.path.exists(image_path):
+            return jsonify({'success': False, 'error': '图片文件不存在'})
+        
+        if not os.path.isfile(image_path):
+            return jsonify({'success': False, 'error': '路径不是文件'})
+        
+        # 检查文件大小（限制预览大小为5MB）
+        file_size = os.path.getsize(image_path)
+        if file_size > 5 * 1024 * 1024:
+            return jsonify({
+                'success': False, 
+                'error': f'文件过大 ({file_size / 1024 / 1024:.1f}MB)，无法预览'
+            })
+        
+        # 检查是否为图片文件
+        mime_type = mimetypes.guess_type(image_path)[0]
+        if not mime_type or not mime_type.startswith('image/'):
+            return jsonify({'success': False, 'error': '不是有效的图片文件'})
+        
+        # 读取图片数据并转换为base64
+        with open(image_path, 'rb') as f:
+            image_data = f.read()
+        
+        base64_data = base64.b64encode(image_data).decode('utf-8')
+        
+        # 格式化文件大小
+        if file_size < 1024:
+            size_str = f"{file_size} B"
+        elif file_size < 1024 * 1024:
+            size_str = f"{file_size / 1024:.1f} KB"
+        else:
+            size_str = f"{file_size / 1024 / 1024:.1f} MB"
+        
+        return jsonify({
+            'success': True,
+            'image_data': base64_data,
+            'mime_type': mime_type,
+            'file_size': size_str,
+            'file_name': os.path.basename(image_path)
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'预览失败: {str(e)}'})
+
+if __name__ == '__main__':
     load_rules()
     
     print("BiliGo - B站私信自动回复系统启动中...")
