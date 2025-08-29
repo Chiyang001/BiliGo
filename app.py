@@ -24,7 +24,8 @@ config = {
     'default_reply_enabled': False,
     'default_reply_message': '您好，我现在不在，稍后会回复您的消息。',
     'default_reply_type': 'text',  # 'text' 或 'image'
-    'default_reply_image': ''  # 默认回复图片路径
+    'default_reply_image': '',  # 默认回复图片路径
+    'reply_history_messages': False  # 是否回复历史消息
 }
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import json
@@ -55,6 +56,7 @@ message_cache = {}
 last_message_times = defaultdict(int)
 rule_matcher_cache = {}
 last_send_time = 0
+monitor_start_time = 0  # 监控启动时间，用于区分历史消息和新消息
 
 # 配置文件路径 - 兼容Linux和Windows
 CONFIG_FILE = os.path.join(os.getcwd(), 'config.json')
@@ -598,7 +600,7 @@ def cleanup_cache():
 
 def process_single_session(api, my_uid, session):
     """处理单个会话的消息（只检测最后一条消息）"""
-    global message_cache, last_message_times
+    global message_cache, last_message_times, monitor_start_time
     
     try:
         talker_id = session.get('talker_id')
@@ -612,6 +614,15 @@ def process_single_session(api, my_uid, session):
         
         msg_timestamp = latest_msg.get('timestamp', 0)
         sender_uid = latest_msg.get('sender_uid')
+        
+        # 检查是否回复历史消息
+        if not config.get('reply_history_messages', False):
+            # 如果不回复历史消息，只处理监控启动后的新消息
+            if msg_timestamp < monitor_start_time:
+                # 更新最后处理时间，避免重复检查
+                last_message_times[talker_id] = msg_timestamp
+                add_log(f"用户{talker_id} 消息是历史消息，跳过回复（时间戳: {msg_timestamp} < 启动时间: {monitor_start_time}）", 'debug')
+                return []
         
         # 检查是否是新消息
         last_processed_time = last_message_times.get(talker_id, 0)
@@ -735,6 +746,7 @@ def monitor_messages():
             message_cache = {}
             last_message_times = defaultdict(int)
             last_send_time = 0
+            monitor_start_time = int(time.time())  # 记录监控启动时间
             
             last_cleanup = int(time.time())
             last_api_reset = int(time.time())
@@ -1140,10 +1152,11 @@ def start_monitoring():
     monitor_thread = None
     
     # 清理全局状态
-    global message_cache, last_message_times, last_send_time
+    global message_cache, last_message_times, last_send_time, monitor_start_time
     message_cache = {}
     last_message_times = defaultdict(int)
     last_send_time = 0
+    monitor_start_time = int(time.time())  # 记录监控启动时间
     
     # 启动新的监控线程
     monitoring = True

@@ -304,6 +304,11 @@ function loadConfig() {
                 showImagePreview('default', data.default_reply_image);
             }
         }
+        
+        // 加载历史消息回复设置
+        if (document.getElementById('reply-history-messages')) {
+            document.getElementById('reply-history-messages').checked = data.reply_history_messages || false;
+        }
     })
     .catch(error => {
         console.error('加载配置失败:', error);
@@ -314,10 +319,12 @@ function loadConfig() {
 function saveDefaultReply() {
     const enabled = document.getElementById('default-reply-enabled').checked;
     const replyType = document.querySelector('input[name="default-reply-type"]:checked').value;
+    const replyHistoryMessages = document.getElementById('reply-history-messages').checked;
     
     let configData = {
         default_reply_enabled: enabled,
-        default_reply_type: replyType
+        default_reply_type: replyType,
+        reply_history_messages: replyHistoryMessages
     };
     
     if (replyType === 'text') {
