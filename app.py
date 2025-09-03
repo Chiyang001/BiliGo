@@ -25,7 +25,14 @@ config = {
     'default_reply_message': '您好，我现在不在，稍后会回复您的消息。',
     'default_reply_type': 'text',  # 'text' 或 'image'
     'default_reply_image': '',  # 默认回复图片路径
-    'reply_history_messages': False  # 是否回复历史消息
+    'follow_reply_enabled': False,  # 关注后回复功能开关
+    'follow_reply_message': '感谢您的关注！欢迎来到我的频道~',  # 关注后回复消息
+    'follow_reply_type': 'text',  # 关注后回复类型：'text' 或 'image'
+    'follow_reply_image': '',  # 关注后回复图片路径
+    'unfollow_reply_enabled': False,  # 取消关注回复功能开关
+    'unfollow_reply_message': '很遗憾看到您取消了关注，希望我们还有机会再见！',  # 取消关注回复消息
+    'unfollow_reply_type': 'text',  # 取消关注回复类型：'text' 或 'image'
+    'unfollow_reply_image': ''  # 取消关注回复图片路径
 }
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import json
@@ -56,7 +63,16 @@ message_cache = {}
 last_message_times = defaultdict(int)
 rule_matcher_cache = {}
 last_send_time = 0
-monitor_start_time = 0  # 监控启动时间，用于区分历史消息和新消息
+# 关注者监控相关变量
+followers_cache = set()  # 缓存已知关注者
+welcome_sent_cache = set()  # 缓存已发送欢迎消息的关注者
+last_follow_check = 0  # 上次检查关注者的时间
+follow_check_interval = 3  # 检查关注者的间隔（秒）- 改为3秒实时检测
+
+# 取消关注监控相关变量
+unfollowers_cache = set()  # 缓存已处理的取消关注者
+last_unfollow_check = 0  # 上次检查取消关注的时间
+follow_history = {}  # 关注历史记录 {uid: last_follow_time}
 
 # 配置文件路径 - 兼容Linux和Windows
 CONFIG_FILE = os.path.join(os.getcwd(), 'config.json')
@@ -419,6 +435,61 @@ class BilibiliAPI:
         except Exception as e:
             logger.error(f"验证消息发送失败: {e}")
             return False
+    
+    def get_followers(self, page=1, page_size=50):
+        """获取关注者列表"""
+        try:
+            my_uid = self.get_my_uid()
+            if not my_uid:
+                return None
+            
+            url = 'https://api.bilibili.com/x/relation/followers'
+            params = {
+                'vmid': my_uid,
+                'pn': page,
+                'ps': page_size,
+                'order': 'desc',  # 按关注时间倒序
+                'order_type': 'attention'
+            }
+            
+            response = self.session.get(url, params=params, timeout=5.0)
+            response.raise_for_status()
+            result = response.json()
+            
+            if result.get('code') == 0:
+                return result.get('data', {})
+            else:
+                add_log(f"获取关注者列表失败: {result.get('message', '未知错误')}", 'warning')
+                return None
+                
+        except Exception as e:
+            add_log(f"获取关注者列表异常: {e}", 'error')
+            return None
+    
+    def get_recent_followers(self, limit=20):
+        """获取最近的关注者（用于检测新关注）"""
+        try:
+            followers_data = self.get_followers(page=1, page_size=limit)
+            if not followers_data:
+                return []
+            
+            followers_list = followers_data.get('list', [])
+            recent_followers = []
+            
+            for follower in followers_list:
+                recent_followers.append({
+                    'mid': follower.get('mid'),
+                    'uname': follower.get('uname', ''),
+                    'face': follower.get('face', ''),
+                    'mtime': follower.get('mtime', 0),  # 关注时间
+                    'attribute': follower.get('attribute', 0)  # 关注状态
+                })
+            
+            return recent_followers
+            
+        except Exception as e:
+            add_log(f"获取最近关注者异常: {e}", 'error')
+            return []
 
 def add_log(message, log_type='info'):
     """添加日志"""
@@ -598,9 +669,228 @@ def cleanup_cache():
     
     add_log(f"缓存清理完成: 清理消息 {cleaned_count} 条，当前缓存 {len(message_cache)} 条，活跃会话 {len(last_message_times)} 个", 'info')
 
+def check_followers_changes(api):
+    """检测关注者变化（新关注和取消关注）- 完全重构版"""
+    global followers_cache, last_follow_check, unfollowers_cache, follow_history
+    
+    try:
+        current_time = int(time.time())
+        
+        # 超实时检测：每3秒检查一次，提供最快响应
+        if current_time - last_follow_check < follow_check_interval:
+            return {'new_followers': [], 'unfollowers': []}
+        
+        last_follow_check = current_time
+        
+        # 如果关注相关功能都未启用，直接返回
+        if not config.get('follow_reply_enabled', False) and not config.get('unfollow_reply_enabled', False):
+            return {'new_followers': [], 'unfollowers': []}
+        
+        # 获取最近的关注者（优化数量以平衡速度和准确性）
+        recent_followers = api.get_recent_followers(limit=20)
+        if not recent_followers:
+            return {'new_followers': [], 'unfollowers': []}
+        
+        # 使用线程锁确保原子操作
+        lock = threading.Lock()
+        with lock:
+            new_followers = []
+            unfollowers = []
+            current_followers = set()
+            
+            # 1. 构建当前关注者集合
+            for follower in recent_followers:
+                follower_mid = follower.get('mid')
+                if follower_mid:
+                    current_followers.add(follower_mid)
+            
+            # 2. 检测新关注者（支持重复关注）
+            if config.get('follow_reply_enabled', False):
+                for follower in recent_followers:
+                    follower_mid = follower.get('mid')
+                    if not follower_mid:
+                        continue
+                    
+                    follow_time = follower.get('mtime', 0)
+                    
+                    # 检查是否是最近90秒内的新关注
+                    if current_time - follow_time <= 90:
+                        # 检查是否需要发送欢迎消息
+                        should_send_welcome = False
+                        
+                        # 检查是否是新关注者
+                        is_new_follower = follower_mid not in followers_cache
+                        # 检查是否是重复关注（之前取消过关注）
+                        is_re_follow = follower_mid in followers_cache and follow_time > follow_history.get(follower_mid, 0)
+                        
+                        if (is_new_follower or is_re_follow) and follower_mid not in welcome_sent_cache:
+                            should_send_welcome = True
+                            log_type = "新关注者" if is_new_follower else "重复关注者"
+                            add_log(f"⚡ 检测到{log_type}: {follower.get('uname', 'Unknown')} (UID: {follower_mid})", 'success')
+                        
+                        if should_send_welcome:
+                            new_followers.append(follower)
+                            # 更新关注历史
+                            follow_history[follower_mid] = follow_time
+            
+            # 3. 检测取消关注者（更可靠的验证）
+            if config.get('unfollow_reply_enabled', False):
+                # 获取所有新关注者的mid集合
+                new_follower_mids = {f['mid'] for f in new_followers if f.get('mid')}
+                
+                # 找出之前在缓存中但现在不在当前关注者列表中的用户
+                lost_followers = followers_cache - current_followers
+                for unfollower_mid in lost_followers:
+                    # 确保不是新关注者（避免误判）
+                    if unfollower_mid not in new_follower_mids and unfollower_mid not in unfollowers_cache:
+                        # 双重验证：检查该用户是否在最近获取的关注者列表中
+                        # 通过重新获取关注者列表进行验证
+                        try:
+                            # 获取最新的关注者列表（限制为50个）
+                            recent_followers = api.get_recent_followers(limit=50)
+                            current_follower_mids = {f['mid'] for f in recent_followers if f.get('mid')}
+                            
+                            if unfollower_mid in current_follower_mids:
+                                # 用户仍在关注列表中，跳过处理
+                                continue
+                                
+                            # 确认用户确实取消关注
+                            unfollowers.append({'mid': unfollower_mid})
+                            unfollowers_cache.add(unfollower_mid)
+                            add_log(f"💔 确认取消关注: UID {unfollower_mid}", 'warning')
+                            # 从欢迎消息缓存中移除
+                            if unfollower_mid in welcome_sent_cache:
+                                welcome_sent_cache.remove(unfollower_mid)
+                        except Exception as e:
+                            add_log(f"验证取消关注状态失败: {e}", 'warning')
+                            continue
+            
+            # 4. 更新关注者缓存（在所有检测完成后）
+            followers_cache = current_followers.copy()
+            
+            # 动态缓存管理，保持最佳性能
+            if len(followers_cache) > 300:
+                # 只保留最新的200个关注者，确保快速检索
+                followers_cache = set(list(followers_cache)[-200:])
+            
+            if len(unfollowers_cache) > 500:
+                unfollowers_cache = set(list(unfollowers_cache)[-300:])
+            
+            if len(follow_history) > 1000:
+                # 按时间排序，只保留最新的500条记录
+                sorted_history = sorted(follow_history.items(), key=lambda x: x[1], reverse=True)
+                follow_history = dict(sorted_history[:500])
+            
+            return {'new_followers': new_followers, 'unfollowers': unfollowers}
+        
+    except Exception as e:
+        add_log(f"检测关注者变化异常: {e}", 'error')
+        return {'new_followers': [], 'unfollowers': []}
+
+# 保持向后兼容性
+def check_new_followers(api):
+    """检测新关注者（向后兼容函数）"""
+    result = check_followers_changes(api)
+    return result['new_followers']
+
+def send_follow_welcome_message(api, follower):
+    """向新关注者发送欢迎消息"""
+    try:
+        follower_mid = follower.get('mid')
+        follower_name = follower.get('uname', 'Unknown')
+        
+        if not follower_mid:
+            return False
+        
+        # 获取回复配置
+        reply_type = config.get('follow_reply_type', 'text')
+        reply_message = config.get('follow_reply_message', '感谢您的关注！')
+        reply_image = config.get('follow_reply_image', '')
+        
+        success = False
+        
+        if reply_type == 'image' and reply_image and os.path.exists(reply_image):
+            # 发送图片欢迎消息
+            add_log(f"向新关注者 {follower_name} 发送图片欢迎消息", 'info')
+            result = api.send_image_msg(follower_mid, reply_image)
+            if result and result.get('code') == 0:
+                success = True
+                add_log(f"✅ 成功向新关注者 {follower_name} 发送图片欢迎消息", 'success')
+            else:
+                # 图片发送失败，尝试发送文字消息
+                add_log(f"图片发送失败，向 {follower_name} 发送文字欢迎消息", 'warning')
+                result = api.send_msg(follower_mid, content=reply_message)
+                if result and result.get('code') == 0:
+                    success = True
+                    add_log(f"✅ 成功向新关注者 {follower_name} 发送文字欢迎消息", 'success')
+        else:
+            # 发送文字欢迎消息
+            add_log(f"向新关注者 {follower_name} 发送文字欢迎消息: {reply_message}", 'info')
+            result = api.send_msg(follower_mid, content=reply_message)
+            if result and result.get('code') == 0:
+                success = True
+                add_log(f"✅ 成功向新关注者 {follower_name} 发送欢迎消息", 'success')
+        
+        if not success:
+            error_msg = result.get('message', '未知错误') if result else '网络错误'
+            add_log(f"❌ 向新关注者 {follower_name} 发送欢迎消息失败: {error_msg}", 'warning')
+        
+        return success
+        
+    except Exception as e:
+        add_log(f"发送关注欢迎消息异常: {e}", 'error')
+        return False
+
+def send_unfollow_goodbye_message(api, unfollower):
+    """向取消关注者发送告别消息"""
+    try:
+        unfollower_mid = unfollower.get('mid')
+        
+        if not unfollower_mid:
+            return False
+        
+        # 获取回复配置
+        reply_type = config.get('unfollow_reply_type', 'text')
+        reply_message = config.get('unfollow_reply_message', '很遗憾看到您取消了关注，希望我们还有机会再见！')
+        reply_image = config.get('unfollow_reply_image', '')
+        
+        success = False
+        
+        if reply_type == 'image' and reply_image and os.path.exists(reply_image):
+            # 发送图片告别消息
+            add_log(f"向取消关注者 UID:{unfollower_mid} 发送图片告别消息", 'info')
+            result = api.send_image_msg(unfollower_mid, reply_image)
+            if result and result.get('code') == 0:
+                success = True
+                add_log(f"✅ 成功向取消关注者 UID:{unfollower_mid} 发送图片告别消息", 'success')
+            else:
+                # 图片发送失败，尝试发送文字消息
+                add_log(f"图片发送失败，向 UID:{unfollower_mid} 发送文字告别消息", 'warning')
+                result = api.send_msg(unfollower_mid, content=reply_message)
+                if result and result.get('code') == 0:
+                    success = True
+                    add_log(f"✅ 成功向取消关注者 UID:{unfollower_mid} 发送文字告别消息", 'success')
+        else:
+            # 发送文字告别消息
+            add_log(f"向取消关注者 UID:{unfollower_mid} 发送文字告别消息: {reply_message}", 'info')
+            result = api.send_msg(unfollower_mid, content=reply_message)
+            if result and result.get('code') == 0:
+                success = True
+                add_log(f"✅ 成功向取消关注者 UID:{unfollower_mid} 发送告别消息", 'success')
+        
+        if not success:
+            error_msg = result.get('message', '未知错误') if result else '网络错误'
+            add_log(f"❌ 向取消关注者 UID:{unfollower_mid} 发送告别消息失败: {error_msg}", 'warning')
+        
+        return success
+        
+    except Exception as e:
+        add_log(f"发送取消关注告别消息异常: {e}", 'error')
+        return False
+
 def process_single_session(api, my_uid, session):
     """处理单个会话的消息（只检测最后一条消息）"""
-    global message_cache, last_message_times, monitor_start_time
+    global message_cache, last_message_times
     
     try:
         talker_id = session.get('talker_id')
@@ -614,15 +904,6 @@ def process_single_session(api, my_uid, session):
         
         msg_timestamp = latest_msg.get('timestamp', 0)
         sender_uid = latest_msg.get('sender_uid')
-        
-        # 检查是否回复历史消息
-        if not config.get('reply_history_messages', False):
-            # 如果不回复历史消息，只处理监控启动后的新消息
-            if msg_timestamp < monitor_start_time:
-                # 更新最后处理时间，避免重复检查
-                last_message_times[talker_id] = msg_timestamp
-                add_log(f"用户{talker_id} 消息是历史消息，跳过回复（时间戳: {msg_timestamp} < 启动时间: {monitor_start_time}）", 'debug')
-                return []
         
         # 检查是否是新消息
         last_processed_time = last_message_times.get(talker_id, 0)
@@ -746,7 +1027,8 @@ def monitor_messages():
             message_cache = {}
             last_message_times = defaultdict(int)
             last_send_time = 0
-            monitor_start_time = int(time.time())  # 记录监控启动时间
+            followers_cache = set()
+            last_follow_check = 0
             
             last_cleanup = int(time.time())
             last_api_reset = int(time.time())
@@ -775,6 +1057,8 @@ def monitor_messages():
                             add_log(f"定期维护: 已处理 {processed_count} 条消息，错误 {error_count} 次，活跃会话 {len(last_message_times)} 个", 'info')
                         except Exception as e:
                             add_log(f"缓存清理异常: {e}", 'warning')
+                    
+                    # 关注者检测已移至主循环，此处不再需要
                     
                     # 每30分钟重新创建API对象，防止连接问题
                     if current_time - last_api_reset > 1800:
@@ -833,6 +1117,45 @@ def monitor_messages():
                     
                     consecutive_errors = 0  # 重置连续错误计数
                     
+                    # 初始化本轮回复计数
+                    reply_count = 0
+                    
+                    # 🎯 实时检测关注者变化（新关注和取消关注）
+                    if config.get('follow_reply_enabled', False) or config.get('unfollow_reply_enabled', False):
+                        try:
+                            followers_changes = check_followers_changes(api)
+                            
+                            # 处理新关注者
+                            for follower in followers_changes['new_followers']:
+                                if not monitoring:  # 检查是否仍在监控中
+                                    break
+                                try:
+                                    # 发送欢迎消息（会自动应用发送间隔控制）
+                                    if send_follow_welcome_message(api, follower):
+                                        welcome_sent_cache.add(follower['mid'])
+                                    reply_count += 1  # 计入回复统计
+                                    processed_count += 1
+                                except Exception as e:
+                                    add_log(f"处理新关注者异常: {e}", 'error')
+                                    error_count += 1
+                            
+                            # 处理取消关注者
+                            for unfollower in followers_changes['unfollowers']:
+                                if not monitoring:  # 检查是否仍在监控中
+                                    break
+                                try:
+                                    # 发送告别消息（会自动应用发送间隔控制）
+                                    send_unfollow_goodbye_message(api, unfollower)
+                                    reply_count += 1  # 计入回复统计
+                                    processed_count += 1
+                                except Exception as e:
+                                    add_log(f"处理取消关注者异常: {e}", 'error')
+                                    error_count += 1
+                                    
+                        except Exception as e:
+                            add_log(f"实时检测关注者变化异常: {e}", 'warning')
+                            error_count += 1
+                    
                     sessions = sessions_data.get('data', {}).get('session_list', [])
                     if not sessions:
                         time.sleep(0.5)
@@ -873,7 +1196,7 @@ def monitor_messages():
                         continue
                     
                     # 单线程顺序处理所有会话
-                    reply_count = 0
+                    # reply_count 已在循环开始时初始化
                     
                     for session in check_sessions:
                         if not monitoring:
@@ -984,6 +1307,10 @@ def monitor_messages():
                                 message_cache.clear()
                                 last_message_times.clear()
                                 last_send_time = 0
+                                followers_cache.clear()
+                                last_follow_check = 0
+                                unfollowers_cache.clear()
+                                follow_history.clear()
                                 
                                 # 强制垃圾回收
                                 import gc
@@ -1152,11 +1479,14 @@ def start_monitoring():
     monitor_thread = None
     
     # 清理全局状态
-    global message_cache, last_message_times, last_send_time, monitor_start_time
+    global message_cache, last_message_times, last_send_time, followers_cache, last_follow_check, unfollowers_cache, follow_history
     message_cache = {}
     last_message_times = defaultdict(int)
     last_send_time = 0
-    monitor_start_time = int(time.time())  # 记录监控启动时间
+    followers_cache = set()
+    last_follow_check = 0
+    unfollowers_cache = set()
+    follow_history = {}
     
     # 启动新的监控线程
     monitoring = True
@@ -1366,6 +1696,119 @@ def get_home_directory():
         
     except Exception as e:
         return jsonify({'success': False, 'error': f'获取主目录失败: {str(e)}'})
+
+@app.route('/api/follow-reply-config', methods=['GET', 'POST'])
+def handle_follow_reply_config():
+    """处理关注后回复配置"""
+    global config
+    
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        # 更新关注后回复配置
+        if 'follow_reply_enabled' in data:
+            config['follow_reply_enabled'] = data['follow_reply_enabled']
+        
+        if 'follow_reply_message' in data:
+            config['follow_reply_message'] = data['follow_reply_message'].strip()
+        
+        if 'follow_reply_type' in data:
+            reply_type = data['follow_reply_type']
+            if reply_type in ['text', 'image']:
+                config['follow_reply_type'] = reply_type
+        
+        if 'follow_reply_image' in data:
+            image_path = data['follow_reply_image'].strip()
+            if image_path and not os.path.exists(image_path):
+                return jsonify({'success': False, 'error': '指定的图片文件不存在'})
+            config['follow_reply_image'] = image_path
+        
+        save_config()
+        add_log("关注后回复配置已更新", 'success')
+        return jsonify({'success': True})
+    else:
+        return jsonify({
+            'follow_reply_enabled': config.get('follow_reply_enabled', False),
+            'follow_reply_message': config.get('follow_reply_message', '感谢您的关注！欢迎来到我的频道~'),
+            'follow_reply_type': config.get('follow_reply_type', 'text'),
+            'follow_reply_image': config.get('follow_reply_image', '')
+        })
+
+@app.route('/api/unfollow-reply-config', methods=['GET', 'POST'])
+def handle_unfollow_reply_config():
+    """处理取消关注回复配置"""
+    global config
+    
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        # 更新取消关注回复配置
+        if 'unfollow_reply_enabled' in data:
+            config['unfollow_reply_enabled'] = data['unfollow_reply_enabled']
+        
+        if 'unfollow_reply_message' in data:
+            config['unfollow_reply_message'] = data['unfollow_reply_message'].strip()
+        
+        if 'unfollow_reply_type' in data:
+            reply_type = data['unfollow_reply_type']
+            if reply_type in ['text', 'image']:
+                config['unfollow_reply_type'] = reply_type
+        
+        if 'unfollow_reply_image' in data:
+            image_path = data['unfollow_reply_image'].strip()
+            if image_path and not os.path.exists(image_path):
+                return jsonify({'success': False, 'error': '指定的图片文件不存在'})
+            config['unfollow_reply_image'] = image_path
+        
+        save_config()
+        add_log("取消关注回复配置已更新", 'success')
+        return jsonify({'success': True})
+    else:
+        # GET请求，返回当前配置
+        return jsonify({
+            'unfollow_reply_enabled': config.get('unfollow_reply_enabled', False),
+            'unfollow_reply_message': config.get('unfollow_reply_message', '很遗憾看到您取消了关注，希望我们还有机会再见！'),
+            'unfollow_reply_type': config.get('unfollow_reply_type', 'text'),
+            'unfollow_reply_image': config.get('unfollow_reply_image', '')
+        })
+
+@app.route('/api/test-follow-detection', methods=['POST'])
+def test_follow_detection():
+    """测试关注者检测功能"""
+    try:
+        if not config.get('sessdata') or not config.get('bili_jct'):
+            return jsonify({'success': False, 'error': '请先配置登录信息'})
+        
+        api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+        
+        # 测试获取关注者列表
+        recent_followers = api.get_recent_followers(limit=10)
+        
+        if recent_followers:
+            followers_info = []
+            for follower in recent_followers[:5]:  # 只显示前5个
+                followers_info.append({
+                    'uname': follower.get('uname', 'Unknown'),
+                    'mid': follower.get('mid'),
+                    'mtime': follower.get('mtime', 0)
+                })
+            
+            add_log(f"测试获取关注者成功，共 {len(recent_followers)} 个最近关注者", 'success')
+            return jsonify({
+                'success': True,
+                'message': f'成功获取到 {len(recent_followers)} 个最近关注者',
+                'followers': followers_info
+            })
+        else:
+            add_log("测试获取关注者失败或无关注者", 'warning')
+            return jsonify({
+                'success': False,
+                'error': '无法获取关注者列表，请检查登录状态和权限设置'
+            })
+            
+    except Exception as e:
+        add_log(f"测试关注者检测异常: {e}", 'error')
+        return jsonify({'success': False, 'error': f'测试失败: {str(e)}'})
 
 if __name__ == '__main__':
     # 启动时加载配置和规则

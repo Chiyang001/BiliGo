@@ -43,6 +43,22 @@ function initReplyTypeHandlers() {
             toggleEditReplyContent(this.value);
         });
     });
+    
+    // 关注后回复类型切换
+    const followRadios = document.querySelectorAll('input[name="follow-reply-type"]');
+    followRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            toggleFollowReplyContent(this.value);
+        });
+    });
+    
+    // 取消关注回复类型切换
+    const unfollowRadios = document.querySelectorAll('input[name="unfollow-reply-type"]');
+    unfollowRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            toggleUnfollowReplyContent(this.value);
+        });
+    });
 }
 
 // 切换默认回复内容显示
@@ -262,18 +278,116 @@ function saveConfig() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showToast('配置保存成功', 'success');
-            addLog('配置保存成功', 'success');
+            showToast('关注者检测测试完成', 'success');
+            addLog('关注者检测测试完成: ' + data.message, 'success');
         } else {
-            showToast('配置保存失败: ' + data.error, 'error');
-            addLog('配置保存失败: ' + data.error, 'error');
+            showToast('测试失败: ' + data.error, 'error');
+            addLog('关注者检测测试失败: ' + data.error, 'error');
         }
     })
     .catch(error => {
-        showToast('配置保存失败: ' + error, 'error');
-        addLog('配置保存失败: ' + error, 'error');
+        showToast('测试失败: ' + error, 'error');
+        addLog('关注者检测测试失败: ' + error, 'error');
     });
 }
+
+// 加载取消关注回复配置
+function loadUnfollowReplyConfig() {
+    fetch('/api/unfollow-reply-config')
+    .then(response => response.json())
+    .then(data => {
+        if (document.getElementById('unfollow-reply-enabled')) {
+            document.getElementById('unfollow-reply-enabled').checked = data.unfollow_reply_enabled || false;
+            
+            // 设置回复类型
+            const replyType = data.unfollow_reply_type || 'text';
+            document.querySelector(`input[name="unfollow-reply-type"][value="${replyType}"]`).checked = true;
+            toggleUnfollowReplyContent(replyType);
+            
+            // 设置内容
+            document.getElementById('unfollow-reply-message').value = data.unfollow_reply_message || '很遗憾看到您取消了关注，希望我们还有机会再见！';
+            
+            if (data.unfollow_reply_image) {
+                document.getElementById('unfollow-reply-image-path').value = data.unfollow_reply_image;
+                showImagePreview('unfollow', data.unfollow_reply_image);
+            }
+        }
+    })
+    .catch(error => {
+        console.error('加载取消关注回复配置失败:', error);
+    });
+}
+
+// 切换取消关注回复内容显示
+function toggleUnfollowReplyContent(type) {
+    const textContent = document.getElementById('unfollow-text-content');
+    const imageContent = document.getElementById('unfollow-image-content');
+    
+    if (type === 'text') {
+        textContent.style.display = 'block';
+        imageContent.style.display = 'none';
+    } else {
+        textContent.style.display = 'none';
+        imageContent.style.display = 'block';
+    }
+}
+
+// 保存取消关注回复设置
+function saveUnfollowReplyConfig() {
+    const enabled = document.getElementById('unfollow-reply-enabled').checked;
+    const replyType = document.querySelector('input[name="unfollow-reply-type"]:checked').value;
+    
+    let configData = {
+        unfollow_reply_enabled: enabled,
+        unfollow_reply_type: replyType
+    };
+    
+    if (replyType === 'text') {
+        const message = document.getElementById('unfollow-reply-message').value.trim();
+        if (enabled && !message) {
+            showToast('请填写取消关注回复消息', 'warning');
+            return;
+        }
+        configData.unfollow_reply_message = message;
+        configData.unfollow_reply_image = '';
+    } else {
+        const imagePath = document.getElementById('unfollow-reply-image-path').value.trim();
+        if (enabled && !imagePath) {
+            showToast('请选择取消关注回复图片', 'warning');
+            return;
+        }
+        configData.unfollow_reply_message = '很遗憾看到您取消了关注';
+        configData.unfollow_reply_image = imagePath;
+    }
+    
+    fetch('/api/unfollow-reply-config', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(configData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('取消关注回复设置保存成功', 'success');
+            addLog('取消关注回复设置保存成功', 'success');
+        } else {
+            showToast('保存失败: ' + data.error, 'error');
+            addLog('取消关注回复设置保存失败: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        showToast('保存失败: ' + error, 'error');
+        addLog('取消关注回复设置保存失败: ' + error, 'error');
+    });
+}
+
+// 在页面加载时也加载取消关注回复配置
+document.addEventListener('DOMContentLoaded', function() {
+    // 加载取消关注回复设置
+    loadUnfollowReplyConfig();
+});
 
 // 加载配置
 function loadConfig() {
@@ -305,10 +419,8 @@ function loadConfig() {
             }
         }
         
-        // 加载历史消息回复设置
-        if (document.getElementById('reply-history-messages')) {
-            document.getElementById('reply-history-messages').checked = data.reply_history_messages || false;
-        }
+        // 加载关注后回复设置
+        loadFollowReplyConfig();
     })
     .catch(error => {
         console.error('加载配置失败:', error);
@@ -319,12 +431,10 @@ function loadConfig() {
 function saveDefaultReply() {
     const enabled = document.getElementById('default-reply-enabled').checked;
     const replyType = document.querySelector('input[name="default-reply-type"]:checked').value;
-    const replyHistoryMessages = document.getElementById('reply-history-messages').checked;
     
     let configData = {
         default_reply_enabled: enabled,
-        default_reply_type: replyType,
-        reply_history_messages: replyHistoryMessages
+        default_reply_type: replyType
     };
     
     if (replyType === 'text') {
@@ -988,6 +1098,12 @@ function confirmImageSelection() {
     } else if (currentImageBrowserTarget === 'edit') {
         document.getElementById('edit-reply-image-path').value = selectedImagePath;
         showImagePreview('edit', selectedImagePath);
+    } else if (currentImageBrowserTarget === 'follow') {
+        document.getElementById('follow-reply-image-path').value = selectedImagePath;
+        showImagePreview('follow', selectedImagePath);
+    } else if (currentImageBrowserTarget === 'unfollow') {
+        document.getElementById('unfollow-reply-image-path').value = selectedImagePath;
+        showImagePreview('unfollow', selectedImagePath);
     }
     
     closeImageBrowser();
@@ -1118,6 +1234,12 @@ document.addEventListener('keydown', function(event) {
         } else if (event.target.closest('.default-reply-panel')) {
             event.preventDefault();
             saveDefaultReply();
+        } else if (event.target.closest('.follow-reply-panel')) {
+            event.preventDefault();
+            saveFollowReply();
+        } else if (event.target.closest('.unfollow-reply-panel')) {
+            event.preventDefault();
+            saveUnfollowReplyConfig();
         }
     }
 });
@@ -1188,4 +1310,130 @@ function addLongPressDelete() {
 if (window.innerWidth <= 768) {
     handleVirtualKeyboard();
     addLongPressDelete();
+}
+
+// 关注后回复功能相关函数
+
+// 加载关注后回复配置
+function loadFollowReplyConfig() {
+    fetch('/api/follow-reply-config')
+    .then(response => response.json())
+    .then(data => {
+        if (document.getElementById('follow-reply-enabled')) {
+            document.getElementById('follow-reply-enabled').checked = data.follow_reply_enabled || false;
+            
+            // 设置回复类型
+            const replyType = data.follow_reply_type || 'text';
+            document.querySelector(`input[name="follow-reply-type"][value="${replyType}"]`).checked = true;
+            toggleFollowReplyContent(replyType);
+            
+            // 设置内容
+            document.getElementById('follow-reply-message').value = data.follow_reply_message || '感谢您的关注！欢迎来到我的频道~';
+            
+            if (data.follow_reply_image) {
+                document.getElementById('follow-reply-image-path').value = data.follow_reply_image;
+                showImagePreview('follow', data.follow_reply_image);
+            }
+        }
+    })
+    .catch(error => {
+        console.error('加载关注后回复配置失败:', error);
+    });
+}
+
+// 切换关注后回复内容显示
+function toggleFollowReplyContent(type) {
+    const textContent = document.getElementById('follow-text-content');
+    const imageContent = document.getElementById('follow-image-content');
+    
+    if (type === 'text') {
+        textContent.style.display = 'block';
+        imageContent.style.display = 'none';
+    } else {
+        textContent.style.display = 'none';
+        imageContent.style.display = 'block';
+    }
+}
+
+// 保存关注后回复设置
+function saveFollowReply() {
+    const enabled = document.getElementById('follow-reply-enabled').checked;
+    const replyType = document.querySelector('input[name="follow-reply-type"]:checked').value;
+    
+    let configData = {
+        follow_reply_enabled: enabled,
+        follow_reply_type: replyType
+    };
+    
+    if (replyType === 'text') {
+        const message = document.getElementById('follow-reply-message').value.trim();
+        if (enabled && !message) {
+            showToast('请填写关注后回复消息', 'warning');
+            return;
+        }
+        configData.follow_reply_message = message;
+        configData.follow_reply_image = '';
+    } else {
+        const imagePath = document.getElementById('follow-reply-image-path').value.trim();
+        if (enabled && !imagePath) {
+            showToast('请选择关注后回复图片', 'warning');
+            return;
+        }
+        configData.follow_reply_message = '感谢您的关注！';
+        configData.follow_reply_image = imagePath;
+    }
+    
+    fetch('/api/follow-reply-config', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(configData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('关注后回复设置保存成功', 'success');
+            addLog('关注后回复设置保存成功', 'success');
+        } else {
+            showToast('保存失败: ' + data.error, 'error');
+            addLog('关注后回复设置保存失败: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        showToast('保存失败: ' + error, 'error');
+        addLog('关注后回复设置保存失败: ' + error, 'error');
+    });
+}
+
+// 测试关注者检测功能
+function testFollowDetection() {
+    showToast('正在测试关注者检测功能...', 'info');
+    addLog('开始测试关注者检测功能', 'info');
+    
+    fetch('/api/test-follow-detection', {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+            addLog(`测试成功: ${data.message}`, 'success');
+            
+            if (data.followers && data.followers.length > 0) {
+                addLog('最近关注者列表:', 'info');
+                data.followers.forEach(follower => {
+                    const followTime = new Date(follower.mtime * 1000).toLocaleString();
+                    addLog(`- ${follower.uname} (UID: ${follower.mid}) 关注时间: ${followTime}`, 'info');
+                });
+            }
+        } else {
+            showToast('测试失败: ' + data.error, 'error');
+            addLog('测试关注者检测失败: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        showToast('测试失败: ' + error, 'error');
+        addLog('测试关注者检测异常: ' + error, 'error');
+    });
 }

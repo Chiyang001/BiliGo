@@ -529,9 +529,53 @@ footer a:hover {
     text-decoration: underline;
 }
 
+/* 并排回复设置容器样式 */
+.reply-settings-container {
+    grid-column: span 2;
+}
+
+.reply-settings-row {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+.half-width {
+    flex: 1;
+    min-width: 0; /* 防止内容溢出 */
+}
+
 /* 默认回复设置样式 */
 .default-reply-panel {
+    /* 移除原来的 grid-column 设置，现在由 half-width 控制 */
+}
+
+/* 关注后回复设置样式 */
+.follow-reply-panel {
+    /* 由 half-width 控制宽度 */
+}
+
+/* 取消关注和关键词回复并排容器样式 */
+.unfollow-keyword-container {
     grid-column: span 2;
+}
+
+.unfollow-keyword-row {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+}
+
+/* 响应式设计：在小屏幕上垂直排列 */
+@media (max-width: 768px) {
+    .reply-settings-row, .unfollow-keyword-row {
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .half-width {
+        width: 100%;
+    }
 }
 
 /* 单选按钮组样式 */

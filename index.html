@@ -59,110 +59,206 @@
                 </button>
             </section>
 
-            <section class="default-reply-panel">
-                <h2><i class="bi bi-chat-dots-fill"></i> 默认回复设置</h2>
-                <div class="form-row">
-                    <div class="checkbox-wrapper">
-                        <input type="checkbox" id="default-reply-enabled">
-                        <label for="default-reply-enabled">启用默认回复</label>
-                    </div>
-                    <p class="help-text">当用户消息未匹配任何关键词时，自动回复默认消息</p>
-                </div>
-                
-                <div class="form-row">
-                    <div class="checkbox-wrapper">
-                        <input type="checkbox" id="reply-history-messages">
-                        <label for="reply-history-messages">回复历史消息</label>
-                    </div>
-                    <p class="help-text">开启后会检查并回复历史消息；关闭后只回复监控启动后的新消息</p>
-                </div>
-                
-                <div class="form-row">
-                    <label>回复类型:</label>
-                    <div class="radio-group">
-                        <div class="radio-wrapper">
-                            <input type="radio" id="default-reply-text" name="default-reply-type" value="text" checked>
-                            <label for="default-reply-text">文字回复</label>
+            <section class="reply-settings-container">
+                <div class="reply-settings-row">
+                    <div class="default-reply-panel half-width">
+                        <h2><i class="bi bi-chat-dots-fill"></i> 默认回复设置</h2>
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="default-reply-enabled">
+                                <label for="default-reply-enabled">启用默认回复</label>
+                            </div>
+                            <p class="help-text">当用户消息未匹配任何关键词时，自动回复默认消息</p>
                         </div>
-                        <div class="radio-wrapper">
-                            <input type="radio" id="default-reply-image" name="default-reply-type" value="image">
-                            <label for="default-reply-image">图片回复</label>
+                        
+                        <div class="form-row">
+                            <label>回复类型:</label>
+                            <div class="radio-group">
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="default-reply-text" name="default-reply-type" value="text" checked>
+                                    <label for="default-reply-text">文字回复</label>
+                                </div>
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="default-reply-image" name="default-reply-type" value="image">
+                                    <label for="default-reply-image">图片回复</label>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                </div>
-                
-                <div id="default-text-content" class="form-row">
-                    <label for="default-reply-message">默认回复内容:</label>
-                    <textarea id="default-reply-message" placeholder="请输入默认回复内容，例如：您好，我现在不在，稍后会回复您的消息。"></textarea>
-                </div>
-                
-                <div id="default-image-content" class="form-row" style="display: none;">
-                    <label for="default-reply-image-path">选择图片:</label>
-                    <div class="image-selector">
-                        <input type="text" id="default-reply-image-path" placeholder="请选择图片文件" readonly>
-                        <button type="button" class="btn-secondary" onclick="openImageBrowser('default')">
-                            <i class="bi bi-folder2-open"></i> 选择图片
+                        
+                        <div id="default-text-content" class="form-row">
+                            <label for="default-reply-message">默认回复内容:</label>
+                            <textarea id="default-reply-message" placeholder="请输入默认回复内容，例如：您好，我现在不在，稍后会回复您的消息。"></textarea>
+                        </div>
+                        
+                        <div id="default-image-content" class="form-row" style="display: none;">
+                            <label for="default-reply-image-path">选择图片:</label>
+                            <div class="image-selector">
+                                <input type="text" id="default-reply-image-path" placeholder="请选择图片文件" readonly>
+                                <button type="button" class="btn-secondary" onclick="openImageBrowser('default')">
+                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                </button>
+                            </div>
+                            <div id="default-image-preview" class="image-preview" style="display: none;"></div>
+                        </div>
+                        
+                        <button class="btn-primary" onclick="saveDefaultReply()">
+                            <i class="bi bi-save-fill"></i> 保存默认回复设置
                         </button>
                     </div>
-                    <div id="default-image-preview" class="image-preview" style="display: none;"></div>
+
+                    <div class="follow-reply-panel half-width">
+                        <h2><i class="bi bi-person-plus-fill"></i> 关注后回复设置</h2>
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="follow-reply-enabled">
+                                <label for="follow-reply-enabled">启用关注后自动回复</label>
+                            </div>
+                            <p class="help-text">当有新用户关注时，自动发送欢迎消息</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label>回复类型:</label>
+                            <div class="radio-group">
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="follow-reply-text" name="follow-reply-type" value="text" checked>
+                                    <label for="follow-reply-text">文字回复</label>
+                                </div>
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="follow-reply-image" name="follow-reply-type" value="image">
+                                    <label for="follow-reply-image">图片回复</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="follow-text-content" class="form-row">
+                            <label for="follow-reply-message">欢迎消息内容:</label>
+                            <textarea id="follow-reply-message" placeholder="请输入关注后的欢迎消息，例如：感谢您的关注！欢迎来到我的频道~"></textarea>
+                        </div>
+                        
+                        <div id="follow-image-content" class="form-row" style="display: none;">
+                            <label for="follow-reply-image-path">选择图片:</label>
+                            <div class="image-selector">
+                                <input type="text" id="follow-reply-image-path" placeholder="请选择图片文件" readonly>
+                                <button type="button" class="btn-secondary" onclick="openImageBrowser('follow')">
+                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                </button>
+                            </div>
+                            <div id="follow-image-preview" class="image-preview" style="display: none;"></div>
+                        </div>
+                        
+                        <div class="button-group">
+                            <button class="btn-primary" onclick="saveFollowReply()">
+                                <i class="bi bi-save-fill"></i> 保存关注回复设置
+                            </button>
+                            <button class="btn-secondary" onclick="testFollowDetection()">
+                                <i class="bi bi-search"></i> 测试关注者检测
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                
-                <button class="btn-primary" onclick="saveDefaultReply()">
-                    <i class="bi bi-save-fill"></i> 保存默认回复设置
-                </button>
             </section>
 
-
-            <section class="keyword-panel">
-                <h2><i class="bi bi-chat-square-text-fill"></i> 关键词回复设置</h2>
-                <div class="form-row">
-                    <label for="rule-title">规则标题:</label>
-                    <div class="input-wrapper">
-                        <i class="bi bi-tag-fill"></i>
-                        <input type="text" id="rule-title" placeholder="例如：问候回复、帮助说明">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <label for="keywords">关键词 (用中文逗号分隔):</label>
-                    <div class="input-wrapper">
-                        <i class="bi bi-hash"></i>
-                        <input type="text" id="keywords" placeholder="例如：你好，帮助，问题">
-                    </div>
-                </div>
-                
-                <div class="form-row">
-                    <label>回复类型:</label>
-                    <div class="radio-group">
-                        <div class="radio-wrapper">
-                            <input type="radio" id="rule-reply-text" name="rule-reply-type" value="text" checked>
-                            <label for="rule-reply-text">文字回复</label>
+            <section class="unfollow-keyword-container">
+                <div class="unfollow-keyword-row">
+                    <!-- 取消关注回复设置 -->
+                    <div class="unfollow-reply-panel half-width">
+                        <h2><i class="bi bi-person-dash-fill"></i> 取消关注回复设置</h2>
+                        
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="unfollow-reply-enabled">
+                                <label for="unfollow-reply-enabled">启用取消关注自动回复</label>
+                            </div>
                         </div>
-                        <div class="radio-wrapper">
-                            <input type="radio" id="rule-reply-image" name="rule-reply-type" value="image">
-                            <label for="rule-reply-image">图片回复</label>
+                        
+                        <div class="form-row">
+                            <label>回复类型:</label>
+                            <div class="radio-group">
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="unfollow-reply-text" name="unfollow-reply-type" value="text" checked>
+                                    <label for="unfollow-reply-text">文字回复</label>
+                                </div>
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="unfollow-reply-image" name="unfollow-reply-type" value="image">
+                                    <label for="unfollow-reply-image">图片回复</label>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                </div>
-                
-                <div id="rule-text-content" class="form-row">
-                    <label for="reply">回复内容:</label>
-                    <textarea id="reply" placeholder="请输入回复内容"></textarea>
-                </div>
-                
-                <div id="rule-image-content" class="form-row" style="display: none;">
-                    <label for="rule-reply-image-path">选择图片:</label>
-                    <div class="image-selector">
-                        <input type="text" id="rule-reply-image-path" placeholder="请选择图片文件" readonly>
-                        <button type="button" class="btn-secondary" onclick="openImageBrowser('rule')">
-                            <i class="bi bi-folder2-open"></i> 选择图片
+                        
+                        <div id="unfollow-text-content" class="form-row">
+                            <label for="unfollow-reply-message">告别消息:</label>
+                            <textarea id="unfollow-reply-message" placeholder="很遗憾看到您取消了关注，希望我们还有机会再见！"></textarea>
+                        </div>
+                        
+                        <div id="unfollow-image-content" class="form-row" style="display: none;">
+                            <label for="unfollow-reply-image-path">选择图片:</label>
+                            <div class="image-selector">
+                                <input type="text" id="unfollow-reply-image-path" placeholder="请选择图片文件" readonly>
+                                <button type="button" class="btn-secondary" onclick="openImageBrowser('unfollow')">
+                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                </button>
+                            </div>
+                            <div id="unfollow-image-preview" class="image-preview" style="display: none;"></div>
+                        </div>
+                        
+                        <button class="btn-primary" onclick="saveUnfollowReplyConfig()">
+                            <i class="bi bi-check-circle-fill"></i> 保存取消关注回复设置
                         </button>
                     </div>
-                    <div id="rule-image-preview" class="image-preview" style="display: none;"></div>
+                    
+                    <!-- 关键词回复设置 -->
+                    <div class="keyword-panel half-width">
+                        <h2><i class="bi bi-chat-square-text-fill"></i> 关键词回复设置</h2>
+                        <div class="form-row">
+                            <label for="rule-title">规则标题:</label>
+                            <div class="input-wrapper">
+                                <i class="bi bi-tag-fill"></i>
+                                <input type="text" id="rule-title" placeholder="例如：问候回复、帮助说明">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <label for="keywords">关键词 (用中文逗号分隔):</label>
+                            <div class="input-wrapper">
+                                <i class="bi bi-hash"></i>
+                                <input type="text" id="keywords" placeholder="例如：你好，帮助，问题">
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label>回复类型:</label>
+                            <div class="radio-group">
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="rule-reply-text" name="rule-reply-type" value="text" checked>
+                                    <label for="rule-reply-text">文字回复</label>
+                                </div>
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="rule-reply-image" name="rule-reply-type" value="image">
+                                    <label for="rule-reply-image">图片回复</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="rule-text-content" class="form-row">
+                            <label for="reply">回复内容:</label>
+                            <textarea id="reply" placeholder="请输入回复内容"></textarea>
+                        </div>
+                        
+                        <div id="rule-image-content" class="form-row" style="display: none;">
+                            <label for="rule-reply-image-path">选择图片:</label>
+                            <div class="image-selector">
+                                <input type="text" id="rule-reply-image-path" placeholder="请选择图片文件" readonly>
+                                <button type="button" class="btn-secondary" onclick="openImageBrowser('rule')">
+                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                </button>
+                            </div>
+                            <div id="rule-image-preview" class="image-preview" style="display: none;"></div>
+                        </div>
+                        
+                        <button class="btn-primary" onclick="addRule()">
+                            <i class="bi bi-plus-circle-fill"></i> 添加规则
+                        </button>
+                    </div>
                 </div>
-                
-                <button class="btn-primary" onclick="addRule()">
-                    <i class="bi bi-plus-circle-fill"></i> 添加规则
-                </button>
             </section>
 
             <section class="rules-panel">
