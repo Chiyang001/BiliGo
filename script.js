@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', function() {
     checkServerStatus();
     initMobileOptimizations();
     initReplyTypeHandlers();
+    loadNewMessageConfig();
+    loadFollowCheckIntervalConfig();
 });
 
 // 全局变量
@@ -421,6 +423,11 @@ function loadConfig() {
         
         // 加载关注后回复设置
         loadFollowReplyConfig();
+        
+        // 加载仅回复新消息设置
+        if (document.getElementById('only-reply-new-messages')) {
+            document.getElementById('only-reply-new-messages').checked = data.only_reply_new_messages || false;
+        }
     })
     .catch(error => {
         console.error('加载配置失败:', error);
@@ -1359,6 +1366,21 @@ function toggleFollowReplyContent(type) {
 function saveFollowReply() {
     const enabled = document.getElementById('follow-reply-enabled').checked;
     const replyType = document.querySelector('input[name="follow-reply-type"]:checked').value;
+    const interval = document.getElementById('follow-check-interval').value;
+    
+    // 验证检查间隔
+    const intervalNum = parseInt(interval);
+    if (isNaN(intervalNum) || intervalNum < 5 || intervalNum > 300) {
+        showToast('检查间隔必须在5-300秒之间', 'error');
+        return;
+    }
+    
+    // 风控提示
+    if (intervalNum < 30) {
+        if (!confirm(`检查间隔设置为${intervalNum}秒可能触发B站风控系统，建议设置为30秒以上。确定要保存吗？`)) {
+            return;
+        }
+    }
     
     let configData = {
         follow_reply_enabled: enabled,
@@ -1383,6 +1405,7 @@ function saveFollowReply() {
         configData.follow_reply_image = imagePath;
     }
     
+    // 先保存关注回复设置
     fetch('/api/follow-reply-config', {
         method: 'POST',
         headers: {
@@ -1393,16 +1416,39 @@ function saveFollowReply() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showToast('关注后回复设置保存成功', 'success');
-            addLog('关注后回复设置保存成功', 'success');
+            // 关注回复设置保存成功后，保存检查间隔设置
+            return fetch('/api/follow-check-interval-config', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    follow_check_interval: intervalNum
+                })
+            });
         } else {
-            showToast('保存失败: ' + data.error, 'error');
-            addLog('关注后回复设置保存失败: ' + data.error, 'error');
+            throw new Error(data.error || '保存关注回复设置失败');
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('关注回复设置和检查间隔保存成功', 'success');
+            addLog('关注回复设置和检查间隔保存成功', 'success');
+            
+            // 显示风控提示
+            if (intervalNum < 30) {
+                showToast('⚠️ 间隔较短，请注意风控风险', 'warning');
+            } else {
+                showToast('✅ 间隔设置合理，有助于避免风控', 'success');
+            }
+        } else {
+            throw new Error(data.error || '保存检查间隔设置失败');
         }
     })
     .catch(error => {
         showToast('保存失败: ' + error, 'error');
-        addLog('关注后回复设置保存失败: ' + error, 'error');
+        addLog('保存关注回复设置失败: ' + error, 'error');
     });
 }
 
@@ -1437,3 +1483,62 @@ function testFollowDetection() {
         addLog('测试关注者检测异常: ' + error, 'error');
     });
 }
+
+// 加载仅回复新消息配置
+function loadNewMessageConfig() {
+    fetch('/api/new-message-config')
+    .then(response => response.json())
+    .then(data => {
+        if (document.getElementById('only-reply-new-messages')) {
+            document.getElementById('only-reply-new-messages').checked = data.only_reply_new_messages || false;
+        }
+    })
+    .catch(error => {
+        console.error('加载仅回复新消息配置失败:', error);
+    });
+}
+
+// 保存仅回复新消息配置
+function saveNewMessageConfig() {
+    const onlyReplyNewMessages = document.getElementById('only-reply-new-messages').checked;
+    
+    fetch('/api/new-message-config', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            only_reply_new_messages: onlyReplyNewMessages
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('消息设置已保存', 'success');
+            addLog('仅回复新消息配置已更新', 'success');
+        } else {
+            showToast('保存失败', 'error');
+            addLog('保存仅回复新消息配置失败', 'error');
+        }
+    })
+    .catch(error => {
+        showToast('保存失败: ' + error, 'error');
+        addLog('保存仅回复新消息配置异常: ' + error, 'error');
+    });
+}
+
+// 加载关注者检查间隔配置
+function loadFollowCheckIntervalConfig() {
+    fetch('/api/follow-check-interval-config')
+    .then(response => response.json())
+    .then(data => {
+        if (document.getElementById('follow-check-interval')) {
+            document.getElementById('follow-check-interval').value = data.follow_check_interval || 30;
+        }
+    })
+    .catch(error => {
+        console.error('加载关注者检查间隔配置失败:', error);
+    });
+}
+
+

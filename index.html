@@ -36,6 +36,18 @@
                         <i class="bi bi-stop-fill"></i> 停止监控
                     </button>
                 </div>
+                
+                <div class="form-row" style="margin-top: 20px;">
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="only-reply-new-messages">
+                        <label for="only-reply-new-messages">仅回复新消息</label>
+                    </div>
+                    <p class="help-text">启用后，只会回复程序启动之后收到的消息，不会回复启动前的历史消息</p>
+                </div>
+                
+                <button class="btn-secondary" onclick="saveNewMessageConfig()" style="margin-top: 10px;">
+                    <i class="bi bi-save-fill"></i> 保存消息设置
+                </button>
             </section>
 
             <section class="config-panel">
@@ -144,6 +156,18 @@
                                 </button>
                             </div>
                             <div id="follow-image-preview" class="image-preview" style="display: none;"></div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="follow-check-interval">关注者检查间隔 (秒):</label>
+                            <div class="input-wrapper">
+                                <i class="bi bi-clock-fill"></i>
+                                <input type="number" id="follow-check-interval" min="5" max="300" value="30" placeholder="30">
+                            </div>
+                            <p class="help-text">
+                                <i class="bi bi-exclamation-triangle-fill" style="color: #ff6b6b;"></i>
+                                建议设置为30秒以上，间隔过短可能触发B站风控系统导致无法正常检测关注者
+                            </p>
                         </div>
                         
                         <div class="button-group">

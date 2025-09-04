@@ -32,7 +32,9 @@ config = {
     'unfollow_reply_enabled': False,  # 取消关注回复功能开关
     'unfollow_reply_message': '很遗憾看到您取消了关注，希望我们还有机会再见！',  # 取消关注回复消息
     'unfollow_reply_type': 'text',  # 取消关注回复类型：'text' 或 'image'
-    'unfollow_reply_image': ''  # 取消关注回复图片路径
+    'unfollow_reply_image': '',  # 取消关注回复图片路径
+    'only_reply_new_messages': False,  # 是否仅回复新消息（程序启动后的消息）
+    'follow_check_interval': 30  # 检查关注者的间隔（秒）- 建议不少于30秒避免触发风控
 }
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import json
@@ -67,12 +69,15 @@ last_send_time = 0
 followers_cache = set()  # 缓存已知关注者
 welcome_sent_cache = set()  # 缓存已发送欢迎消息的关注者
 last_follow_check = 0  # 上次检查关注者的时间
-follow_check_interval = 30  # 检查关注者的间隔（秒）- 30秒检查一次避免触发风控
+# 检查关注者的间隔将从配置中读取
 
 # 取消关注监控相关变量
 unfollowers_cache = set()  # 缓存已处理的取消关注者
 last_unfollow_check = 0  # 上次检查取消关注的时间
 follow_history = {}  # 关注历史记录 {uid: last_follow_time}
+
+# 程序启动时间戳（用于仅回复新消息功能）
+program_start_time = int(time.time())
 
 # 配置文件路径 - 兼容Linux和Windows
 CONFIG_FILE = os.path.join(os.getcwd(), 'config.json')
@@ -676,8 +681,9 @@ def check_followers_changes(api):
     try:
         current_time = int(time.time())
         
-        # 超实时检测：每3秒检查一次，提供最快响应
-        if current_time - last_follow_check < follow_check_interval:
+        # 从配置中获取检查间隔，默认30秒避免触发风控
+        check_interval = config.get('follow_check_interval', 30)
+        if current_time - last_follow_check < check_interval:
             return {'new_followers': [], 'unfollowers': []}
         
         last_follow_check = current_time
@@ -890,7 +896,7 @@ def send_unfollow_goodbye_message(api, unfollower):
 
 def process_single_session(api, my_uid, session):
     """处理单个会话的消息（只检测最后一条消息）"""
-    global message_cache, last_message_times
+    global message_cache, last_message_times, program_start_time
     
     try:
         talker_id = session.get('talker_id')
@@ -904,6 +910,15 @@ def process_single_session(api, my_uid, session):
         
         msg_timestamp = latest_msg.get('timestamp', 0)
         sender_uid = latest_msg.get('sender_uid')
+        
+        # 检查是否启用了"仅回复新消息"功能
+        if config.get('only_reply_new_messages', False):
+            # 如果消息时间早于程序启动时间，跳过处理
+            if msg_timestamp < program_start_time:
+                add_log(f"用户{talker_id} 消息时间早于程序启动时间，跳过回复（仅回复新消息模式）", 'debug')
+                # 仍然更新最后处理时间，避免重复检查
+                last_message_times[talker_id] = msg_timestamp
+                return []
         
         # 检查是否是新消息
         last_processed_time = last_message_times.get(talker_id, 0)
@@ -1460,7 +1475,7 @@ def handle_rules():
 
 @app.route('/api/start', methods=['POST'])
 def start_monitoring():
-    global monitoring, monitor_thread
+    global monitoring, monitor_thread, program_start_time
     
     # 检查配置
     if not config.get('sessdata') or not config.get('bili_jct'):
@@ -1488,13 +1503,21 @@ def start_monitoring():
     unfollowers_cache = set()
     follow_history = {}
     
+    # 重置程序启动时间（用于仅回复新消息功能）
+    program_start_time = int(time.time())
+    
     # 启动新的监控线程
     monitoring = True
     monitor_thread = threading.Thread(target=monitor_messages)
     monitor_thread.daemon = True
     monitor_thread.start()
     
-    add_log("开始监控私信", 'success')
+    # 根据配置显示不同的启动消息
+    if config.get('only_reply_new_messages', False):
+        add_log("开始监控私信（仅回复新消息模式）", 'success')
+    else:
+        add_log("开始监控私信", 'success')
+    
     return jsonify({'success': True})
 
 @app.route('/api/stop', methods=['POST'])
@@ -1809,6 +1832,79 @@ def test_follow_detection():
     except Exception as e:
         add_log(f"测试关注者检测异常: {e}", 'error')
         return jsonify({'success': False, 'error': f'测试失败: {str(e)}'})
+
+@app.route('/api/new-message-config', methods=['GET', 'POST'])
+def handle_new_message_config():
+    """处理仅回复新消息配置"""
+    global config
+    
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        # 更新仅回复新消息配置
+        if 'only_reply_new_messages' in data:
+            old_value = config.get('only_reply_new_messages', False)
+            new_value = data['only_reply_new_messages']
+            config['only_reply_new_messages'] = new_value
+            
+            # 记录配置变更
+            if old_value != new_value:
+                if new_value:
+                    add_log("已启用仅回复新消息模式，只会回复程序启动后的消息", 'success')
+                else:
+                    add_log("已关闭仅回复新消息模式，会回复所有未处理的消息", 'success')
+        
+        save_config()
+        add_log("仅回复新消息配置已更新", 'success')
+        return jsonify({'success': True})
+    else:
+        # GET请求，返回当前配置
+        return jsonify({
+            'only_reply_new_messages': config.get('only_reply_new_messages', False)
+        })
+
+@app.route('/api/follow-check-interval-config', methods=['GET', 'POST'])
+def handle_follow_check_interval_config():
+    """处理关注者检查间隔配置"""
+    global config
+    
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        # 更新关注者检查间隔配置
+        if 'follow_check_interval' in data:
+            interval = data['follow_check_interval']
+            
+            # 验证间隔值的合理性
+            try:
+                interval = int(interval)
+                if interval < 5:
+                    return jsonify({'success': False, 'error': '检查间隔不能少于5秒'})
+                elif interval > 300:
+                    return jsonify({'success': False, 'error': '检查间隔不能超过300秒（5分钟）'})
+                
+                old_value = config.get('follow_check_interval', 30)
+                config['follow_check_interval'] = interval
+                
+                # 记录配置变更和风控提示
+                if old_value != interval:
+                    add_log(f"关注者检查间隔已更新: {old_value}秒 -> {interval}秒", 'success')
+                    if interval < 30:
+                        add_log(f"⚠️ 警告：检查间隔设置为{interval}秒，可能触发B站风控系统，建议设置为30秒以上", 'warning')
+                    elif interval >= 30:
+                        add_log(f"✅ 检查间隔设置为{interval}秒，有助于避免触发B站风控", 'success')
+                
+            except (ValueError, TypeError):
+                return jsonify({'success': False, 'error': '检查间隔必须是有效的数字'})
+        
+        save_config()
+        add_log("关注者检查间隔配置已更新", 'success')
+        return jsonify({'success': True})
+    else:
+        # GET请求，返回当前配置
+        return jsonify({
+            'follow_check_interval': config.get('follow_check_interval', 30)
+        })
 
 if __name__ == '__main__':
     # 启动时加载配置和规则
