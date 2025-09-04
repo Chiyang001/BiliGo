@@ -67,7 +67,7 @@ last_send_time = 0
 followers_cache = set()  # 缓存已知关注者
 welcome_sent_cache = set()  # 缓存已发送欢迎消息的关注者
 last_follow_check = 0  # 上次检查关注者的时间
-follow_check_interval = 3  # 检查关注者的间隔（秒）- 改为3秒实时检测
+follow_check_interval = 30  # 检查关注者的间隔（秒）- 30秒检查一次避免触发风控
 
 # 取消关注监控相关变量
 unfollowers_cache = set()  # 缓存已处理的取消关注者
