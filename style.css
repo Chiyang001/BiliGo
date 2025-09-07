@@ -453,12 +453,16 @@ button:disabled {
 
 .modal-content {
     background-color: white;
-    margin: 8% auto;
+    margin: 5% auto;
     width: 90%;
-    max-width: 500px;
+    max-width: 600px;
+    max-height: 90vh;
     border-radius: var(--radius);
     box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
     animation: modalSlideIn 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 @keyframes modalSlideIn {
@@ -501,6 +505,9 @@ button:disabled {
 
 .modal-body {
     padding: 20px;
+    flex: 1;
+    overflow-y: auto;
+    max-height: calc(90vh - 120px); /* 减去header和footer的高度 */
 }
 
 .modal-footer {
@@ -1079,5 +1086,292 @@ footer a:hover {
     
     textarea {
         height: 80px;
+    }
+}
+
+/* 规则列表头部样式 */
+.rules-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.rules-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 13px;
+    min-height: 32px;
+}
+
+/* 文件上传区域样式 */
+.file-upload-area {
+    border: 2px dashed var(--border-color);
+    border-radius: var(--radius);
+    padding: 30px;
+    text-align: center;
+    transition: var(--transition);
+    cursor: pointer;
+    background-color: #fafbfc;
+}
+
+.file-upload-area:hover {
+    border-color: var(--primary-color);
+    background-color: #f0f8ff;
+}
+
+.file-upload-area.dragover {
+    border-color: var(--primary-color);
+    background-color: #e6f3ff;
+}
+
+.upload-placeholder i {
+    font-size: 48px;
+    color: var(--text-light);
+    margin-bottom: 15px;
+    display: block;
+}
+
+.upload-placeholder p {
+    font-size: 16px;
+    color: var(--text-color);
+    margin-bottom: 8px;
+}
+
+.upload-placeholder small {
+    color: var(--text-light);
+    font-size: 13px;
+}
+
+/* 文件信息样式 */
+.file-info {
+    margin-top: 15px;
+    padding: 12px;
+    background-color: #f8f9fa;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+}
+
+.file-details {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.file-details i {
+    font-size: 24px;
+    color: var(--primary-color);
+}
+
+.file-text {
+    flex: 1;
+}
+
+.file-text strong {
+    display: block;
+    color: var(--text-color);
+    font-size: 14px;
+}
+
+.file-text small {
+    color: var(--text-light);
+    font-size: 12px;
+}
+
+/* 验证结果样式 */
+.validation-result {
+    margin-top: 15px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+}
+
+.validation-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+
+.validation-header i {
+    font-size: 18px;
+}
+
+.validation-details p {
+    margin: 5px 0;
+    font-size: 14px;
+}
+
+.text-success {
+    color: var(--success-color);
+}
+
+.text-warning {
+    color: var(--warning-color);
+}
+
+.text-danger {
+    color: var(--danger-color);
+}
+
+/* 规则预览样式 */
+.sample-rules {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color);
+}
+
+.sample-rules h4 {
+    font-size: 14px;
+    color: var(--text-color);
+    margin-bottom: 10px;
+}
+
+.sample-rules-list {
+    max-height: 150px;
+    overflow-y: auto;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 8px;
+}
+
+.sample-rule-item {
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    background-color: white;
+    border-radius: 4px;
+    border: 1px solid #e9ecef;
+    font-size: 13px;
+}
+
+.sample-rule-item:last-child {
+    margin-bottom: 0;
+}
+
+.sample-rule-item .rule-name {
+    font-weight: 600;
+    color: var(--primary-color);
+    margin-bottom: 4px;
+}
+
+.sample-rule-item .rule-keyword {
+    color: var(--text-light);
+    margin-bottom: 4px;
+}
+
+.sample-rule-item .rule-reply {
+    color: var(--text-color);
+    font-size: 12px;
+}
+
+/* 导入选项样式 */
+#import-options {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color);
+}
+
+/* 导入模态框特定样式 */
+#import-modal .modal-content {
+    max-width: 650px;
+    max-height: 95vh;
+}
+
+#import-modal .modal-body {
+    max-height: calc(95vh - 140px);
+    padding: 15px 20px;
+}
+
+/* 验证结果容器优化 */
+.validation-result {
+    margin-top: 15px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* 响应式优化 */
+@media (max-width: 768px) {
+    .rules-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+    
+    .rules-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+    
+    .file-upload-area {
+        padding: 20px;
+    }
+    
+    .upload-placeholder i {
+        font-size: 36px;
+    }
+    
+    .upload-placeholder p {
+        font-size: 14px;
+    }
+    
+    /* 移动端导入模态框优化 */
+    #import-modal .modal-content {
+        margin: 2% auto;
+        width: 95%;
+        max-width: none;
+        max-height: 96vh;
+    }
+    
+    #import-modal .modal-body {
+        padding: 15px;
+        max-height: calc(96vh - 120px);
+    }
+    
+    .validation-result {
+        max-height: 300px;
+    }
+    
+    .sample-rules-list {
+        max-height: 120px;
+    }
+    
+    .file-details {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .file-text {
+        width: 100%;
+    }
+}
+
+/* 横屏模式下的导入模态框优化 */
+@media (max-width: 768px) and (orientation: landscape) {
+    #import-modal .modal-content {
+        margin: 1% auto;
+        max-height: 98vh;
+    }
+    
+    #import-modal .modal-body {
+        max-height: calc(98vh - 100px);
+    }
+    
+    .validation-result {
+        max-height: 200px;
+    }
+    
+    .sample-rules-list {
+        max-height: 100px;
     }
 }

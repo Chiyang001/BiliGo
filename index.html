@@ -48,6 +48,15 @@
                 <button class="btn-secondary" onclick="saveNewMessageConfig()" style="margin-top: 10px;">
                     <i class="bi bi-save-fill"></i> 保存消息设置
                 </button>
+                
+                <div class="button-group" style="margin-top: 20px;">
+                    <button class="btn-secondary" onclick="exportConfig()" title="导出完整配置包">
+                        <i class="bi bi-download"></i> 导出配置
+                    </button>
+                    <button class="btn-primary" onclick="openImportModal()" title="导入完整配置包">
+                        <i class="bi bi-upload"></i> 导入配置
+                    </button>
+                </div>
             </section>
 
             <section class="config-panel">
@@ -286,7 +295,11 @@
             </section>
 
             <section class="rules-panel">
-                <h2><i class="bi bi-list-check"></i> 回复规则列表</h2>
+                <div class="rules-header">
+                    <h2><i class="bi bi-list-check"></i> 回复规则列表</h2>
+                    <div class="rules-actions">
+                    </div>
+                </div>
                 <div class="pagination">
                     <button id="prev-page" class="btn-icon" onclick="changePage(-1)" disabled>
                         <i class="bi bi-chevron-left"></i>
@@ -350,6 +363,83 @@
             </div>
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="closeImageBrowser()">
+                    <i class="bi bi-x"></i> 取消
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入关键词规则模态框 -->
+    <div id="import-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-upload"></i> 导入配置包</h3>
+                <button class="close-btn" onclick="closeImportModal()">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label>选择JSON文件:</label>
+                    <div class="file-upload-area" id="file-upload-area">
+                        <input type="file" id="keywords-file" accept=".json" style="display: none;" onchange="handleFileSelect(event)">
+                        <div class="upload-placeholder" onclick="document.getElementById('keywords-file').click()">
+                            <i class="bi bi-cloud-upload-fill"></i>
+                            <p>点击选择文件或拖拽文件到此处</p>
+                            <small>支持 .json 格式，文件大小不超过1MB</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="file-info" class="file-info" style="display: none;">
+                    <div class="file-details">
+                        <i class="bi bi-file-earmark-text-fill"></i>
+                        <div class="file-text">
+                            <strong id="file-name"></strong>
+                            <small id="file-size"></small>
+                        </div>
+                        <button class="btn-icon" onclick="clearSelectedFile()" title="清除选择">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="validation-result" class="validation-result" style="display: none;">
+                    <div class="validation-header">
+                        <i class="bi bi-check-circle-fill text-success"></i>
+                        <span>文件验证结果</span>
+                    </div>
+                    <div class="validation-details">
+                        <p><strong>总规则数:</strong> <span id="total-rules">0</span></p>
+                        <p><strong>有效规则:</strong> <span id="valid-rules" class="text-success">0</span></p>
+                        <p><strong>无效规则:</strong> <span id="invalid-rules" class="text-warning">0</span></p>
+                    </div>
+                    <div id="sample-rules" class="sample-rules">
+                        <h4>规则预览:</h4>
+                        <div id="sample-rules-list"></div>
+                    </div>
+                </div>
+                
+                <div class="form-row" id="import-options" style="display: none;">
+                    <label>导入模式:</label>
+                    <div class="radio-group">
+                        <div class="radio-wrapper">
+                            <input type="radio" id="import-replace" name="import-mode" value="replace" checked>
+                            <label for="import-replace">替换现有规则</label>
+                        </div>
+                        <div class="radio-wrapper">
+                            <input type="radio" id="import-append" name="import-mode" value="append">
+                            <label for="import-append">追加到现有规则</label>
+                        </div>
+                    </div>
+                    <p class="help-text">替换模式会清空现有规则，追加模式会保留现有规则并添加新规则</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="import-btn" class="btn-primary" onclick="importConfig()" disabled>
+                    <i class="bi bi-upload"></i> 导入
+                </button>
+                <button class="btn-secondary" onclick="closeImportModal()">
                     <i class="bi bi-x"></i> 取消
                 </button>
             </div>

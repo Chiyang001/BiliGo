@@ -1541,4 +1541,272 @@ function loadFollowCheckIntervalConfig() {
     });
 }
 
+// ==================== 导入/导出功能 ====================
+
+// 打开导入模态框
+function openImportModal() {
+    document.getElementById('import-modal').style.display = 'block';
+    clearImportForm();
+}
+
+// 关闭导入模态框
+function closeImportModal() {
+    document.getElementById('import-modal').style.display = 'none';
+    clearImportForm();
+}
+
+// 清空导入表单
+function clearImportForm() {
+    document.getElementById('keywords-file').value = '';
+    document.getElementById('file-info').style.display = 'none';
+    document.getElementById('validation-result').style.display = 'none';
+    document.getElementById('import-options').style.display = 'none';
+    document.getElementById('import-btn').disabled = true;
+    
+    // 重置上传区域
+    const uploadArea = document.getElementById('file-upload-area');
+    uploadArea.classList.remove('dragover');
+}
+
+// 处理文件选择
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (file) {
+        displayFileInfo(file);
+        validateFile(file);
+    }
+}
+
+// 显示文件信息
+function displayFileInfo(file) {
+    const fileInfo = document.getElementById('file-info');
+    const fileName = document.getElementById('file-name');
+    const fileSize = document.getElementById('file-size');
+    
+    fileName.textContent = file.name;
+    fileSize.textContent = formatFileSize(file.size);
+    fileInfo.style.display = 'block';
+}
+
+// 格式化文件大小
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// 清除选择的文件
+function clearSelectedFile() {
+    document.getElementById('keywords-file').value = '';
+    clearImportForm();
+}
+
+// 验证文件
+function validateFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    fetch('/api/validate-keywords-file', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            displayValidationResult(data);
+            document.getElementById('import-options').style.display = 'block';
+            document.getElementById('import-btn').disabled = false;
+        } else {
+            showToast('文件验证失败: ' + data.error, 'error');
+            document.getElementById('import-btn').disabled = true;
+        }
+    })
+    .catch(error => {
+        showToast('验证文件时出错: ' + error, 'error');
+        document.getElementById('import-btn').disabled = true;
+    });
+}
+
+// 显示验证结果
+function displayValidationResult(data) {
+    const validationResult = document.getElementById('validation-result');
+    const totalRules = document.getElementById('total-rules');
+    const validRules = document.getElementById('valid-rules');
+    const invalidRules = document.getElementById('invalid-rules');
+    const sampleRulesList = document.getElementById('sample-rules-list');
+    
+    totalRules.textContent = data.total_rules;
+    validRules.textContent = data.valid_rules;
+    invalidRules.textContent = data.invalid_rules;
+    
+    // 显示规则预览
+    sampleRulesList.innerHTML = '';
+    if (data.sample_rules && data.sample_rules.length > 0) {
+        data.sample_rules.forEach(rule => {
+            const ruleItem = document.createElement('div');
+            ruleItem.className = 'sample-rule-item';
+            ruleItem.innerHTML = `
+                <div class="rule-name">${escapeHtml(rule.name)}</div>
+                <div class="rule-keyword">关键词: ${escapeHtml(rule.keyword)}</div>
+                <div class="rule-reply">回复: ${escapeHtml(rule.reply)}</div>
+            `;
+            sampleRulesList.appendChild(ruleItem);
+        });
+    } else {
+        sampleRulesList.innerHTML = '<p style="color: #666; font-size: 13px;">无有效规则预览</p>';
+    }
+    
+    validationResult.style.display = 'block';
+}
+
+// HTML转义函数
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// 导入关键词
+function importConfig() {
+    const fileInput = document.getElementById('keywords-file');
+    const importMode = document.querySelector('input[name="import-mode"]:checked').value;
+    
+    if (!fileInput.files[0]) {
+        showToast('请选择文件', 'error');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    formData.append('import_mode', importMode);
+    
+    // 禁用导入按钮，显示加载状态
+    const importBtn = document.getElementById('import-btn');
+    const originalText = importBtn.innerHTML;
+    importBtn.disabled = true;
+    importBtn.innerHTML = '<i class="bi bi-arrow-clockwise spin"></i> 导入中...';
+    
+    fetch('/api/import-config', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+            closeImportModal();
+            loadRules(); // 重新加载规则列表
+            loadConfig(); // 重新加载配置
+        } else {
+            showToast('导入失败: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        showToast('导入时出错: ' + error, 'error');
+    })
+    .finally(() => {
+        // 恢复按钮状态
+        importBtn.disabled = false;
+        importBtn.innerHTML = originalText;
+    });
+}
+
+// 导出关键词
+function exportConfig() {
+    showToast('正在导出配置包...', 'info');
+    
+    fetch('/api/export-config')
+    .then(response => {
+        if (response.ok) {
+            return response.blob();
+        } else {
+            return response.json().then(data => {
+                throw new Error(data.error || '导出失败');
+            });
+        }
+    })
+    .then(blob => {
+        // 创建下载链接
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        
+        // 生成文件名
+        const now = new Date();
+        const timestamp = now.getFullYear() + 
+            String(now.getMonth() + 1).padStart(2, '0') + 
+            String(now.getDate()).padStart(2, '0') + '_' +
+            String(now.getHours()).padStart(2, '0') + 
+            String(now.getMinutes()).padStart(2, '0') + 
+            String(now.getSeconds()).padStart(2, '0');
+        
+        a.download = `biligo_config_${timestamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        showToast(`成功导出完整配置包（${rules.length} 条规则）`, 'success');
+    })
+    .catch(error => {
+        showToast('导出失败: ' + error, 'error');
+    });
+}
+
+// 文件拖拽功能
+document.addEventListener('DOMContentLoaded', function() {
+    const uploadArea = document.getElementById('file-upload-area');
+    
+    if (uploadArea) {
+        // 阻止默认拖拽行为
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        // 拖拽进入和悬停
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, highlight, false);
+        });
+        
+        // 拖拽离开
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, unhighlight, false);
+        });
+        
+        function highlight(e) {
+            uploadArea.classList.add('dragover');
+        }
+        
+        function unhighlight(e) {
+            uploadArea.classList.remove('dragover');
+        }
+        
+        // 处理文件放置
+        uploadArea.addEventListener('drop', handleDrop, false);
+        
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.name.toLowerCase().endsWith('.json')) {
+                    document.getElementById('keywords-file').files = files;
+                    displayFileInfo(file);
+                    validateFile(file);
+                } else {
+                    showToast('请选择JSON格式文件', 'error');
+                }
+            }
+        }
+    }
+});
+
 

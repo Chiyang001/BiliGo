@@ -79,9 +79,22 @@ follow_history = {}  # 关注历史记录 {uid: last_follow_time}
 # 程序启动时间戳（用于仅回复新消息功能）
 program_start_time = int(time.time())
 
-# 配置文件路径 - 兼容Linux和Windows
-CONFIG_FILE = os.path.join(os.getcwd(), 'config.json')
-RULES_FILE = os.path.join(os.getcwd(), 'keywords.json')
+# 配置文件路径 - 兼容Linux和Windows（延迟初始化）
+CONFIG_FILE = None
+RULES_FILE = None
+
+def get_config_file_path(filename):
+    """获取配置文件路径，确保跨平台兼容"""
+    app_root = get_app_root()
+    return os.path.join(app_root, filename)
+
+def init_config_paths():
+    """初始化配置文件路径"""
+    global CONFIG_FILE, RULES_FILE
+    if CONFIG_FILE is None:
+        CONFIG_FILE = get_config_file_path('config.json')
+    if RULES_FILE is None:
+        RULES_FILE = get_config_file_path('keywords.json')
 
 class BilibiliAPI:
     def __init__(self, sessdata, bili_jct):
@@ -515,24 +528,37 @@ def add_log(message, log_type='info'):
 def load_config():
     """加载配置"""
     global config
+    init_config_paths()  # 确保路径已初始化
+    
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
+                loaded_config = json.load(f)
+                config.update(loaded_config)
+            logger.info(f"成功加载配置文件: {CONFIG_FILE}")
         except Exception as e:
             logger.error(f"加载配置失败: {e}")
+            add_log(f"加载配置失败: {e}", 'error')
+    else:
+        logger.info(f"配置文件不存在，使用默认配置: {CONFIG_FILE}")
 
 def save_config():
     """保存配置"""
     try:
+        init_config_paths()  # 确保路径已初始化
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
+        logger.info(f"成功保存配置文件: {CONFIG_FILE}")
     except Exception as e:
         logger.error(f"保存配置失败: {e}")
+        add_log(f"保存配置失败: {e}", 'error')
 
 def load_rules():
     """加载关键词规则"""
     global rules
+    init_config_paths()  # 确保路径已初始化
+    logger.info(f"尝试加载关键词文件: {RULES_FILE}")
+    
     if os.path.exists(RULES_FILE):
         try:
             with open(RULES_FILE, 'r', encoding='utf-8') as f:
@@ -542,6 +568,7 @@ def load_rules():
                     precompile_rules()
                     enabled_count = len([r for r in rules if r.get('enabled', True)])
                     add_log(f"成功加载 {len(rules)} 条关键词规则，其中 {enabled_count} 条已启用", 'success')
+                    logger.info(f"成功加载关键词规则: {len(rules)} 条")
                 else:
                     rules = []
                     add_log("关键词文件格式错误，已重置", 'warning')
@@ -551,15 +578,62 @@ def load_rules():
             rules = []
     else:
         rules = []
-        add_log("关键词文件不存在，创建新文件", 'info')
+        add_log(f"关键词文件不存在: {RULES_FILE}，创建新文件", 'info')
+        logger.warning(f"关键词文件不存在: {RULES_FILE}")
 
 def save_rules():
     """保存规则"""
     try:
+        init_config_paths()  # 确保路径已初始化
         with open(RULES_FILE, 'w', encoding='utf-8') as f:
             json.dump(rules, f, ensure_ascii=False, indent=2)
+        logger.info(f"成功保存关键词规则: {RULES_FILE}")
     except Exception as e:
         logger.error(f"保存规则失败: {e}")
+        add_log(f"保存规则失败: {e}", 'error')
+
+def load_rules_from_file(file_path):
+    """从指定文件加载关键词规则"""
+    try:
+        if not os.path.exists(file_path):
+            return None, "文件不存在"
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            loaded_rules = json.load(f)
+        
+        if not isinstance(loaded_rules, list):
+            return None, "文件格式错误：根元素必须是数组"
+        
+        # 验证规则格式
+        valid_rules = []
+        for i, rule in enumerate(loaded_rules):
+            if not isinstance(rule, dict):
+                continue
+            
+            # 检查必需字段
+            if 'keyword' not in rule or 'name' not in rule:
+                continue
+            
+            # 标准化规则格式
+            standardized_rule = {
+                'id': rule.get('id', i + 1),
+                'name': rule.get('name', f'规则{i+1}'),
+                'keyword': rule.get('keyword', ''),
+                'reply': rule.get('reply', ''),
+                'reply_type': rule.get('reply_type', 'text'),
+                'reply_image': rule.get('reply_image', ''),
+                'enabled': rule.get('enabled', True),
+                'use_regex': rule.get('use_regex', False),
+                'created_at': rule.get('created_at', datetime.now().isoformat())
+            }
+            valid_rules.append(standardized_rule)
+        
+        return valid_rules, None
+        
+    except json.JSONDecodeError as e:
+        return None, f"JSON格式错误: {str(e)}"
+    except Exception as e:
+        return None, f"读取文件失败: {str(e)}"
 
 def precompile_rules():
     """预编译规则，提高匹配速度"""
@@ -1435,16 +1509,93 @@ def monitor_messages():
     monitoring = False
     add_log("监控已停止", 'warning')
 
+# 获取应用根目录
+def get_app_root():
+    """获取应用根目录，确保跨平台兼容"""
+    if hasattr(get_app_root, '_cached_root'):
+        return get_app_root._cached_root
+    
+    # 尝试多种方式获取应用根目录
+    possible_roots = [
+        os.getcwd(),  # 当前工作目录
+        os.path.dirname(os.path.abspath(__file__)),  # 脚本所在目录
+        os.path.dirname(os.path.realpath(__file__))  # 脚本真实路径目录
+    ]
+    
+    for root in possible_roots:
+        index_path = os.path.join(root, 'index.html')
+        if os.path.exists(index_path) and os.path.isfile(index_path):
+            get_app_root._cached_root = root
+            logger.info(f"应用根目录: {root}")
+            return root
+    
+    # 如果都找不到，使用当前工作目录
+    get_app_root._cached_root = os.getcwd()
+    logger.warning(f"未找到index.html，使用默认目录: {get_app_root._cached_root}")
+    return get_app_root._cached_root
+
 # 路由定义
 @app.route('/')
 def index():
-    return send_from_directory(os.getcwd(), 'index.html')
+    """主页路由"""
+    try:
+        app_root = get_app_root()
+        index_path = os.path.join(app_root, 'index.html')
+        
+        logger.info(f"尝试访问主页，根目录: {app_root}")
+        logger.info(f"index.html路径: {index_path}")
+        logger.info(f"文件是否存在: {os.path.exists(index_path)}")
+        
+        if os.path.exists(index_path) and os.path.isfile(index_path):
+            return send_from_directory(app_root, 'index.html')
+        else:
+            error_msg = f"index.html not found in {app_root}"
+            logger.error(error_msg)
+            # 列出目录内容用于调试
+            try:
+                files = os.listdir(app_root)
+                logger.info(f"目录内容: {files}")
+                return f"{error_msg}<br>目录内容: {', '.join(files)}", 404
+            except Exception as list_e:
+                logger.error(f"无法列出目录内容: {list_e}")
+                return error_msg, 404
+                
+    except Exception as e:
+        logger.error(f"访问主页失败: {e}")
+        return f"Error loading index.html: {str(e)}", 500
 
 @app.route('/<path:filename>')
 def static_files(filename):
-    if '..' in filename or filename.startswith('/'):
-        return "Access denied", 403
-    return send_from_directory(os.getcwd(), filename)
+    """静态文件服务路由"""
+    try:
+        # 安全检查
+        if '..' in filename or filename.startswith('/') or filename.startswith('\\'):
+            logger.warning(f"拒绝访问不安全路径: {filename}")
+            return "Access denied", 403
+        
+        app_root = get_app_root()
+        # 规范化文件名，兼容Linux和Windows
+        safe_filename = os.path.normpath(filename)
+        file_path = os.path.join(app_root, safe_filename)
+        
+        logger.debug(f"请求文件: {filename}, 完整路径: {file_path}")
+        
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
+            logger.warning(f"文件不存在: {file_path}")
+            return f"File not found: {filename}", 404
+        
+        # 检查是否为文件
+        if not os.path.isfile(file_path):
+            logger.warning(f"路径不是文件: {file_path}")
+            return f"Not a file: {filename}", 404
+        
+        # 发送文件
+        return send_from_directory(app_root, safe_filename)
+        
+    except Exception as e:
+        logger.error(f"静态文件服务错误 {filename}: {e}")
+        return f"Error serving file: {str(e)}", 500
 
 @app.route('/api/config', methods=['GET', 'POST'])
 def handle_config():
@@ -1965,6 +2116,350 @@ def preview_image():
     
     except Exception as e:
         return jsonify({'success': False, 'error': f'预览失败: {str(e)}'})
+
+@app.route('/api/import-config', methods=['POST'])
+def import_config():
+    """导入完整配置包"""
+    global rules
+    try:
+        init_config_paths()
+        
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': '没有上传文件'})
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': '没有选择文件'})
+        
+        # 检查文件类型
+        if not file.filename.lower().endswith('.json'):
+            return jsonify({'success': False, 'error': '只支持JSON格式文件'})
+        
+        # 检查文件大小 (5MB)
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
+        
+        if file_size > 5 * 1024 * 1024:  # 5MB
+            return jsonify({'success': False, 'error': '文件大小不能超过5MB'})
+        
+        # 读取文件内容
+        try:
+            content = file.read().decode('utf-8')
+            imported_data = json.loads(content)
+        except UnicodeDecodeError:
+            return jsonify({'success': False, 'error': '文件编码错误，请使用UTF-8编码'})
+        except json.JSONDecodeError as e:
+            return jsonify({'success': False, 'error': f'JSON格式错误: {str(e)}'})
+        
+        # 获取导入模式
+        import_mode = request.form.get('import_mode', 'replace')
+        
+        # 统一处理：优先处理完整配置文件格式，兼容旧版本仅规则格式
+        imported_config = {}
+        imported_rules = []
+        
+        if 'config' in imported_data and 'rules' in imported_data:
+            # 完整配置文件格式
+            imported_config = imported_data.get('config', {})
+            imported_rules = imported_data.get('rules', [])
+        elif isinstance(imported_data, list):
+            # 兼容旧版本：仅关键词规则文件
+            imported_rules = imported_data
+        else:
+            return jsonify({'success': False, 'error': '不支持的文件格式，请使用包含config和rules的完整配置文件'})
+        
+        # 验证和更新配置
+        global config, rules
+        
+        # 备份当前配置
+        backup_config = config.copy()
+        backup_rules = rules.copy()
+        
+        try:
+            # 更新配置（如果有的话）
+            config_updated = False
+            if imported_config:
+                if import_mode == 'replace':
+                    # 只更新存在的配置项，保持默认值
+                    for key, value in imported_config.items():
+                        if key in config:
+                            config[key] = value
+                            config_updated = True
+                else:  # append模式对配置也是替换
+                    for key, value in imported_config.items():
+                        if key in config:
+                            config[key] = value
+                            config_updated = True
+            
+            # 处理规则
+            valid_rules = []
+            invalid_count = 0
+            
+            for i, rule in enumerate(imported_rules):
+                if not isinstance(rule, dict):
+                    invalid_count += 1
+                    continue
+                
+                # 检查必需字段
+                if 'keyword' not in rule or not rule.get('keyword', '').strip():
+                    invalid_count += 1
+                    continue
+                
+                # 标准化规则格式
+                standardized_rule = {
+                    'id': rule.get('id', int(time.time() * 1000) + i),
+                    'name': rule.get('name', f'导入规则{i+1}'),
+                    'keyword': rule.get('keyword', '').strip(),
+                    'reply': rule.get('reply', ''),
+                    'reply_type': rule.get('reply_type', 'text'),
+                    'reply_image': rule.get('reply_image', ''),
+                    'enabled': rule.get('enabled', True),
+                    'use_regex': rule.get('use_regex', False),
+                    'created_at': rule.get('created_at', datetime.now().isoformat())
+                }
+                valid_rules.append(standardized_rule)
+            
+            # 更新规则
+            if import_mode == 'replace':
+                rules = valid_rules
+                rules_message = f'替换导入 {len(valid_rules)} 条规则'
+            else:  # append
+                existing_keywords = {rule['keyword'] for rule in rules}
+                new_rules = [rule for rule in valid_rules if rule['keyword'] not in existing_keywords]
+                rules.extend(new_rules)
+                rules_message = f'追加导入 {len(new_rules)} 条新规则'
+            
+            # 保存配置和规则
+            if config_updated:
+                save_config()
+            save_rules()
+            precompile_rules()
+            
+            # 记录日志
+            success_msg = f"成功导入配置包: {rules_message}"
+            if config_updated:
+                success_msg += "，配置项已更新"
+            if invalid_count > 0:
+                success_msg += f"，跳过 {invalid_count} 条无效规则"
+            
+            add_log(success_msg, 'success')
+            
+            return jsonify({
+                'success': True,
+                'message': success_msg,
+                'imported_rules': len(valid_rules),
+                'invalid_count': invalid_count,
+                'total_rules': len(rules),
+                'config_updated': config_updated
+            })
+            
+        except Exception as e:
+            # 恢复备份
+            config = backup_config
+            rules = backup_rules
+            raise e
+        
+
+        
+    except Exception as e:
+        error_msg = f"导入失败: {str(e)}"
+        add_log(error_msg, 'error')
+        return jsonify({'success': False, 'error': error_msg})
+
+@app.route('/api/validate-config-file', methods=['POST'])
+def validate_config_file():
+    """验证配置文件格式"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': '没有上传文件'})
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': '没有选择文件'})
+        
+        # 检查文件类型
+        if not file.filename.lower().endswith('.json'):
+            return jsonify({'success': False, 'error': '只支持JSON格式文件'})
+        
+        # 检查文件大小
+        file.seek(0, 2)
+        file_size = file.tell()
+        file.seek(0)
+        
+        if file_size > 5 * 1024 * 1024:  # 5MB
+            return jsonify({'success': False, 'error': '文件大小不能超过5MB'})
+        
+        # 读取文件内容
+        try:
+            content = file.read().decode('utf-8')
+            data = json.loads(content)
+        except UnicodeDecodeError:
+            return jsonify({'success': False, 'error': '文件编码错误，请使用UTF-8编码'})
+        except json.JSONDecodeError as e:
+            return jsonify({'success': False, 'error': f'JSON格式错误: {str(e)}'})
+        
+        # 统一验证文件格式：优先支持完整配置格式，兼容旧版本
+        config_data = {}
+        rules_data = []
+        file_type = 'unknown'
+        
+        if 'config' in data and 'rules' in data:
+            # 完整配置文件格式（推荐）
+            config_data = data.get('config', {})
+            rules_data = data.get('rules', [])
+            file_type = 'complete_config'
+        elif isinstance(data, list):
+            # 兼容旧版本：仅关键词规则文件
+            rules_data = data
+            file_type = 'rules_only'
+        else:
+            return jsonify({'success': False, 'error': '不支持的文件格式，推荐使用包含config和rules的完整配置文件'})
+        
+        # 验证配置项
+        valid_config_keys = []
+        if config_data:
+            for key in config_data.keys():
+                if key in config:  # 检查是否是有效的配置项
+                    valid_config_keys.append(key)
+        
+        # 验证规则
+        valid_rules = 0
+        invalid_rules = 0
+        sample_rules = []
+        
+        for rule in rules_data[:5]:  # 只显示前5条作为示例
+            if isinstance(rule, dict) and 'keyword' in rule and rule.get('keyword', '').strip():
+                valid_rules += 1
+                sample_rules.append({
+                    'name': rule.get('name', '未命名'),
+                    'keyword': rule.get('keyword', ''),
+                    'reply': rule.get('reply', '')[:50] + ('...' if len(rule.get('reply', '')) > 50 else '')
+                })
+            else:
+                invalid_rules += 1
+        
+        # 统计剩余规则
+        for rule in rules_data[5:]:
+            if isinstance(rule, dict) and 'keyword' in rule and rule.get('keyword', '').strip():
+                valid_rules += 1
+            else:
+                invalid_rules += 1
+        
+        return jsonify({
+            'success': True,
+            'file_type': file_type,
+            'file_size': f"{file_size / 1024:.1f} KB",
+            'config_items': len(valid_config_keys),
+            'valid_config_keys': valid_config_keys,
+            'total_rules': len(rules_data),
+            'valid_rules': valid_rules,
+            'invalid_rules': invalid_rules,
+            'sample_rules': sample_rules
+        })
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'验证失败: {str(e)}'})
+
+@app.route('/api/export-config', methods=['GET'])
+def export_config():
+    """导出完整配置包（包含config.json和keywords.json）"""
+    try:
+        init_config_paths()
+        
+        # 创建export目录
+        app_root = get_app_root()
+        export_dir = os.path.join(app_root, 'export')
+        os.makedirs(export_dir, exist_ok=True)
+        
+        # 生成时间戳
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # 准备配置数据
+        config_data = {
+            'version': '1.0',
+            'export_time': datetime.now().isoformat(),
+            'app_name': 'BiliGo',
+            'config': config.copy(),
+            'rules': rules.copy()
+        }
+        
+        # 导出文件路径
+        export_filename = f'biligo_config_{timestamp}.json'
+        export_path = os.path.join(export_dir, export_filename)
+        
+        # 写入文件
+        with open(export_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=2)
+        
+        add_log(f'导出完整配置: {len(rules)} 条规则, 配置文件已保存到 export/{export_filename}', 'success')
+        
+        # 返回文件下载
+        return send_from_directory(
+            export_dir, 
+            export_filename,
+            as_attachment=True,
+            download_name=export_filename,
+            mimetype='application/json'
+        )
+        
+    except Exception as e:
+        error_msg = f"导出配置失败: {str(e)}"
+        add_log(error_msg, 'error')
+        return jsonify({'success': False, 'error': error_msg})
+
+@app.route('/api/export-keywords', methods=['GET'])
+def export_keywords():
+    """导出完整配置包（包含config和keywords，统一格式）"""
+    try:
+        init_config_paths()
+        
+        # 创建export目录
+        app_root = get_app_root()
+        export_dir = os.path.join(app_root, 'export')
+        os.makedirs(export_dir, exist_ok=True)
+        
+        # 生成时间戳
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # 准备配置数据（统一格式：包含config和keywords）
+        config_data = {
+            'version': '1.0',
+            'export_time': datetime.now().isoformat(),
+            'app_name': 'BiliGo',
+            'config': config.copy(),
+            'rules': rules.copy()
+        }
+        
+        # 导出文件路径
+        export_filename = f'biligo_config_{timestamp}.json'
+        export_path = os.path.join(export_dir, export_filename)
+        
+        # 写入文件
+        with open(export_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=2)
+        
+        add_log(f'导出完整配置: {len(rules)} 条规则和配置项，文件已保存到 export/{export_filename}', 'success')
+        
+        # 返回文件下载
+        return send_from_directory(
+            export_dir, 
+            export_filename,
+            as_attachment=True,
+            download_name=export_filename,
+            mimetype='application/json'
+        )
+        
+    except Exception as e:
+        error_msg = f"导出失败: {str(e)}"
+        add_log(error_msg, 'error')
+        return jsonify({'success': False, 'error': error_msg})
+
+@app.route('/api/validate-keywords-file', methods=['POST'])
+def validate_keywords_file():
+    """验证配置文件格式（统一使用validate-config-file接口）"""
+    # 重定向到统一的配置文件验证接口
+    return validate_config_file()
 
 if __name__ == '__main__':
     load_rules()
