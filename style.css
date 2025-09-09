@@ -1375,3 +1375,133 @@ footer a:hover {
         max-height: 100px;
     }
 }
+
+/* 可收纳容器样式 */
+.collapsible-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: var(--transition);
+}
+
+.collapsible-header {
+    padding: 15px 20px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: var(--transition);
+    user-select: none;
+}
+
+.collapsible-header:hover {
+    background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+}
+
+.collapsible-header h3 {
+    color: var(--primary-color);
+    font-size: 16px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.toggle-icon {
+    color: var(--text-light);
+    font-size: 16px;
+    transition: transform 0.3s ease;
+}
+
+.toggle-icon.rotated {
+    transform: rotate(180deg);
+}
+
+.collapsible-content {
+    padding: 20px;
+    border-top: none;
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+    to {
+        opacity: 1;
+        max-height: 500px;
+        padding-top: 20px;
+        padding-bottom: 20px;
+    }
+}
+
+.collapsible-content .form-row {
+    margin-bottom: 15px;
+}
+
+.collapsible-content .help-text {
+    font-size: 13px;
+    color: var(--text-light);
+    margin-top: 5px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.collapsible-content .help-text i {
+    font-size: 12px;
+}
+
+.collapsible-content input[type="number"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    font-size: 14px;
+    transition: var(--transition);
+    background: var(--card-bg);
+}
+
+.collapsible-content input[type="number"]:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(0, 161, 214, 0.1);
+}
+
+.collapsible-content input[type="number"]:hover {
+    border-color: var(--primary-hover);
+}
+
+/* 移动端可收纳容器优化 */
+@media (max-width: 768px) {
+    .collapsible-header {
+        padding: 12px 15px;
+    }
+    
+    .collapsible-header h3 {
+        font-size: 15px;
+    }
+    
+    .collapsible-content {
+        padding: 15px;
+    }
+    
+    .collapsible-content .form-row {
+        margin-bottom: 12px;
+    }
+    
+    .collapsible-content .help-text {
+        font-size: 12px;
+    }
+    
+    .toggle-icon {
+        font-size: 14px;
+    }
+}

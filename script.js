@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initReplyTypeHandlers();
     loadNewMessageConfig();
     loadFollowCheckIntervalConfig();
+    loadTimingConfig();
 });
 
 // 全局变量
@@ -1808,5 +1809,125 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
+
+// ==================== 时间间隔配置功能 ====================
+
+// 切换时间间隔配置容器
+function toggleTimingConfig() {
+    const content = document.getElementById('timing-config-content');
+    const icon = document.getElementById('timing-toggle-icon');
+    
+    if (content.style.display === 'none' || content.style.display === '') {
+        content.style.display = 'block';
+        icon.classList.add('rotated');
+        
+        // 保存展开状态到本地存储
+        localStorage.setItem('timing-config-expanded', 'true');
+    } else {
+        content.style.display = 'none';
+        icon.classList.remove('rotated');
+        
+        // 保存收起状态到本地存储
+        localStorage.setItem('timing-config-expanded', 'false');
+    }
+}
+
+// 加载时间间隔配置
+function loadTimingConfig() {
+    fetch('/api/timing-config')
+    .then(response => response.json())
+    .then(data => {
+        if (document.getElementById('message-check-interval')) {
+            document.getElementById('message-check-interval').value = data.message_check_interval || 0.05;
+        }
+        if (document.getElementById('send-delay-interval')) {
+            document.getElementById('send-delay-interval').value = data.send_delay_interval || 1.0;
+        }
+        if (document.getElementById('auto-restart-interval')) {
+            document.getElementById('auto-restart-interval').value = data.auto_restart_interval || 300;
+        }
+        
+        // 恢复展开/收起状态
+        const isExpanded = localStorage.getItem('timing-config-expanded') === 'true';
+        const content = document.getElementById('timing-config-content');
+        const icon = document.getElementById('timing-toggle-icon');
+        
+        if (isExpanded && content && icon) {
+            content.style.display = 'block';
+            icon.classList.add('rotated');
+        }
+    })
+    .catch(error => {
+        console.error('加载时间间隔配置失败:', error);
+    });
+}
+
+// 保存时间间隔配置
+function saveTimingConfig() {
+    const messageCheckInterval = parseFloat(document.getElementById('message-check-interval').value);
+    const sendDelayInterval = parseFloat(document.getElementById('send-delay-interval').value);
+    const autoRestartInterval = parseInt(document.getElementById('auto-restart-interval').value);
+    
+    // 验证输入值
+    if (isNaN(messageCheckInterval) || messageCheckInterval < 0.01 || messageCheckInterval > 5) {
+        showToast('消息监测间隔必须在0.01-5秒之间', 'error');
+        return;
+    }
+    
+    if (isNaN(sendDelayInterval) || sendDelayInterval < 0.1 || sendDelayInterval > 10) {
+        showToast('发送等待间隔必须在0.1-10秒之间', 'error');
+        return;
+    }
+    
+    if (isNaN(autoRestartInterval) || autoRestartInterval < 60 || autoRestartInterval > 3600) {
+        showToast('自动重启间隔必须在60-3600秒之间', 'error');
+        return;
+    }
+    
+    // 风控提示
+    if (sendDelayInterval < 1.0) {
+        if (!confirm(`发送间隔设置为${sendDelayInterval}秒可能触发B站风控系统，建议设置为1秒以上。确定要保存吗？`)) {
+            return;
+        }
+    }
+    
+    const configData = {
+        message_check_interval: messageCheckInterval,
+        send_delay_interval: sendDelayInterval,
+        auto_restart_interval: autoRestartInterval
+    };
+    
+    fetch('/api/timing-config', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(configData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('时间间隔配置保存成功', 'success');
+            addLog('时间间隔配置已更新', 'success');
+            
+            // 显示配置提示
+            if (messageCheckInterval <= 0.05) {
+                showToast('✅ 消息监测间隔设置合理，响应速度快', 'success');
+            }
+            if (sendDelayInterval >= 1.0) {
+                showToast('✅ 发送间隔设置合理，有助于避免风控', 'success');
+            } else {
+                showToast('⚠️ 发送间隔较短，请注意风控风险', 'warning');
+            }
+        } else {
+            showToast('保存失败: ' + data.error, 'error');
+            addLog('时间间隔配置保存失败: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        showToast('保存失败: ' + error, 'error');
+        addLog('时间间隔配置保存异常: ' + error, 'error');
+    });
+}
 
 

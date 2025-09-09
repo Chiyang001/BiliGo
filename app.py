@@ -34,7 +34,10 @@ config = {
     'unfollow_reply_type': 'text',  # 取消关注回复类型：'text' 或 'image'
     'unfollow_reply_image': '',  # 取消关注回复图片路径
     'only_reply_new_messages': False,  # 是否仅回复新消息（程序启动后的消息）
-    'follow_check_interval': 30  # 检查关注者的间隔（秒）- 建议不少于30秒避免触发风控
+    'follow_check_interval': 30,  # 检查关注者的间隔（秒）
+    'message_check_interval': 0.05,  # 消息监测间隔（秒）
+    'send_delay_interval': 1.0,  # 发送消息等待间隔（秒）
+    'auto_restart_interval': 300  # 自动重启间隔（秒）
 }
 from flask import Flask, render_template, request, jsonify, send_from_directory
 import json
@@ -158,14 +161,15 @@ class BilibiliAPI:
             return None
     
     def send_msg(self, receiver_id, msg_type=1, content=""):
-        """发送私信（固定1秒间隔版）"""
+        """发送私信（可配置间隔版）"""
         global last_send_time
         
         current_time = time.time()
         
-        # 固定1秒发送间隔
-        if current_time - last_send_time < 1.0:
-            wait_time = 1.0 - (current_time - last_send_time)
+        # 使用配置中的发送间隔
+        send_interval = config.get('send_delay_interval', 1.0)
+        if current_time - last_send_time < send_interval:
+            wait_time = send_interval - (current_time - last_send_time)
             add_log(f"发送间隔控制，等待 {wait_time:.1f} 秒", 'info')
             time.sleep(wait_time)
         
@@ -195,9 +199,9 @@ class BilibiliAPI:
             
             # 简单的结果处理
             if result.get('code') == -412:
-                add_log(f"触发频率限制，但保持1秒间隔继续运行", 'warning')
+                add_log(f"触发频率限制，但保持发送间隔继续运行", 'warning')
             elif result.get('code') == -101:
-                add_log("登录状态失效", 'error')
+                add_log("登录状态失效，请重新配置登录信息", 'error')
             elif result.get('code') != 0:
                 add_log(f"发送失败: {result.get('message', '未知错误')}", 'warning')
             
@@ -658,12 +662,23 @@ def precompile_rules():
             }
 
 def check_keywords_fast(message):
-    """极速关键词匹配"""
-    message_lower = message.lower()
+    """极速关键词匹配（优化版）"""
+    if not message or not rule_matcher_cache:
+        return None
     
+    message_lower = message.lower().strip()
+    if not message_lower:
+        return None
+    
+    # 使用更高效的匹配算法
     for rule_id, rule_data in rule_matcher_cache.items():
-        for keyword in rule_data['keywords']:
-            if keyword in message_lower:
+        keywords = rule_data['keywords']
+        if not keywords:
+            continue
+            
+        # 优先匹配较长的关键词，提高准确性
+        for keyword in sorted(keywords, key=len, reverse=True):
+            if keyword and keyword in message_lower:
                 return rule_data
     return None
 
@@ -715,7 +730,7 @@ def cleanup_cache():
     global message_cache, last_message_times
     current_time = int(time.time())
     
-    # 更激进的缓存清理策略 - 只保留30分钟内的消息缓存
+    # 更激进的缓存清理策略 - 只保留15分钟内的消息缓存，提高内存效率
     old_cache = {}
     cleaned_count = 0
     for msg_id in list(message_cache.keys()):
@@ -724,7 +739,7 @@ def cleanup_cache():
             parts = msg_id.split('_')
             if len(parts) >= 2:
                 msg_time = int(parts[1])
-                if current_time - msg_time < 1800:  # 只保留30分钟内的
+                if current_time - msg_time < 900:  # 只保留15分钟内的，减少内存占用
                     old_cache[msg_id] = message_cache[msg_id]
                 else:
                     cleaned_count += 1
@@ -736,11 +751,11 @@ def cleanup_cache():
     
     # 不清理时间记录，保持会话连续性
     # 但限制缓存大小，防止内存泄漏
-    if len(message_cache) > 1000:
-        # 如果缓存过大，只保留最新的500条
+    if len(message_cache) > 300:
+        # 进一步减少消息缓存大小，只保留最新的200条，大幅提高内存效率
         sorted_items = sorted(message_cache.items(), key=lambda x: x[0])
-        message_cache = dict(sorted_items[-500:])
-        add_log("缓存过大，已清理到最新500条", 'warning')
+        message_cache = dict(sorted_items[-200:])
+        add_log("缓存过大，已清理到最新200条", 'warning')
     
     # 强制垃圾回收
     import gc
@@ -766,8 +781,8 @@ def check_followers_changes(api):
         if not config.get('follow_reply_enabled', False) and not config.get('unfollow_reply_enabled', False):
             return {'new_followers': [], 'unfollowers': []}
         
-        # 获取最近的关注者（优化数量以平衡速度和准确性）
-        recent_followers = api.get_recent_followers(limit=20)
+        # 获取最近的关注者（进一步优化数量，减少API负担，提高响应速度）
+        recent_followers = api.get_recent_followers(limit=15)
         if not recent_followers:
             return {'new_followers': [], 'unfollowers': []}
         
@@ -848,18 +863,19 @@ def check_followers_changes(api):
             # 4. 更新关注者缓存（在所有检测完成后）
             followers_cache = current_followers.copy()
             
-            # 动态缓存管理，保持最佳性能
-            if len(followers_cache) > 300:
-                # 只保留最新的200个关注者，确保快速检索
-                followers_cache = set(list(followers_cache)[-200:])
+            # 优化缓存管理，减少内存占用并提高性能
+            if len(followers_cache) > 200:
+                # 只保留最新的150个关注者，减少内存占用
+                followers_cache = set(list(followers_cache)[-150:])
             
-            if len(unfollowers_cache) > 500:
-                unfollowers_cache = set(list(unfollowers_cache)[-300:])
+            if len(unfollowers_cache) > 300:
+                # 减少取消关注缓存大小
+                unfollowers_cache = set(list(unfollowers_cache)[-200:])
             
-            if len(follow_history) > 1000:
-                # 按时间排序，只保留最新的500条记录
+            if len(follow_history) > 500:
+                # 按时间排序，只保留最新的300条记录，减少内存占用
                 sorted_history = sorted(follow_history.items(), key=lambda x: x[1], reverse=True)
-                follow_history = dict(sorted_history[:500])
+                follow_history = dict(sorted_history[:300])
             
             return {'new_followers': new_followers, 'unfollowers': unfollowers}
         
@@ -1098,7 +1114,7 @@ def monitor_messages():
                 retry_count += 1
                 if retry_count < max_retries:
                     add_log(f"重试获取用户信息 ({retry_count}/{max_retries})", 'warning')
-                    time.sleep(1)  # 缩短用户信息重试等待时间
+                    time.sleep(0.3)  # 进一步缩短用户信息重试等待时间
                     continue
                 else:
                     monitoring = False
@@ -1174,7 +1190,7 @@ def monitor_messages():
                         except Exception as e:
                             add_log(f"获取会话列表尝试 {attempt+1}/3 失败: {e}", 'warning')
                             if attempt < 2:
-                                time.sleep(1)
+                                time.sleep(0.3)  # 优化系统稳定等待时间
                     
                     if not sessions_data:
                         consecutive_errors += 1
@@ -1205,6 +1221,17 @@ def monitor_messages():
                         continue
                     
                     consecutive_errors = 0  # 重置连续错误计数
+                    
+                    # 定期缓存清理，避免长时间运行内存负荷过大
+                    if current_time % 300 == 0:  # 每5分钟清理一次
+                        try:
+                            cleanup_cache()
+                            # 强制垃圾回收
+                            import gc
+                            gc.collect()
+                            add_log("定期缓存清理完成，内存优化", 'info')
+                        except Exception as e:
+                            add_log(f"定期缓存清理异常: {e}", 'warning')
                     
                     # 初始化本轮回复计数
                     reply_count = 0
@@ -1247,7 +1274,7 @@ def monitor_messages():
                     
                     sessions = sessions_data.get('data', {}).get('session_list', [])
                     if not sessions:
-                        time.sleep(0.5)
+                        time.sleep(0.2)
                         continue
                     
                     # 按最后消息时间排序
@@ -1325,8 +1352,9 @@ def monitor_messages():
                                         reply_result = api.send_msg(result['talker_id'], content=result['rule']['reply'])
                                     
                                     if reply_result and reply_result.get('code') == 0:
-                                        # 验证发送是否真正成功
-                                        time.sleep(0.1)  # 缩短消息发送完成等待时间
+                                        # 验证发送是否真正成功（优化等待时间）
+                                        verification_wait = config.get('message_check_interval', 0.05) * 0.5
+                                        time.sleep(max(0.01, verification_wait))  # 动态调整验证等待时间
                                         try:
                                             verification_success = api.verify_message_sent(result['talker_id'], reply_content)
                                         except Exception as e:
@@ -1377,9 +1405,10 @@ def monitor_messages():
                         last_reply_time = int(time.time())  # 更新最后回复时间
                         add_log(f"📊 本轮回复了 {reply_count} 条消息，总计处理 {processed_count} 条", 'info')
                     
-                    # 检查是否需要自动重启（5秒无回复）
+                    # 检查是否需要自动重启（可配置间隔）
                     current_time_check = int(time.time())
-                    if current_time_check - last_reply_time >= 5:
+                    restart_interval = config.get('auto_restart_interval', 300)
+                    if current_time_check - last_reply_time >= restart_interval:
                         add_log(f"🔄 已连续 {current_time_check - last_reply_time} 秒无回复消息，执行自动重启", 'warning')
                         
                         # 增强的重启机制
@@ -1420,10 +1449,10 @@ def monitor_messages():
                                             break
                                         else:
                                             add_log(f"API测试失败，尝试 {api_attempt + 1}/3", 'warning')
-                                            time.sleep(0.5)  # 缩短API测试失败等待时间
+                                            time.sleep(0.2)  # 进一步缩短API测试失败等待时间
                                     except Exception as api_e:
                                         add_log(f"API创建失败 {api_attempt + 1}/3: {api_e}", 'warning')
-                                        time.sleep(0.5)  # 缩短API创建失败等待时间
+                                        time.sleep(0.2)  # 进一步缩短API创建失败等待时间
                                 
                                 if not api_created:
                                     raise Exception("无法创建有效的API连接")
@@ -1437,10 +1466,10 @@ def monitor_messages():
                                             break
                                         else:
                                             add_log(f"获取用户信息失败，尝试 {uid_attempt + 1}/3", 'warning')
-                                            time.sleep(0.3)  # 缩短获取用户信息失败等待时间
+                                            time.sleep(0.1)  # 进一步缩短获取用户信息失败等待时间
                                     except Exception as uid_e:
                                         add_log(f"获取用户信息异常 {uid_attempt + 1}/3: {uid_e}", 'warning')
-                                        time.sleep(0.3)  # 缩短获取用户信息异常等待时间
+                                        time.sleep(0.1)  # 进一步缩短获取用户信息异常等待时间
                                 
                                 if not my_uid:
                                     raise Exception("无法获取用户信息，可能是登录状态失效")
@@ -1461,7 +1490,7 @@ def monitor_messages():
                                 add_log(f"重启尝试 {restart_attempts} 失败: {e}", 'error')
                                 if restart_attempts < max_restart_attempts:
                                     add_log(f"等待 {restart_attempts} 秒后重试", 'info')
-                                    time.sleep(restart_attempts)  # 缩短重启等待时间
+                                    time.sleep(min(restart_attempts * 0.5, 2))  # 大幅缩短重启等待时间，最多2秒
                         
                         # 如果重启失败，停止监控
                         if not restart_success:
@@ -1469,9 +1498,10 @@ def monitor_messages():
                             monitoring = False
                             break
                     
-                    # 固定循环间隔 - 缩短间隔实现秒回复
+                    # 可配置循环间隔 - 实现快速响应
                     elapsed = time.time() - loop_start
-                    sleep_time = max(0.1, 0.2 - elapsed)  # 缩短循环间隔实现更快响应
+                    check_interval = config.get('message_check_interval', 0.05)
+                    sleep_time = max(0.01, check_interval - elapsed)
                     time.sleep(sleep_time)
                     
                 except KeyboardInterrupt:
@@ -1492,16 +1522,16 @@ def monitor_messages():
                         except Exception as init_e:
                             add_log(f"系统重新初始化失败: {init_e}", 'error')
                             break
-                        time.sleep(1)  # 缩短系统重新初始化后的等待时间
+                        time.sleep(0.3)  # 进一步缩短系统重新初始化后的等待时间
                     else:
-                        time.sleep(0.5)  # 缩短一般错误的等待时间
+                        time.sleep(0.2)  # 进一步缩短一般错误的等待时间
         
         except Exception as e:
             add_log(f"监控系统异常: {e}", 'error')
             retry_count += 1
             if retry_count < max_retries and monitoring:
                 add_log(f"尝试重新启动监控系统 ({retry_count}/{max_retries})", 'warning')
-                time.sleep(3)  # 缩短监控系统重启等待时间
+                time.sleep(1)  # 大幅缩短监控系统重启等待时间
             else:
                 break
     
@@ -2055,6 +2085,81 @@ def handle_follow_check_interval_config():
         # GET请求，返回当前配置
         return jsonify({
             'follow_check_interval': config.get('follow_check_interval', 30)
+        })
+
+@app.route('/api/timing-config', methods=['GET', 'POST'])
+def handle_timing_config():
+    """处理时间间隔配置"""
+    global config
+    
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        # 验证和更新消息监测间隔
+        if 'message_check_interval' in data:
+            try:
+                interval = float(data['message_check_interval'])
+                if interval < 0.01:
+                    return jsonify({'success': False, 'error': '消息监测间隔不能少于0.01秒'})
+                elif interval > 5.0:
+                    return jsonify({'success': False, 'error': '消息监测间隔不能超过5秒'})
+                
+                old_value = config.get('message_check_interval', 0.05)
+                config['message_check_interval'] = interval
+                
+                if old_value != interval:
+                    add_log(f"消息监测间隔已更新: {old_value}秒 -> {interval}秒", 'success')
+                    
+            except (ValueError, TypeError):
+                return jsonify({'success': False, 'error': '消息监测间隔必须是有效的数字'})
+        
+        # 验证和更新发送等待间隔
+        if 'send_delay_interval' in data:
+            try:
+                interval = float(data['send_delay_interval'])
+                if interval < 0.1:
+                    return jsonify({'success': False, 'error': '发送等待间隔不能少于0.1秒'})
+                elif interval > 10.0:
+                    return jsonify({'success': False, 'error': '发送等待间隔不能超过10秒'})
+                
+                old_value = config.get('send_delay_interval', 1.0)
+                config['send_delay_interval'] = interval
+                
+                if old_value != interval:
+                    add_log(f"发送等待间隔已更新: {old_value}秒 -> {interval}秒", 'success')
+                    if interval < 1.0:
+                        add_log(f"⚠️ 警告：发送间隔设置为{interval}秒，可能触发B站风控系统", 'warning')
+                    
+            except (ValueError, TypeError):
+                return jsonify({'success': False, 'error': '发送等待间隔必须是有效的数字'})
+        
+        # 验证和更新自动重启间隔
+        if 'auto_restart_interval' in data:
+            try:
+                interval = int(data['auto_restart_interval'])
+                if interval < 60:
+                    return jsonify({'success': False, 'error': '自动重启间隔不能少于60秒'})
+                elif interval > 3600:
+                    return jsonify({'success': False, 'error': '自动重启间隔不能超过3600秒（1小时）'})
+                
+                old_value = config.get('auto_restart_interval', 300)
+                config['auto_restart_interval'] = interval
+                
+                if old_value != interval:
+                    add_log(f"自动重启间隔已更新: {old_value}秒 -> {interval}秒", 'success')
+                    
+            except (ValueError, TypeError):
+                return jsonify({'success': False, 'error': '自动重启间隔必须是有效的数字'})
+        
+        save_config()
+        add_log("时间间隔配置已更新", 'success')
+        return jsonify({'success': True})
+    else:
+        # GET请求，返回当前配置
+        return jsonify({
+            'message_check_interval': config.get('message_check_interval', 0.05),
+            'send_delay_interval': config.get('send_delay_interval', 1.0),
+            'auto_restart_interval': config.get('auto_restart_interval', 300)
         })
 
 if __name__ == '__main__':
