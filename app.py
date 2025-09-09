@@ -1098,7 +1098,7 @@ def monitor_messages():
                 retry_count += 1
                 if retry_count < max_retries:
                     add_log(f"重试获取用户信息 ({retry_count}/{max_retries})", 'warning')
-                    time.sleep(5)
+                    time.sleep(1)  # 缩短用户信息重试等待时间
                     continue
                 else:
                     monitoring = False
@@ -1326,7 +1326,7 @@ def monitor_messages():
                                     
                                     if reply_result and reply_result.get('code') == 0:
                                         # 验证发送是否真正成功
-                                        time.sleep(0.5)  # 等待消息发送完成
+                                        time.sleep(0.1)  # 缩短消息发送完成等待时间
                                         try:
                                             verification_success = api.verify_message_sent(result['talker_id'], reply_content)
                                         except Exception as e:
@@ -1420,10 +1420,10 @@ def monitor_messages():
                                             break
                                         else:
                                             add_log(f"API测试失败，尝试 {api_attempt + 1}/3", 'warning')
-                                            time.sleep(2)
+                                            time.sleep(0.5)  # 缩短API测试失败等待时间
                                     except Exception as api_e:
                                         add_log(f"API创建失败 {api_attempt + 1}/3: {api_e}", 'warning')
-                                        time.sleep(2)
+                                        time.sleep(0.5)  # 缩短API创建失败等待时间
                                 
                                 if not api_created:
                                     raise Exception("无法创建有效的API连接")
@@ -1437,10 +1437,10 @@ def monitor_messages():
                                             break
                                         else:
                                             add_log(f"获取用户信息失败，尝试 {uid_attempt + 1}/3", 'warning')
-                                            time.sleep(1)
+                                            time.sleep(0.3)  # 缩短获取用户信息失败等待时间
                                     except Exception as uid_e:
                                         add_log(f"获取用户信息异常 {uid_attempt + 1}/3: {uid_e}", 'warning')
-                                        time.sleep(1)
+                                        time.sleep(0.3)  # 缩短获取用户信息异常等待时间
                                 
                                 if not my_uid:
                                     raise Exception("无法获取用户信息，可能是登录状态失效")
@@ -1460,8 +1460,8 @@ def monitor_messages():
                             except Exception as e:
                                 add_log(f"重启尝试 {restart_attempts} 失败: {e}", 'error')
                                 if restart_attempts < max_restart_attempts:
-                                    add_log(f"等待 {restart_attempts * 2} 秒后重试", 'info')
-                                    time.sleep(restart_attempts * 2)
+                                    add_log(f"等待 {restart_attempts} 秒后重试", 'info')
+                                    time.sleep(restart_attempts)  # 缩短重启等待时间
                         
                         # 如果重启失败，停止监控
                         if not restart_success:
@@ -1469,9 +1469,9 @@ def monitor_messages():
                             monitoring = False
                             break
                     
-                    # 固定循环间隔
+                    # 固定循环间隔 - 缩短间隔实现秒回复
                     elapsed = time.time() - loop_start
-                    sleep_time = max(0.3, 0.5 - elapsed)  # 保持稳定的循环速度
+                    sleep_time = max(0.1, 0.2 - elapsed)  # 缩短循环间隔实现更快响应
                     time.sleep(sleep_time)
                     
                 except KeyboardInterrupt:
@@ -1492,16 +1492,16 @@ def monitor_messages():
                         except Exception as init_e:
                             add_log(f"系统重新初始化失败: {init_e}", 'error')
                             break
-                        time.sleep(5)
+                        time.sleep(1)  # 缩短系统重新初始化后的等待时间
                     else:
-                        time.sleep(2)
+                        time.sleep(0.5)  # 缩短一般错误的等待时间
         
         except Exception as e:
             add_log(f"监控系统异常: {e}", 'error')
             retry_count += 1
             if retry_count < max_retries and monitoring:
                 add_log(f"尝试重新启动监控系统 ({retry_count}/{max_retries})", 'warning')
-                time.sleep(10)  # 等待更长时间再重试
+                time.sleep(3)  # 缩短监控系统重启等待时间
             else:
                 break
     
