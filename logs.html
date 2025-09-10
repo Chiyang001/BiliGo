@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统日志 - BiliGo</title>
+    <link rel="stylesheet" href="logs_style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" crossorigin="anonymous">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <i class="fas fa-chart-line"></i>
+                <div>
+                    <h1>系统日志</h1>
+                    <div class="subtitle">BiliGo 运行日志监控</div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn-switch" onclick="goToMessageMode()">
+                    <i class="fas fa-envelope"></i>
+                    私信模式
+                </button>
+                <button class="btn-switch" onclick="goToCommentMode()">
+                    <i class="fas fa-comments"></i>
+                    评论模式
+                </button>
+                <div class="status-indicator" id="status">
+                    <span class="status-icon">●</span>
+                    <span id="status-text">系统状态</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- 日志控制面板 -->
+            <section class="log-control-panel">
+                <h2><i class="fas fa-cogs"></i>日志控制</h2>
+                <div class="control-row">
+                    <div class="control-group">
+                        <label>日志级别过滤</label>
+                        <div class="filter-buttons">
+                            <button class="filter-btn active" data-level="all">
+                                <i class="fas fa-list"></i>
+                                全部
+                            </button>
+                            <button class="filter-btn" data-level="info">
+                                <i class="fas fa-info-circle"></i>
+                                信息
+                            </button>
+                            <button class="filter-btn" data-level="success">
+                                <i class="fas fa-check-circle"></i>
+                                成功
+                            </button>
+                            <button class="filter-btn" data-level="warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                警告
+                            </button>
+                            <button class="filter-btn" data-level="error">
+                                <i class="fas fa-times-circle"></i>
+                                错误
+                            </button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>日志操作</label>
+                        <div class="button-group">
+                            <button class="btn-secondary" onclick="clearLogs()">
+                                <i class="fas fa-trash"></i>
+                                清空日志
+                            </button>
+
+                            <button class="btn-secondary" onclick="refreshLogs()">
+                                <i class="fas fa-sync-alt"></i>
+                                刷新
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="control-row">
+                    <div class="control-group">
+                        <label>自动刷新</label>
+                        <div class="checkbox-wrapper">
+                            <input type="checkbox" id="autoRefresh" checked>
+                            <label for="autoRefresh">启用自动刷新（每5秒）</label>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>最大显示条数</label>
+                        <select id="maxLogEntries">
+                            <option value="100">100条</option>
+                            <option value="200" selected>200条</option>
+                            <option value="500">500条</option>
+                            <option value="1000">1000条</option>
+                            <option value="-1">不限制</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 日志统计面板 -->
+            <section class="log-stats-panel">
+                <h2><i class="fas fa-chart-bar"></i>日志统计</h2>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-icon info">
+                            <i class="fas fa-info-circle"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number" id="infoCount">0</div>
+                            <div class="stat-label">信息</div>
+                        </div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-icon success">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number" id="successCount">0</div>
+                            <div class="stat-label">成功</div>
+                        </div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-icon warning">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number" id="warningCount">0</div>
+                            <div class="stat-label">警告</div>
+                        </div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-icon error">
+                            <i class="fas fa-times-circle"></i>
+                        </div>
+                        <div class="stat-content">
+                            <div class="stat-number" id="errorCount">0</div>
+                            <div class="stat-label">错误</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 日志显示面板 -->
+            <section class="log-display-panel">
+                <h2>
+                    <i class="fas fa-terminal"></i>
+                    系统日志
+                    <span class="log-count">共 <span id="totalLogCount">0</span> 条</span>
+                </h2>
+                <div class="log-search">
+                    <div class="search-wrapper">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="logSearch" placeholder="搜索日志内容...">
+                        <button class="clear-search" onclick="clearSearch()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="log-container">
+                    <div id="log">
+                        <div class="log-placeholder" id="log-placeholder">
+                            <i class="fas fa-spinner fa-spin"></i>
+                            <p>正在加载日志数据...</p>
+                            <small>请稍候，正在连接服务器</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="log-footer">
+                    <div class="log-info">
+                        <span>最后更新：<span id="lastUpdate">--</span></span>
+                        <span>|</span>
+                        <span>显示：<span id="displayedCount">0</span> / <span id="totalCount">0</span></span>
+                    </div>
+                    <button class="btn-secondary btn-sm" onclick="scrollToBottom()">
+                        <i class="fas fa-arrow-down"></i>
+                        滚动到底部
+                    </button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Toast 容器 -->
+    <div id="toast-container"></div>
+
+    <script src="logs_script.js"></script>
+</body>
+</html>

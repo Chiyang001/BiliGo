@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="format-detection" content="telephone=no">
+    <title>BiliGo - B站私信自动回复系统</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 提示消息 -->
+    <div id="toast-container"></div>
+    
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>BiliGo</h1>
+                <div class="subtitle">B站私信自动回复工具</div>
+            </div>
+            <div class="header-actions">
+                <button class="btn-switch btn-primary" onclick="switchToCommentMode()">
+                    <i class="bi bi-chat-dots-fill"></i> 切换到评论回复
+                </button>
+                <div class="status-indicator">
+                    <i class="bi bi-circle-fill status-icon"></i>
+                    <span id="status">未启动</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <section class="control-panel">
+                <h2><i class="bi bi-sliders"></i> 系统控制</h2>
+                <div class="button-group">
+                    <button id="start-btn" class="btn-primary" onclick="startMonitoring()">
+                        <i class="bi bi-play-fill"></i> 开始监控
+                    </button>
+                    <button id="stop-btn" class="btn-danger" onclick="stopMonitoring()" disabled>
+                        <i class="bi bi-stop-fill"></i> 停止监控
+                    </button>
+                </div>
+                
+                <!-- 时间间隔配置 - 可收纳容器 -->
+                <div class="collapsible-section" style="margin-top: 20px;">
+                    <div class="collapsible-header" onclick="toggleTimingConfig()">
+                        <h3><i class="bi bi-clock-fill"></i> 时间间隔配置</h3>
+                        <i class="bi bi-chevron-down toggle-icon" id="timing-toggle-icon"></i>
+                    </div>
+                    
+                    <div class="collapsible-content" id="timing-config-content" style="display: none;">
+                        <div class="form-row">
+                            <label for="message-check-interval">消息监测间隔 (秒):</label>
+                            <input type="number" id="message-check-interval" min="0.01" max="5" step="0.01" value="0.05" placeholder="0.05">
+                            <p class="help-text">控制检查新消息的频率，越小响应越快，建议0.05秒</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="send-delay-interval">发送等待间隔 (秒):</label>
+                            <input type="number" id="send-delay-interval" min="0.1" max="10" step="0.1" value="1.0" placeholder="1.0">
+                            <p class="help-text">
+                                <i class="bi bi-exclamation-triangle-fill" style="color: #ff6b6b;"></i>
+                                两次发送消息之间的等待时间，建议1秒以上避免触发风控
+                            </p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="auto-restart-interval">自动重启间隔 (秒):</label>
+                            <input type="number" id="auto-restart-interval" min="60" max="3600" step="1" value="300" placeholder="300">
+                            <p class="help-text">无消息回复时自动重启系统的时间间隔，建议300秒（5分钟）</p>
+                        </div>
+                        
+                        <button class="btn-primary" onclick="saveTimingConfig()">
+                            <i class="bi bi-save-fill"></i> 保存时间配置
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="form-row" style="margin-top: 20px;">
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="only-reply-new-messages">
+                        <label for="only-reply-new-messages">仅回复新消息</label>
+                    </div>
+                    <p class="help-text">启用后，只会回复程序启动之后收到的消息，不会回复启动前的历史消息</p>
+                </div>
+                
+                <button class="btn-secondary" onclick="saveNewMessageConfig()" style="margin-top: 10px;">
+                    <i class="bi bi-save-fill"></i> 保存消息设置
+                </button>
+                
+                <div class="button-group" style="margin-top: 20px;">
+                    <button class="btn-secondary" onclick="exportConfig()" title="导出完整配置包">
+                        <i class="bi bi-download"></i> 导出配置
+                    </button>
+                    <button class="btn-primary" onclick="openImportModal()" title="导入完整配置包">
+                        <i class="bi bi-upload"></i> 导入配置
+                    </button>
+                </div>
+            </section>
+
+            <section class="config-panel">
+                <h2><i class="bi bi-gear-fill"></i> 登录配置</h2>
+                <div class="form-row">
+                    <label for="sessdata">SESSDATA:</label>
+                    <div class="input-wrapper">
+                        <i class="bi bi-key-fill"></i>
+                        <input type="password" id="sessdata" placeholder="请输入B站SESSDATA">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <label for="bili_jct">bili_jct:</label>
+                    <div class="input-wrapper">
+                        <i class="bi bi-shield-lock-fill"></i>
+                        <input type="password" id="bili_jct" placeholder="请输入bili_jct">
+                    </div>
+                </div>
+                <button class="btn-primary" onclick="saveConfig()">
+                    <i class="bi bi-save-fill"></i> 保存配置
+                </button>
+            </section>
+
+            <section class="reply-settings-container">
+                <div class="reply-settings-row">
+                    <div class="default-reply-panel half-width">
+                        <h2><i class="bi bi-chat-dots-fill"></i> 默认回复设置</h2>
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="default-reply-enabled">
+                                <label for="default-reply-enabled">启用默认回复</label>
+                            </div>
+                            <p class="help-text">当用户消息未匹配任何关键词时，自动回复默认消息</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label>回复类型:</label>
+                            <div class="radio-group">
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="default-reply-text" name="default-reply-type" value="text" checked>
+                                    <label for="default-reply-text">文字回复</label>
+                                </div>
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="default-reply-image" name="default-reply-type" value="image">
+                                    <label for="default-reply-image">图片回复</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="default-text-content" class="form-row">
+                            <label for="default-reply-message">默认回复内容:</label>
+                            <textarea id="default-reply-message" placeholder="请输入默认回复内容，例如：您好，我现在不在，稍后会回复您的消息。"></textarea>
+                        </div>
+                        
+                        <div id="default-image-content" class="form-row" style="display: none;">
+                            <label for="default-reply-image-path">选择图片:</label>
+                            <div class="image-selector">
+                                <input type="text" id="default-reply-image-path" placeholder="请选择图片文件" readonly>
+                                <button type="button" class="btn-secondary" onclick="openImageBrowser('default')">
+                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                </button>
+                            </div>
+                            <div id="default-image-preview" class="image-preview" style="display: none;"></div>
+                        </div>
+                        
+                        <button class="btn-primary" onclick="saveDefaultReply()">
+                            <i class="bi bi-save-fill"></i> 保存默认回复设置
+                        </button>
+                    </div>
+
+                    <div class="follow-reply-panel half-width">
+                        <h2><i class="bi bi-person-plus-fill"></i> 关注后回复设置</h2>
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="follow-reply-enabled">
+                                <label for="follow-reply-enabled">启用关注后自动回复</label>
+                            </div>
+                            <p class="help-text">当有新用户关注时，自动发送欢迎消息</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label>回复类型:</label>
+                            <div class="radio-group">
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="follow-reply-text" name="follow-reply-type" value="text" checked>
+                                    <label for="follow-reply-text">文字回复</label>
+                                </div>
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="follow-reply-image" name="follow-reply-type" value="image">
+                                    <label for="follow-reply-image">图片回复</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="follow-text-content" class="form-row">
+                            <label for="follow-reply-message">欢迎消息内容:</label>
+                            <textarea id="follow-reply-message" placeholder="请输入关注后的欢迎消息，例如：感谢您的关注！欢迎来到我的频道~"></textarea>
+                        </div>
+                        
+                        <div id="follow-image-content" class="form-row" style="display: none;">
+                            <label for="follow-reply-image-path">选择图片:</label>
+                            <div class="image-selector">
+                                <input type="text" id="follow-reply-image-path" placeholder="请选择图片文件" readonly>
+                                <button type="button" class="btn-secondary" onclick="openImageBrowser('follow')">
+                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                </button>
+                            </div>
+                            <div id="follow-image-preview" class="image-preview" style="display: none;"></div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="follow-check-interval">关注者检查间隔 (秒):</label>
+                            <div class="input-wrapper">
+                                <i class="bi bi-clock-fill"></i>
+                                <input type="number" id="follow-check-interval" min="5" max="300" value="30" placeholder="30">
+                            </div>
+                            <p class="help-text">
+                                <i class="bi bi-exclamation-triangle-fill" style="color: #ff6b6b;"></i>
+                                建议设置为30秒以上，间隔过短可能触发B站风控系统导致无法正常检测关注者
+                            </p>
+                        </div>
+                        
+                        <div class="button-group">
+                            <button class="btn-primary" onclick="saveFollowReply()">
+                                <i class="bi bi-save-fill"></i> 保存关注回复设置
+                            </button>
+                            <button class="btn-secondary" onclick="testFollowDetection()">
+                                <i class="bi bi-search"></i> 测试关注者检测
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="unfollow-keyword-container">
+                <div class="unfollow-keyword-row">
+                    <!-- 取消关注回复设置 -->
+                    <div class="unfollow-reply-panel half-width">
+                        <h2><i class="bi bi-person-dash-fill"></i> 取消关注回复设置</h2>
+                        
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="unfollow-reply-enabled">
+                                <label for="unfollow-reply-enabled">启用取消关注自动回复</label>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label>回复类型:</label>
+                            <div class="radio-group">
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="unfollow-reply-text" name="unfollow-reply-type" value="text" checked>
+                                    <label for="unfollow-reply-text">文字回复</label>
+                                </div>
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="unfollow-reply-image" name="unfollow-reply-type" value="image">
+                                    <label for="unfollow-reply-image">图片回复</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="unfollow-text-content" class="form-row">
+                            <label for="unfollow-reply-message">告别消息:</label>
+                            <textarea id="unfollow-reply-message" placeholder="很遗憾看到您取消了关注，希望我们还有机会再见！"></textarea>
+                        </div>
+                        
+                        <div id="unfollow-image-content" class="form-row" style="display: none;">
+                            <label for="unfollow-reply-image-path">选择图片:</label>
+                            <div class="image-selector">
+                                <input type="text" id="unfollow-reply-image-path" placeholder="请选择图片文件" readonly>
+                                <button type="button" class="btn-secondary" onclick="openImageBrowser('unfollow')">
+                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                </button>
+                            </div>
+                            <div id="unfollow-image-preview" class="image-preview" style="display: none;"></div>
+                        </div>
+                        
+                        <button class="btn-primary" onclick="saveUnfollowReplyConfig()">
+                            <i class="bi bi-check-circle-fill"></i> 保存取消关注回复设置
+                        </button>
+                    </div>
+                    
+                    <!-- 关键词回复设置 -->
+                    <div class="keyword-panel half-width">
+                        <h2><i class="bi bi-chat-square-text-fill"></i> 关键词回复设置</h2>
+                        <div class="form-row">
+                            <label for="rule-title">规则标题:</label>
+                            <div class="input-wrapper">
+                                <i class="bi bi-tag-fill"></i>
+                                <input type="text" id="rule-title" placeholder="例如：问候回复、帮助说明">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <label for="keywords">关键词 (用中文逗号分隔):</label>
+                            <div class="input-wrapper">
+                                <i class="bi bi-hash"></i>
+                                <input type="text" id="keywords" placeholder="例如：你好，帮助，问题">
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label>回复类型:</label>
+                            <div class="radio-group">
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="rule-reply-text" name="rule-reply-type" value="text" checked>
+                                    <label for="rule-reply-text">文字回复</label>
+                                </div>
+                                <div class="radio-wrapper">
+                                    <input type="radio" id="rule-reply-image" name="rule-reply-type" value="image">
+                                    <label for="rule-reply-image">图片回复</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="rule-text-content" class="form-row">
+                            <label for="reply">回复内容:</label>
+                            <textarea id="reply" placeholder="请输入回复内容"></textarea>
+                        </div>
+                        
+                        <div id="rule-image-content" class="form-row" style="display: none;">
+                            <label for="rule-reply-image-path">选择图片:</label>
+                            <div class="image-selector">
+                                <input type="text" id="rule-reply-image-path" placeholder="请选择图片文件" readonly>
+                                <button type="button" class="btn-secondary" onclick="openImageBrowser('rule')">
+                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                </button>
+                            </div>
+                            <div id="rule-image-preview" class="image-preview" style="display: none;"></div>
+                        </div>
+                        
+                        <button class="btn-primary" onclick="addRule()">
+                            <i class="bi bi-plus-circle-fill"></i> 添加规则
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="rules-panel">
+                <div class="rules-header">
+                    <h2><i class="bi bi-list-check"></i> 回复规则列表</h2>
+                    <div class="rules-actions">
+                    </div>
+                </div>
+                <div class="pagination">
+                    <button id="prev-page" class="btn-icon" onclick="changePage(-1)" disabled>
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+                    <span id="page-info">第 1 页，共 1 页</span>
+                    <button id="next-page" class="btn-icon" onclick="changePage(1)" disabled>
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+                <div id="rules-list" class="rules-list"></div>
+                <div class="pagination">
+                    <button id="prev-page-bottom" class="btn-icon" onclick="changePage(-1)" disabled>
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+                    <span id="page-info-bottom">第 1 页，共 1 页</span>
+                    <button id="next-page-bottom" class="btn-icon" onclick="changePage(1)" disabled>
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+            </section>
+
+            <section class="log-panel">
+                <h2><i class="bi bi-journal-text"></i> 系统日志</h2>
+                <div class="log-redirect">
+                    <div class="log-redirect-content">
+                        <i class="bi bi-file-earmark-text"></i>
+                        <h3>查看系统日志</h3>
+                        <p>点击下方按钮跳转到专门的日志页面查看详细的系统运行日志</p>
+                        <button class="btn-primary" onclick="goToLogsPage()">
+                            <i class="bi bi-box-arrow-up-right"></i>
+                            打开日志页面
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <footer>
+            <p>© 2025 <a href="https://space.bilibili.com/404891612" target="_blank">炽阳001</a> | BiliGo 自动回复系统</p>
+        </footer>
+    </div>
+
+    <!-- 图片浏览器模态框 -->
+    <div id="image-browser-modal" class="modal">
+        <div class="modal-content image-browser-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-folder2-open"></i> 选择图片</h3>
+                <button class="close-btn" onclick="closeImageBrowser()">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="browser-toolbar">
+                    <div class="current-path">
+                        <i class="bi bi-folder-fill"></i>
+                        <span id="current-path-text">加载中...</span>
+                    </div>
+                    <div class="quick-nav">
+                        <button class="btn-secondary btn-sm" onclick="goToHomeDirectory()">
+                            <i class="bi bi-house-fill"></i> 主目录
+                        </button>
+                    </div>
+                </div>
+                <div id="file-list" class="file-list">
+                    <div class="loading">
+                        <i class="bi bi-arrow-clockwise spin"></i> 加载中...
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeImageBrowser()">
+                    <i class="bi bi-x"></i> 取消
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入关键词规则模态框 -->
+    <div id="import-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-upload"></i> 导入配置包</h3>
+                <button class="close-btn" onclick="closeImportModal()">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label>选择JSON文件:</label>
+                    <div class="file-upload-area" id="file-upload-area">
+                        <input type="file" id="keywords-file" accept=".json" style="display: none;" onchange="handleFileSelect(event)">
+                        <div class="upload-placeholder" onclick="document.getElementById('keywords-file').click()">
+                            <i class="bi bi-cloud-upload-fill"></i>
+                            <p>点击选择文件或拖拽文件到此处</p>
+                            <small>支持 .json 格式，文件大小不超过1MB</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="file-info" class="file-info" style="display: none;">
+                    <div class="file-details">
+                        <i class="bi bi-file-earmark-text-fill"></i>
+                        <div class="file-text">
+                            <strong id="file-name"></strong>
+                            <small id="file-size"></small>
+                        </div>
+                        <button class="btn-icon" onclick="clearSelectedFile()" title="清除选择">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="validation-result" class="validation-result" style="display: none;">
+                    <div class="validation-header">
+                        <i class="bi bi-check-circle-fill text-success"></i>
+                        <span>文件验证结果</span>
+                    </div>
+                    <div class="validation-details">
+                        <p><strong>总规则数:</strong> <span id="total-rules">0</span></p>
+                        <p><strong>有效规则:</strong> <span id="valid-rules" class="text-success">0</span></p>
+                        <p><strong>无效规则:</strong> <span id="invalid-rules" class="text-warning">0</span></p>
+                    </div>
+                    <div id="sample-rules" class="sample-rules">
+                        <h4>规则预览:</h4>
+                        <div id="sample-rules-list"></div>
+                    </div>
+                </div>
+                
+                <div class="form-row" id="import-options" style="display: none;">
+                    <label>导入模式:</label>
+                    <div class="radio-group">
+                        <div class="radio-wrapper">
+                            <input type="radio" id="import-replace" name="import-mode" value="replace" checked>
+                            <label for="import-replace">替换现有规则</label>
+                        </div>
+                        <div class="radio-wrapper">
+                            <input type="radio" id="import-append" name="import-mode" value="append">
+                            <label for="import-append">追加到现有规则</label>
+                        </div>
+                    </div>
+                    <p class="help-text">替换模式会清空现有规则，追加模式会保留现有规则并添加新规则</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="import-btn" class="btn-primary" onclick="importConfig()" disabled>
+                    <i class="bi bi-upload"></i> 导入
+                </button>
+                <button class="btn-secondary" onclick="closeImportModal()">
+                    <i class="bi bi-x"></i> 取消
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑规则模态框 -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-pencil-square"></i> 编辑规则</h3>
+                <button class="close-btn" onclick="closeEditModal()">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label for="edit-rule-title">规则标题:</label>
+                    <div class="input-wrapper">
+                        <i class="bi bi-tag-fill"></i>
+                        <input type="text" id="edit-rule-title" placeholder="例如：问候回复、帮助说明">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <label for="edit-keywords">关键词 (用中文逗号分隔):</label>
+                    <div class="input-wrapper">
+                        <i class="bi bi-hash"></i>
+                        <input type="text" id="edit-keywords" placeholder="例如：你好，帮助，问题">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <label>回复类型:</label>
+                    <div class="radio-group">
+                        <div class="radio-wrapper">
+                            <input type="radio" id="edit-reply-text" name="edit-reply-type" value="text" checked>
+                            <label for="edit-reply-text">文字回复</label>
+                        </div>
+                        <div class="radio-wrapper">
+                            <input type="radio" id="edit-reply-image" name="edit-reply-type" value="image">
+                            <label for="edit-reply-image">图片回复</label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="edit-text-content" class="form-row">
+                    <label for="edit-reply">回复内容:</label>
+                    <textarea id="edit-reply" placeholder="请输入回复内容"></textarea>
+                </div>
+                
+                <div id="edit-image-content" class="form-row" style="display: none;">
+                    <label for="edit-reply-image-path">选择图片:</label>
+                    <div class="image-selector">
+                        <input type="text" id="edit-reply-image-path" placeholder="请选择图片文件" readonly>
+                        <button type="button" class="btn-secondary" onclick="openImageBrowser('edit')">
+                            <i class="bi bi-folder2-open"></i> 选择图片
+                        </button>
+                    </div>
+                    <div id="edit-image-preview" class="image-preview" style="display: none;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="saveEditRule()">
+                    <i class="bi bi-check-lg"></i> 保存
+                </button>
+                <button class="btn-secondary" onclick="closeEditModal()">
+                    <i class="bi bi-x"></i> 取消
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
