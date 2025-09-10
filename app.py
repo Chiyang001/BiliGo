@@ -1537,7 +1537,6 @@ def monitor_messages():
     
     # 确保监控状态正确设置
     monitoring = False
-    add_log("监控已停止", 'warning')
 
 # 获取应用根目录
 def get_app_root():
@@ -2685,6 +2684,9 @@ def add_comment_log(message, log_type='info'):
     # 保持日志数量在合理范围内
     if len(comment_logs) > 200:
         comment_logs = comment_logs[-100:]
+    
+    # 同时添加到系统日志中，以便在系统日志页面显示
+    add_log(f"[评论回复] {message}", log_type)
     
     logger.info(f"[评论回复] {message}")
 
