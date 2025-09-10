@@ -121,7 +121,7 @@ function updateStatus() {
             const statusElement = document.getElementById('status');
             const statusText = document.getElementById('status-text');
             
-            if (data.monitoring) {
+            if (data.system_running) {
                 statusElement.classList.add('active');
                 statusText.textContent = '系统运行中';
             } else {

@@ -1722,9 +1722,9 @@ def stop_monitoring():
 
 @app.route('/api/status')
 def get_status():
-    global monitoring, monitor_thread
+    global monitoring, monitor_thread, comment_monitoring, comment_monitor_thread
     
-    # 检查实际状态，确保状态同步
+    # 检查私信监控实际状态，确保状态同步
     actual_monitoring = monitoring and monitor_thread and monitor_thread.is_alive()
     
     # 如果状态不一致，自动修正
@@ -1733,9 +1733,24 @@ def get_status():
         monitor_thread = None
         add_log("检测到状态不一致，已自动修正", 'warning')
     
+    # 检查评论监控实际状态
+    actual_comment_monitoring = comment_monitoring and comment_monitor_thread and comment_monitor_thread.is_alive()
+    
+    # 如果评论监控状态不一致，自动修正
+    if comment_monitoring and (not comment_monitor_thread or not comment_monitor_thread.is_alive()):
+        comment_monitoring = False
+        comment_monitor_thread = None
+        add_comment_log("检测到评论监控状态不一致，已自动修正", 'warning')
+    
+    # 系统整体运行状态：只要有一个监控在运行就算运行中
+    system_running = actual_monitoring or actual_comment_monitoring
+    
     return jsonify({
         'monitoring': actual_monitoring,
+        'comment_monitoring': actual_comment_monitoring,
+        'system_running': system_running,
         'rules_count': len(rules),
+        'comment_rules_count': len(comment_rules),
         'config_set': bool(config.get('sessdata') and config.get('bili_jct'))
     })
 
