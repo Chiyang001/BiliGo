@@ -716,21 +716,30 @@ function changePage(direction) {
 
 // 开始监控
 function startMonitoring() {
-    fetch('/api/start', {
-        method: 'POST'
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
+    // 同时启动私信监控和评论监控
+    Promise.all([
+        fetch('/api/start', { method: 'POST' }),
+        fetch('/api/comment-start', { method: 'POST' })
+    ])
+    .then(responses => Promise.all(responses.map(r => r.json())))
+    .then(([messageData, commentData]) => {
+        if (messageData.success && commentData.success) {
             isMonitoring = true;
             updateButtonStates();
             updateStatus('监控中...');
-            showToast('开始监控私信', 'success');
-            addLog('开始监控私信', 'success');
+            showToast('开始监控私信和评论', 'success');
+            addLog('开始监控私信和评论', 'success');
+            startLogPolling();
+        } else if (messageData.success) {
+            isMonitoring = true;
+            updateButtonStates();
+            updateStatus('监控中...');
+            showToast('私信监控成功，评论监控失败: ' + commentData.error, 'warning');
+            addLog('私信监控成功，评论监控失败: ' + commentData.error, 'warning');
             startLogPolling();
         } else {
-            showToast('启动失败: ' + data.error, 'error');
-            addLog('启动失败: ' + data.error, 'error');
+            showToast('启动失败: ' + messageData.error, 'error');
+            addLog('启动失败: ' + messageData.error, 'error');
         }
     })
     .catch(error => {
@@ -741,23 +750,28 @@ function startMonitoring() {
 
 // 停止监控
 function stopMonitoring() {
-    fetch('/api/stop', {
-        method: 'POST'
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            isMonitoring = false;
-            updateButtonStates();
-            updateStatus('已停止');
-            showToast('停止监控私信', 'warning');
-            addLog('停止监控私信', 'warning');
+    // 同时停止私信监控和评论监控
+    Promise.all([
+        fetch('/api/stop', { method: 'POST' }),
+        fetch('/api/comment-stop', { method: 'POST' })
+    ])
+    .then(responses => Promise.all(responses.map(r => r.json())))
+    .then(([messageData, commentData]) => {
+        isMonitoring = false;
+        updateButtonStates();
+        updateStatus('已停止');
+        if (messageData.success && commentData.success) {
+            showToast('停止监控私信和评论', 'warning');
+            addLog('停止监控私信和评论', 'warning');
         } else {
-            showToast('停止失败: ' + data.error, 'error');
-            addLog('停止失败: ' + data.error, 'error');
+            showToast('监控已停止（部分可能失败）', 'warning');
+            addLog('监控已停止（部分可能失败）', 'warning');
         }
     })
     .catch(error => {
+        isMonitoring = false;
+        updateButtonStates();
+        updateStatus('已停止');
         showToast('停止失败: ' + error, 'error');
         addLog('停止失败: ' + error, 'error');
     });
