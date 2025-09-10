@@ -1,3 +1,19 @@
 {
-  
+  "default_reply_enabled": false,
+  "default_reply_message": "您好，我现在不在，稍后会回复您的消息。",
+  "default_reply_type": "text",
+  "default_reply_image": "",
+  "follow_reply_enabled": false,
+  "follow_reply_message": "感谢您的关注！欢迎来到我的频道~",
+  "follow_reply_type": "text",
+  "follow_reply_image": "",
+  "unfollow_reply_enabled": false,
+  "unfollow_reply_message": "很遗憾看到您取消了关注，希望我们还有机会再见！",
+  "unfollow_reply_type": "text",
+  "unfollow_reply_image": "",
+  "only_reply_new_messages": false,
+  "follow_check_interval": 30,
+  "message_check_interval": 0.09,
+  "send_delay_interval": 1.0,
+  "auto_restart_interval": 300
 }

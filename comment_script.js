@@ -632,6 +632,8 @@ function checkCommentServerStatus() {
 }
 
 // 轮询评论日志
+let lastCommentLogCount = 0;
+
 function startCommentLogPolling() {
     if (!isCommentMonitoring) return;
     
@@ -639,16 +641,29 @@ function startCommentLogPolling() {
     .then(response => response.json())
     .then(data => {
         if (data.logs && data.logs.length > 0) {
-            data.logs.forEach(logEntry => {
-                addCommentLog(logEntry.message, logEntry.type);
-            });
+            // 只显示新的日志条目
+            if (data.logs.length > lastCommentLogCount) {
+                const newLogs = data.logs.slice(0, data.logs.length - lastCommentLogCount);
+                newLogs.reverse().forEach(logEntry => {
+                    addCommentLog(logEntry.message, logEntry.type);
+                });
+                lastCommentLogCount = data.logs.length;
+            }
+        }
+        
+        // 更新监控状态
+        if (data.monitoring !== isCommentMonitoring) {
+            isCommentMonitoring = data.monitoring;
+            updateCommentButtonStates();
+            updateCommentStatus(data.monitoring ? '监控评论中...' : '未启动');
         }
     })
     .catch(error => {
         console.error('获取评论日志失败:', error);
+        addCommentLog('获取日志失败: ' + error.message, 'error');
     });
     
-    setTimeout(startCommentLogPolling, 3000);
+    setTimeout(startCommentLogPolling, 2000);
 }
 
 // 编辑评论回复规则

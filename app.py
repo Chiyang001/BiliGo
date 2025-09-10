@@ -2797,17 +2797,26 @@ def comment_monitor_worker():
         try:
             if not comment_config.get('sessdata') or not comment_config.get('bili_jct'):
                 add_comment_log("登录配置不完整，停止监控", 'error')
+                comment_monitoring = False
                 break
             
             api = CommentAPI(comment_config['sessdata'], comment_config['bili_jct'])
             my_uid = api.get_my_uid()
             
             if not my_uid:
-                add_comment_log("获取用户信息失败，停止监控", 'error')
-                break
+                add_comment_log("获取用户信息失败，请检查登录配置", 'error')
+                # 不要立即退出，等待下次检查
+                time.sleep(30)
+                continue
             
             # 获取用户最新视频
             videos = api.get_user_videos(my_uid, page=1, page_size=10)
+            add_comment_log(f"获取到 {len(videos)} 个视频", 'info')
+            
+            if not videos:
+                add_comment_log("没有找到视频，等待下次检查", 'info')
+                time.sleep(comment_config.get('comment_check_interval', 30))
+                continue
             
             for video in videos:
                 if not comment_monitoring:
@@ -2818,6 +2827,10 @@ def comment_monitor_worker():
                 
                 # 获取视频评论
                 comments = api.get_video_comments(video_id, page=1, page_size=20)
+                add_comment_log(f"视频《{video_title}》获取到 {len(comments)} 条评论", 'info')
+                
+                if not comments:
+                    continue
                 
                 for comment in comments:
                     if not comment_monitoring:
@@ -2828,14 +2841,18 @@ def comment_monitor_worker():
                     comment_time = comment.get('ctime', 0)
                     commenter_name = comment.get('member', {}).get('uname', '未知用户')
                     
+                    add_comment_log(f"检查评论: {commenter_name} - {comment_content[:30]}...", 'info')
+                    
                     # 检查是否为新评论
                     if comment_config.get('only_reply_new_comments', True):
                         if comment_time < comment_program_start_time:
+                            add_comment_log(f"跳过旧评论: {commenter_name}", 'info')
                             continue
                     
                     # 检查是否已回复过
                     cache_key = f"{video_id}_{comment_id}"
                     if cache_key in comment_cache:
+                        add_comment_log(f"已回复过: {commenter_name}", 'info')
                         continue
                     
                     # 匹配回复规则
@@ -2988,9 +3005,12 @@ def get_comment_status():
 @app.route('/api/comment-logs')
 def get_comment_logs():
     """获取评论回复日志"""
-    # 返回最新的日志
-    recent_logs = comment_logs[-10:] if len(comment_logs) > 10 else comment_logs
-    return jsonify({'logs': recent_logs})
+    # 返回所有日志，按时间倒序
+    return jsonify({
+        'logs': list(reversed(comment_logs)),
+        'total': len(comment_logs),
+        'monitoring': comment_monitoring
+    })
 
 @app.route('/api/import-from-message-config', methods=['POST'])
 def import_from_message_config():

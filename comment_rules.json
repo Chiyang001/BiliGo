@@ -1,3 +1,12 @@
 [
-
+  {
+    "id": 1,
+    "name": "示例规则",
+    "keyword": "你好,hello",
+    "reply": "您好！感谢您的评论，有什么可以帮助您的吗？",
+    "reply_type": "text",
+    "reply_image": "",
+    "enabled": false,
+    "created_at": "2024-01-01T00:00:00"
+  }
 ]
