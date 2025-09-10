@@ -7,5 +7,7 @@
   "default_comment_reply_image": "",
   "comment_check_interval": 10,
   "comment_send_delay": 1,
-  "only_reply_new_comments": true
+  "only_reply_new_comments": true,
+  "max_videos_to_check": 20,
+  "comments_per_video": 10
 }

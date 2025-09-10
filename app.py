@@ -2584,6 +2584,8 @@ comment_config = {
     'default_comment_reply_type': 'text',
     'default_comment_reply_image': '',
     'comment_check_interval': 30,
+    'max_videos_to_check': 20,  # 检查的最大视频数量
+    'comments_per_video': 10,   # 每个视频获取的评论数量
     'comment_send_delay': 2.0,
     'only_reply_new_comments': True
 }
@@ -2738,6 +2740,36 @@ class CommentAPI:
             add_comment_log(f"获取评论失败: {e}", 'error')
             return []
     
+    def get_all_comments(self, uid, max_videos=20, comments_per_video=10):
+        """获取用户所有视频的评论（不分视频）"""
+        all_comments = []
+        try:
+            # 获取用户最新视频
+            videos = self.get_user_videos(uid, page=1, page_size=max_videos)
+            add_comment_log(f"获取到 {len(videos)} 个视频，开始获取所有评论", 'info')
+            
+            for video in videos:
+                video_id = video.get('aid')
+                video_title = video.get('title', '未知视频')
+                
+                # 获取该视频的评论
+                comments = self.get_video_comments(video_id, page=1, page_size=comments_per_video)
+                
+                # 为每个评论添加视频信息
+                for comment in comments:
+                    comment['video_id'] = video_id
+                    comment['video_title'] = video_title
+                    all_comments.append(comment)
+            
+            # 按评论时间排序（最新的在前）
+            all_comments.sort(key=lambda x: x.get('ctime', 0), reverse=True)
+            add_comment_log(f"总共获取到 {len(all_comments)} 条评论", 'info')
+            
+            return all_comments
+        except Exception as e:
+            add_comment_log(f"获取所有评论失败: {e}", 'error')
+            return []
+    
     def reply_comment(self, oid, root_rpid, message="", image_path=""):
         """回复评论"""
         global comment_last_send_time
@@ -2809,95 +2841,84 @@ def comment_monitor_worker():
                 time.sleep(30)
                 continue
             
-            # 获取用户最新视频
-            videos = api.get_user_videos(my_uid, page=1, page_size=10)
-            add_comment_log(f"获取到 {len(videos)} 个视频", 'info')
+            # 获取所有评论（不分视频）
+            max_videos = comment_config.get('max_videos_to_check', 20)
+            comments_per_video = comment_config.get('comments_per_video', 10)
+            all_comments = api.get_all_comments(my_uid, max_videos, comments_per_video)
             
-            if not videos:
-                add_comment_log("没有找到视频，等待下次检查", 'info')
+            if not all_comments:
+                add_comment_log("没有找到评论，等待下次检查", 'info')
                 time.sleep(comment_config.get('comment_check_interval', 30))
                 continue
             
-            for video in videos:
+            for comment in all_comments:
                 if not comment_monitoring:
                     break
                 
-                video_id = video.get('aid')
-                video_title = video.get('title', '未知视频')
+                comment_id = comment.get('rpid')
+                comment_content = comment.get('content', {}).get('message', '')
+                comment_time = comment.get('ctime', 0)
+                commenter_name = comment.get('member', {}).get('uname', '未知用户')
+                video_id = comment.get('video_id')
+                video_title = comment.get('video_title', '未知视频')
                 
-                # 获取视频评论
-                comments = api.get_video_comments(video_id, page=1, page_size=20)
-                add_comment_log(f"视频《{video_title}》获取到 {len(comments)} 条评论", 'info')
+                add_comment_log(f"检查评论: {commenter_name} 在《{video_title}》- {comment_content[:30]}...", 'info')
                 
-                if not comments:
+                # 检查是否为新评论
+                if comment_config.get('only_reply_new_comments', True):
+                    if comment_time < comment_program_start_time:
+                        add_comment_log(f"跳过旧评论: {commenter_name}", 'info')
+                        continue
+                
+                # 检查是否已回复过
+                cache_key = f"{video_id}_{comment_id}"
+                if cache_key in comment_cache:
+                    add_comment_log(f"已回复过: {commenter_name}", 'info')
                     continue
                 
-                for comment in comments:
-                    if not comment_monitoring:
-                        break
-                    
-                    comment_id = comment.get('rpid')
-                    comment_content = comment.get('content', {}).get('message', '')
-                    comment_time = comment.get('ctime', 0)
-                    commenter_name = comment.get('member', {}).get('uname', '未知用户')
-                    
-                    add_comment_log(f"检查评论: {commenter_name} - {comment_content[:30]}...", 'info')
-                    
-                    # 检查是否为新评论
-                    if comment_config.get('only_reply_new_comments', True):
-                        if comment_time < comment_program_start_time:
-                            add_comment_log(f"跳过旧评论: {commenter_name}", 'info')
-                            continue
-                    
-                    # 检查是否已回复过
-                    cache_key = f"{video_id}_{comment_id}"
-                    if cache_key in comment_cache:
-                        add_comment_log(f"已回复过: {commenter_name}", 'info')
+                # 匹配回复规则
+                reply_message = ""
+                reply_image = ""
+                reply_type = "text"
+                matched_rule = None
+                
+                # 检查关键词规则
+                for rule in comment_rules:
+                    if not rule.get('enabled', True):
                         continue
                     
-                    # 匹配回复规则
-                    reply_message = ""
-                    reply_image = ""
-                    reply_type = "text"
-                    matched_rule = None
-                    
-                    # 检查关键词规则
-                    for rule in comment_rules:
-                        if not rule.get('enabled', True):
-                            continue
-                        
-                        keywords = rule.get('keyword', '').split(',')
-                        for keyword in keywords:
-                            keyword = keyword.strip()
-                            if keyword and keyword in comment_content:
-                                reply_message = rule.get('reply', '')
-                                reply_image = rule.get('reply_image', '')
-                                reply_type = rule.get('reply_type', 'text')
-                                matched_rule = rule.get('name', '未命名规则')
-                                break
-                        
-                        if matched_rule:
+                    keywords = rule.get('keyword', '').split(',')
+                    for keyword in keywords:
+                        keyword = keyword.strip()
+                        if keyword and keyword in comment_content:
+                            reply_message = rule.get('reply', '')
+                            reply_image = rule.get('reply_image', '')
+                            reply_type = rule.get('reply_type', 'text')
+                            matched_rule = rule.get('name', '未命名规则')
                             break
                     
-                    # 如果没有匹配规则，使用默认回复
-                    if not matched_rule and comment_config.get('default_comment_reply_enabled', False):
-                        reply_message = comment_config.get('default_comment_reply_message', '')
-                        reply_image = comment_config.get('default_comment_reply_image', '')
-                        reply_type = comment_config.get('default_comment_reply_type', 'text')
-                        matched_rule = "默认回复"
+                    if matched_rule:
+                        break
+                
+                # 如果没有匹配规则，使用默认回复
+                if not matched_rule and comment_config.get('default_comment_reply_enabled', False):
+                    reply_message = comment_config.get('default_comment_reply_message', '')
+                    reply_image = comment_config.get('default_comment_reply_image', '')
+                    reply_type = comment_config.get('default_comment_reply_type', 'text')
+                    matched_rule = "默认回复"
+                
+                # 发送回复
+                if reply_message or reply_image:
+                    if reply_type == 'image' and reply_image:
+                        success = api.reply_comment(video_id, comment_id, reply_message, reply_image)
+                    else:
+                        success = api.reply_comment(video_id, comment_id, reply_message)
                     
-                    # 发送回复
-                    if reply_message or reply_image:
-                        if reply_type == 'image' and reply_image:
-                            success = api.reply_comment(video_id, comment_id, reply_message, reply_image)
-                        else:
-                            success = api.reply_comment(video_id, comment_id, reply_message)
-                        
-                        if success:
-                            comment_cache[cache_key] = True
-                            add_comment_log(f"已回复 {commenter_name} 的评论 (规则: {matched_rule})", 'success')
-                        else:
-                            add_comment_log(f"回复 {commenter_name} 的评论失败", 'error')
+                    if success:
+                        comment_cache[cache_key] = True
+                        add_comment_log(f"已回复 {commenter_name} 在《{video_title}》的评论 (规则: {matched_rule})", 'success')
+                    else:
+                        add_comment_log(f"回复 {commenter_name} 在《{video_title}》的评论失败", 'error')
             
             # 等待下次检查
             check_interval = comment_config.get('comment_check_interval', 30)
