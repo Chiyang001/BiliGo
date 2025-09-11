@@ -19,7 +19,7 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 全局变量
+# 全局变量 - 私信回复系统
 config = {
     'default_reply_enabled': False,
     'default_reply_message': '您好，我现在不在，稍后会回复您的消息。',
@@ -39,31 +39,12 @@ config = {
     'send_delay_interval': 1.0,  # 发送消息等待间隔（秒）
     'auto_restart_interval': 300  # 自动重启间隔（秒）
 }
-from flask import Flask, render_template, request, jsonify, send_from_directory
-import json
-import os
-import threading
-import time
-import requests
-from datetime import datetime
-import logging
-import hashlib
-from collections import defaultdict
-import base64
-import mimetypes
-from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, jsonify, send_from_directory
 
-app = Flask(__name__)
-
-# 配置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
+# 私信回复系统变量
 rules = []
 monitoring = False
 monitor_thread = None
-logs = []
+message_logs = []  # 私信日志
 message_cache = {}
 last_message_times = defaultdict(int)
 rule_matcher_cache = {}
@@ -82,9 +63,13 @@ follow_history = {}  # 关注历史记录 {uid: last_follow_time}
 # 程序启动时间戳（用于仅回复新消息功能）
 program_start_time = int(time.time())
 
-# 配置文件路径 - 兼容Linux和Windows（延迟初始化）
-CONFIG_FILE = None
-RULES_FILE = None
+# 配置文件路径 - 私信系统使用独立配置
+CONFIG_FILE = None  # 私信配置文件路径
+RULES_FILE = None   # 私信规则文件路径
+
+# 评论回复配置文件路径 - 完全独立
+COMMENT_CONFIG_FILE = None  # 评论配置文件路径
+COMMENT_RULES_FILE = None   # 评论规则文件路径
 
 def get_config_file_path(filename):
     """获取配置文件路径，确保跨平台兼容"""
@@ -92,12 +77,20 @@ def get_config_file_path(filename):
     return os.path.join(app_root, filename)
 
 def init_config_paths():
-    """初始化配置文件路径"""
+    """初始化私信系统配置文件路径"""
     global CONFIG_FILE, RULES_FILE
     if CONFIG_FILE is None:
-        CONFIG_FILE = get_config_file_path('config.json')
+        CONFIG_FILE = get_config_file_path('config.json')  # 私信配置
     if RULES_FILE is None:
-        RULES_FILE = get_config_file_path('keywords.json')
+        RULES_FILE = get_config_file_path('keywords.json')  # 私信规则
+
+def init_comment_config_paths():
+    """初始化评论系统配置文件路径"""
+    global COMMENT_CONFIG_FILE, COMMENT_RULES_FILE
+    if COMMENT_CONFIG_FILE is None:
+        COMMENT_CONFIG_FILE = get_config_file_path('comment_config.json')  # 评论配置
+    if COMMENT_RULES_FILE is None:
+        COMMENT_RULES_FILE = get_config_file_path('comment_rules.json')    # 评论规则
 
 class BilibiliAPI:
     def __init__(self, sessdata, bili_jct):
@@ -513,24 +506,33 @@ class BilibiliAPI:
             add_log(f"获取最近关注者异常: {e}", 'error')
             return []
 
-def add_log(message, log_type='info'):
-    """添加日志"""
+def add_log(message, log_type='info', system='message'):
+    """添加日志 - 支持区分私信和评论系统"""
     timestamp = datetime.now().isoformat()
     log_entry = {
         'timestamp': timestamp,
         'message': message,
-        'level': log_type  # 前端期望的字段名是 level 而不是 type
+        'level': log_type,
+        'system': system  # 'message' 表示私信系统, 'comment' 表示评论系统
     }
-    logs.append(log_entry)
     
-    # 限制日志数量
-    if len(logs) > 100:
-        logs.pop(0)
+    if system == 'message':
+        message_logs.append(log_entry)
+        # 限制私信日志数量
+        if len(message_logs) > 100:
+            message_logs.pop(0)
+    elif system == 'comment':
+        comment_logs.append(log_entry)
+        # 限制评论日志数量
+        if len(comment_logs) > 100:
+            comment_logs.pop(0)
     
-    logger.info(f"[{log_type.upper()}] {message}")
+    # 系统日志输出
+    system_prefix = "[私信]" if system == 'message' else "[评论]"
+    logger.info(f"{system_prefix}[{log_type.upper()}] {message}")
 
 def load_config():
-    """加载配置"""
+    """加载私信系统配置"""
     global config
     init_config_paths()  # 确保路径已初始化
     
@@ -539,29 +541,29 @@ def load_config():
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 loaded_config = json.load(f)
                 config.update(loaded_config)
-            logger.info(f"成功加载配置文件: {CONFIG_FILE}")
+            logger.info(f"成功加载私信配置文件: {CONFIG_FILE}")
         except Exception as e:
-            logger.error(f"加载配置失败: {e}")
-            add_log(f"加载配置失败: {e}", 'error')
+            logger.error(f"加载私信配置失败: {e}")
+            add_log(f"加载私信配置失败: {e}", 'error', system='message')
     else:
-        logger.info(f"配置文件不存在，使用默认配置: {CONFIG_FILE}")
+        logger.info(f"私信配置文件不存在，使用默认配置: {CONFIG_FILE}")
 
 def save_config():
-    """保存配置"""
+    """保存私信系统配置"""
     try:
         init_config_paths()  # 确保路径已初始化
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(config, f, ensure_ascii=False, indent=2)
-        logger.info(f"成功保存配置文件: {CONFIG_FILE}")
+        logger.info(f"成功保存私信配置文件: {CONFIG_FILE}")
     except Exception as e:
-        logger.error(f"保存配置失败: {e}")
-        add_log(f"保存配置失败: {e}", 'error')
+        logger.error(f"保存私信配置失败: {e}")
+        add_log(f"保存私信配置失败: {e}", 'error', system='message')
 
 def load_rules():
-    """加载关键词规则"""
+    """加载私信系统关键词规则"""
     global rules
     init_config_paths()  # 确保路径已初始化
-    logger.info(f"尝试加载关键词文件: {RULES_FILE}")
+    logger.info(f"尝试加载私信关键词文件: {RULES_FILE}")
     
     if os.path.exists(RULES_FILE):
         try:
@@ -571,30 +573,30 @@ def load_rules():
                     rules = loaded_rules
                     precompile_rules()
                     enabled_count = len([r for r in rules if r.get('enabled', True)])
-                    add_log(f"成功加载 {len(rules)} 条关键词规则，其中 {enabled_count} 条已启用", 'success')
-                    logger.info(f"成功加载关键词规则: {len(rules)} 条")
+                    add_log(f"成功加载 {len(rules)} 条私信关键词规则，其中 {enabled_count} 条已启用", 'success', system='message')
+                    logger.info(f"成功加载私信关键词规则: {len(rules)} 条")
                 else:
                     rules = []
-                    add_log("关键词文件格式错误，已重置", 'warning')
+                    add_log("私信关键词文件格式错误，已重置", 'warning', system='message')
         except Exception as e:
-            logger.error(f"加载关键词规则失败: {e}")
-            add_log(f"加载关键词规则失败: {e}", 'error')
+            logger.error(f"加载私信关键词规则失败: {e}")
+            add_log(f"加载私信关键词规则失败: {e}", 'error', system='message')
             rules = []
     else:
         rules = []
-        add_log(f"关键词文件不存在: {RULES_FILE}，创建新文件", 'info')
-        logger.warning(f"关键词文件不存在: {RULES_FILE}")
+        add_log(f"私信关键词文件不存在: {RULES_FILE}，创建新文件", 'info', system='message')
+        logger.warning(f"私信关键词文件不存在: {RULES_FILE}")
 
 def save_rules():
-    """保存规则"""
+    """保存私信系统规则"""
     try:
         init_config_paths()  # 确保路径已初始化
         with open(RULES_FILE, 'w', encoding='utf-8') as f:
             json.dump(rules, f, ensure_ascii=False, indent=2)
-        logger.info(f"成功保存关键词规则: {RULES_FILE}")
+        logger.info(f"成功保存私信关键词规则: {RULES_FILE}")
     except Exception as e:
-        logger.error(f"保存规则失败: {e}")
-        add_log(f"保存规则失败: {e}", 'error')
+        logger.error(f"保存私信规则失败: {e}")
+        add_log(f"保存私信规则失败: {e}", 'error', system='message')
 
 def load_rules_from_file(file_path):
     """从指定文件加载关键词规则"""
@@ -1005,7 +1007,7 @@ def process_single_session(api, my_uid, session):
         if config.get('only_reply_new_messages', False):
             # 如果消息时间早于程序启动时间，跳过处理
             if msg_timestamp < program_start_time:
-                add_log(f"用户{talker_id} 消息时间早于程序启动时间，跳过回复（仅回复新消息模式）", 'debug')
+                add_log(f"用户{talker_id} 消息时间早于程序启动时间，跳过回复（仅回复新消息模式）", 'debug', system='message')
                 # 仍然更新最后处理时间，避免重复检查
                 last_message_times[talker_id] = msg_timestamp
                 return []
@@ -1020,7 +1022,7 @@ def process_single_session(api, my_uid, session):
         
         # 如果最后一条消息是我发的，不回复
         if sender_uid == my_uid:
-            add_log(f"用户{talker_id} 最后一条消息是我发的，跳过回复", 'debug')
+            add_log(f"用户{talker_id} 最后一条消息是我发的，跳过回复", 'debug', system='message')
             return []
         
         # 获取消息内容
@@ -1046,7 +1048,7 @@ def process_single_session(api, my_uid, session):
         matched_rule = check_keywords_fast(message_text)
         
         if matched_rule:
-            add_log(f"✅ 检测到关键词匹配: 用户{talker_id} 消息'{message_text}' 匹配规则'{matched_rule['title']}'", 'info')
+            add_log(f"✅ 检测到关键词匹配: 用户{talker_id} 消息'{message_text}' 匹配规则'{matched_rule['title']}'", 'info', system='message')
             return [{
                 'talker_id': talker_id,
                 'rule': matched_rule,
@@ -1059,7 +1061,7 @@ def process_single_session(api, my_uid, session):
                 default_type = config.get('default_reply_type', 'text')
                 
                 if default_type == 'text' and config.get('default_reply_message'):
-                    add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认文字回复", 'info')
+                    add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认文字回复", 'info', system='message')
                     return [{
                         'talker_id': talker_id,
                         'rule': {
@@ -1071,7 +1073,7 @@ def process_single_session(api, my_uid, session):
                         'timestamp': msg_timestamp
                     }]
                 elif default_type == 'image' and config.get('default_reply_image'):
-                    add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认图片回复", 'info')
+                    add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认图片回复", 'info', system='message')
                     return [{
                         'talker_id': talker_id,
                         'rule': {
@@ -1084,7 +1086,7 @@ def process_single_session(api, my_uid, session):
                         'timestamp': msg_timestamp
                     }]
             else:
-                add_log(f"❌ 用户{talker_id} 消息'{message_text}' 未匹配任何关键词", 'debug')
+                add_log(f"❌ 用户{talker_id} 消息'{message_text}' 未匹配任何关键词", 'debug', system='message')
                 return []
         
     except Exception as e:
@@ -1096,7 +1098,7 @@ def monitor_messages():
     global monitoring, message_cache, last_message_times, last_send_time, monitor_thread
     
     if not config.get('sessdata') or not config.get('bili_jct'):
-        add_log("未配置登录信息，无法启动监控", 'error')
+        add_log("未配置登录信息，无法启动监控", 'error', system='message')
         monitoring = False
         return
     
@@ -1110,10 +1112,10 @@ def monitor_messages():
             my_uid = api.get_my_uid()
             
             if not my_uid:
-                add_log("获取用户信息失败，请检查登录配置", 'error')
+                add_log("获取用户信息失败，请检查登录配置", 'error', system='message')
                 retry_count += 1
                 if retry_count < max_retries:
-                    add_log(f"重试获取用户信息 ({retry_count}/{max_retries})", 'warning')
+                    add_log(f"重试获取用户信息 ({retry_count}/{max_retries})", 'warning', system='message')
                     time.sleep(0.3)  # 进一步缩短用户信息重试等待时间
                     continue
                 else:
@@ -1123,7 +1125,7 @@ def monitor_messages():
             # 重置重试计数
             retry_count = 0
             
-            add_log(f"监控已启动，用户UID: {my_uid}", 'success')
+            add_log(f"监控已启动，用户UID: {my_uid}", 'success', system='message')
             
             # 预编译规则
             precompile_rules()
@@ -1150,7 +1152,7 @@ def monitor_messages():
                     
                     # 心跳检测 - 每60秒输出一次状态
                     if current_time - last_heartbeat >= 60:
-                        add_log(f"💓 系统运行正常: 处理{processed_count}条消息, 错误{error_count}次, 活跃会话{len(last_message_times)}个", 'info')
+                        add_log(f"💓 系统运行正常: 处理{processed_count}条消息, 错误{error_count}次, 活跃会话{len(last_message_times)}个", 'info', system='message')
                         last_heartbeat = current_time
                     
                     # 每5分钟强制清理缓存（更频繁清理）
@@ -1159,26 +1161,26 @@ def monitor_messages():
                             cleanup_cache()
                             precompile_rules()
                             last_cleanup = current_time
-                            add_log(f"定期维护: 已处理 {processed_count} 条消息，错误 {error_count} 次，活跃会话 {len(last_message_times)} 个", 'info')
+                            add_log(f"定期维护: 已处理 {processed_count} 条消息，错误 {error_count} 次，活跃会话 {len(last_message_times)} 个", 'info', system='message')
                         except Exception as e:
-                            add_log(f"缓存清理异常: {e}", 'warning')
+                            add_log(f"缓存清理异常: {e}", 'warning', system='message')
                     
                     # 关注者检测已移至主循环，此处不再需要
                     
                     # 每30分钟重新创建API对象，防止连接问题
                     if current_time - last_api_reset > 1800:
                         try:
-                            add_log("重新初始化API连接", 'info')
+                            add_log("重新初始化API连接", 'info', system='message')
                             api = BilibiliAPI(config['sessdata'], config['bili_jct'])
                             # 验证新API对象
                             test_uid = api.get_my_uid()
                             if test_uid:
                                 last_api_reset = current_time
-                                add_log("API重新初始化成功", 'success')
+                                add_log("API重新初始化成功", 'success', system='message')
                             else:
-                                add_log("API重新初始化失败，继续使用旧连接", 'warning')
+                                add_log("API重新初始化失败，继续使用旧连接", 'warning', system='message')
                         except Exception as e:
-                            add_log(f"API重新初始化异常: {e}", 'warning')
+                            add_log(f"API重新初始化异常: {e}", 'warning', system='message')
                     
                     # 获取会话列表 - 增加重试机制
                     sessions_data = None
@@ -1188,34 +1190,34 @@ def monitor_messages():
                             if sessions_data:
                                 break
                         except Exception as e:
-                            add_log(f"获取会话列表尝试 {attempt+1}/3 失败: {e}", 'warning')
+                            add_log(f"获取会话列表尝试 {attempt+1}/3 失败: {e}", 'warning', system='message')
                             if attempt < 2:
                                 time.sleep(0.3)  # 优化系统稳定等待时间
                     
                     if not sessions_data:
                         consecutive_errors += 1
                         if consecutive_errors > 5:
-                            add_log("连续获取会话失败，重新初始化API", 'warning')
+                            add_log("连续获取会话失败，重新初始化API", 'warning', system='message')
                             try:
                                 api = BilibiliAPI(config['sessdata'], config['bili_jct'])
                                 consecutive_errors = 0
                             except Exception as e:
-                                add_log(f"API重新初始化失败: {e}", 'error')
+                                add_log(f"API重新初始化失败: {e}", 'error', system='message')
                         time.sleep(2)
                         continue
                     
                     if sessions_data.get('code') != 0:
                         error_msg = sessions_data.get('message', '未知错误')
-                        add_log(f"API返回错误: {error_msg}", 'warning')
+                        add_log(f"API返回错误: {error_msg}", 'warning', system='message')
                         consecutive_errors += 1
                         
                         # 如果是认证相关错误，重新初始化
                         if sessions_data.get('code') in [-101, -111, -400, -403]:
-                            add_log("认证错误，重新初始化API", 'warning')
+                            add_log("认证错误，重新初始化API", 'warning', system='message')
                             try:
                                 api = BilibiliAPI(config['sessdata'], config['bili_jct'])
                             except Exception as e:
-                                add_log(f"认证错误后API重新初始化失败: {e}", 'error')
+                                add_log(f"认证错误后API重新初始化失败: {e}", 'error', system='message')
                         
                         time.sleep(2)
                         continue
@@ -1229,9 +1231,9 @@ def monitor_messages():
                             # 强制垃圾回收
                             import gc
                             gc.collect()
-                            add_log("定期缓存清理完成，内存优化", 'info')
+                            add_log("定期缓存清理完成，内存优化", 'info', system='message')
                         except Exception as e:
-                            add_log(f"定期缓存清理异常: {e}", 'warning')
+                            add_log(f"定期缓存清理异常: {e}", 'warning', system='message')
                     
                     # 初始化本轮回复计数
                     reply_count = 0
@@ -1634,7 +1636,7 @@ def handle_config():
         data = request.get_json()
         config.update(data)
         save_config()
-        add_log("配置已更新", 'success')
+        add_log("私信系统配置已更新", 'success', system='message')
         return jsonify({'success': True})
     else:
         return jsonify(config)
@@ -1648,7 +1650,7 @@ def handle_rules():
         rules = data.get('rules', [])
         save_rules()
         precompile_rules()
-        add_log("关键词规则已更新并预编译完成", 'success')
+        add_log("私信关键词规则已更新并预编译完成", 'success', system='message')
         return jsonify({'success': True})
     else:
         return jsonify({'rules': rules})
@@ -1694,9 +1696,9 @@ def start_monitoring():
     
     # 根据配置显示不同的启动消息
     if config.get('only_reply_new_messages', False):
-        add_log("开始监控私信（仅回复新消息模式）", 'success')
+        add_log("开始监控私信（仅回复新消息模式）", 'success', system='message')
     else:
-        add_log("开始监控私信", 'success')
+        add_log("开始监控私信", 'success', system='message')
     
     return jsonify({'success': True})
 
@@ -1706,13 +1708,13 @@ def stop_monitoring():
     
     # 强制停止，不管当前状态
     monitoring = False
-    add_log("停止监控私信", 'warning')
+    add_log("停止监控私信", 'warning', system='message')
     
     # 等待线程结束
     if monitor_thread and monitor_thread.is_alive():
         monitor_thread.join(timeout=3)
         if monitor_thread.is_alive():
-            add_log("监控线程未能在3秒内停止，但状态已重置", 'warning')
+            add_log("监控线程未能在3秒内停止，但状态已重置", 'warning', system='message')
     
     # 清理线程引用
     monitor_thread = None
@@ -1721,6 +1723,7 @@ def stop_monitoring():
 
 @app.route('/api/status')
 def get_status():
+    """获取系统状态 - 分离私信和评论监控状态"""
     global monitoring, monitor_thread, comment_monitoring, comment_monitor_thread
     
     # 检查私信监控实际状态，确保状态同步
@@ -1730,7 +1733,7 @@ def get_status():
     if monitoring and (not monitor_thread or not monitor_thread.is_alive()):
         monitoring = False
         monitor_thread = None
-        add_log("检测到状态不一致，已自动修正", 'warning')
+        add_log("检测到私信监控状态不一致，已自动修正", 'warning', system='message')
     
     # 检查评论监控实际状态
     actual_comment_monitoring = comment_monitoring and comment_monitor_thread and comment_monitor_thread.is_alive()
@@ -1739,31 +1742,93 @@ def get_status():
     if comment_monitoring and (not comment_monitor_thread or not comment_monitor_thread.is_alive()):
         comment_monitoring = False
         comment_monitor_thread = None
-        add_comment_log("检测到评论监控状态不一致，已自动修正", 'warning')
+        add_log("检测到评论监控状态不一致，已自动修正", 'warning', system='comment')
     
     # 系统整体运行状态：只要有一个监控在运行就算运行中
     system_running = actual_monitoring or actual_comment_monitoring
     
     return jsonify({
+        'message_monitoring': actual_monitoring,  # 私信监控状态
+        'comment_monitoring': actual_comment_monitoring,  # 评论监控状态
+        'system_running': system_running,  # 整体运行状态
+        'message_rules_count': len(rules),  # 私信规则数量
+        'comment_rules_count': len(comment_rules),  # 评论规则数量
+        'message_config_set': bool(config.get('sessdata') and config.get('bili_jct')),  # 私信配置状态
+        'comment_config_set': bool(comment_config.get('sessdata') and comment_config.get('bili_jct')),  # 评论配置状态
+        # 保持向后兼容
         'monitoring': actual_monitoring,
-        'comment_monitoring': actual_comment_monitoring,
-        'system_running': system_running,
         'rules_count': len(rules),
-        'comment_rules_count': len(comment_rules),
+        'config_set': bool(config.get('sessdata') and config.get('bili_jct'))
+    })
+    
+    return jsonify({
+        'message_monitoring': actual_monitoring,  # 私信监控状态
+        'comment_monitoring': actual_comment_monitoring,  # 评论监控状态
+        'system_running': system_running,  # 整体运行状态
+        'message_rules_count': len(rules),  # 私信规则数量
+        'comment_rules_count': len(comment_rules),  # 评论规则数量
+        'message_config_set': bool(config.get('sessdata') and config.get('bili_jct')),  # 私信配置状态
+        'comment_config_set': bool(comment_config.get('sessdata') and comment_config.get('bili_jct')),  # 评论配置状态
+        # 保持向后兼容
+        'monitoring': actual_monitoring,
+        'rules_count': len(rules),
         'config_set': bool(config.get('sessdata') and config.get('bili_jct'))
     })
 
 @app.route('/api/logs', methods=['GET', 'DELETE'])
 def handle_logs():
-    global logs
+    """处理日志接口 - 支持分类获取"""
+    global message_logs, comment_logs
+    
     if request.method == 'GET':
-        # 返回所有日志，让前端决定显示多少条
-        return jsonify({'logs': logs})
+        # 获取日志类型参数
+        log_type = request.args.get('type', 'all')  # all, message, comment
+        
+        if log_type == 'message':
+            logs_data = message_logs
+        elif log_type == 'comment':
+            logs_data = comment_logs
+        else:  # all - 合并所有日志
+            all_logs = []
+            
+            # 添加私信日志
+            for log in message_logs:
+                log_copy = log.copy()
+                if 'system' not in log_copy:
+                    log_copy['system'] = 'message'
+                all_logs.append(log_copy)
+            
+            # 添加评论日志
+            for log in comment_logs:
+                log_copy = log.copy()
+                if 'system' not in log_copy:
+                    log_copy['system'] = 'comment'
+                all_logs.append(log_copy)
+            
+            # 按时间排序
+            all_logs.sort(key=lambda x: x['timestamp'])
+            logs_data = all_logs
+        
+        return jsonify({'logs': logs_data, 'type': log_type})
+    
     elif request.method == 'DELETE':
-        # 清空日志
-        logs.clear()
-        add_log("日志已被手动清空", 'info')
-        return jsonify({'success': True, 'message': '日志已清空'})
+        # 清空指定类型日志
+        log_type = request.args.get('type', 'all')
+        
+        if log_type == 'message':
+            message_logs.clear()
+            add_log("私信日志已被手动清空", 'info', system='message')
+            message = '私信日志已清空'
+        elif log_type == 'comment':
+            comment_logs.clear()
+            add_log("评论日志已被手动清空", 'info', system='comment')
+            message = '评论日志已清空'
+        else:  # all
+            message_logs.clear()
+            comment_logs.clear()
+            message = '所有日志已清空'
+        
+        return jsonify({'success': True, 'message': message})
 
 @app.route('/api/image-config', methods=['GET', 'POST'])
 def handle_image_config():
@@ -2607,7 +2672,7 @@ comment_config = {
 comment_rules = []
 comment_monitoring = False
 comment_monitor_thread = None
-comment_logs = []
+comment_logs = []  # 评论系统独立日志
 comment_cache = {}
 comment_last_send_time = 0
 comment_program_start_time = int(time.time())
@@ -2625,7 +2690,7 @@ def init_comment_config_paths():
         COMMENT_RULES_FILE = get_config_file_path('comment_rules.json')
 
 def load_comment_config():
-    """加载评论回复配置"""
+    """加载评论回复系统配置"""
     global comment_config
     init_comment_config_paths()
     
@@ -2634,18 +2699,24 @@ def load_comment_config():
             with open(COMMENT_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 loaded_config = json.load(f)
                 comment_config.update(loaded_config)
+            logger.info(f"成功加载评论回复配置: {COMMENT_CONFIG_FILE}")
+        else:
+            logger.info(f"评论回复配置文件不存在，使用默认配置: {COMMENT_CONFIG_FILE}")
     except Exception as e:
         logger.error(f"加载评论回复配置失败: {e}")
+        add_log(f"加载评论回复配置失败: {e}", 'error', system='comment')
 
 def save_comment_config():
-    """保存评论回复配置"""
+    """保存评论回复系统配置"""
     init_comment_config_paths()
     
     try:
         with open(COMMENT_CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(comment_config, f, ensure_ascii=False, indent=2)
+        logger.info(f"成功保存评论回复配置: {COMMENT_CONFIG_FILE}")
     except Exception as e:
         logger.error(f"保存评论回复配置失败: {e}")
+        add_log(f"保存评论回复配置失败: {e}", 'error', system='comment')
 
 def load_comment_rules():
     """加载评论回复规则"""
@@ -2672,23 +2743,8 @@ def save_comment_rules():
 
 def add_comment_log(message, log_type='info'):
     """添加评论回复日志"""
-    global comment_logs
-    timestamp = datetime.now().strftime('%H:%M:%S')
-    log_entry = {
-        'timestamp': timestamp,
-        'message': message,
-        'type': log_type
-    }
-    comment_logs.append(log_entry)
-    
-    # 保持日志数量在合理范围内
-    if len(comment_logs) > 200:
-        comment_logs = comment_logs[-100:]
-    
-    # 同时添加到系统日志中，以便在系统日志页面显示
-    add_log(f"[评论回复] {message}", log_type)
-    
-    logger.info(f"[评论回复] {message}")
+    # 使用统一的日志系统，设置system='comment'
+    add_log(message, log_type, system='comment')
 
 class CommentAPI:
     """评论回复API类"""
@@ -2837,34 +2893,37 @@ class CommentAPI:
             return False
 
 def comment_monitor_worker():
-    """评论监控工作线程"""
+    """评论监控工作线程 - 完全独立的评论系统"""
     global comment_monitoring
     
     add_comment_log("开始监控评论回复", 'info')
     
     while comment_monitoring:
         try:
+            # 使用独立的评论配置，不依赖私信配置
             if not comment_config.get('sessdata') or not comment_config.get('bili_jct'):
-                add_comment_log("登录配置不完整，停止监控", 'error')
+                add_comment_log("评论系统登录配置不完整，停止监控", 'error')
                 comment_monitoring = False
                 break
             
+            # 使用评论系统独立的API实例
             api = CommentAPI(comment_config['sessdata'], comment_config['bili_jct'])
             my_uid = api.get_my_uid()
             
             if not my_uid:
-                add_comment_log("获取用户信息失败，请检查登录配置", 'error')
+                add_comment_log("获取评论系统用户信息失败，请检查登录配置", 'error')
                 # 不要立即退出，等待下次检查
                 time.sleep(30)
                 continue
             
-            # 获取所有评论（不分视频）
+            # 获取所有评论（不分视频） - 使用评论系统独立配置
             max_videos = comment_config.get('max_videos_to_check', 20)
             comments_per_video = comment_config.get('comments_per_video', 10)
             all_comments = api.get_all_comments(my_uid, max_videos, comments_per_video)
             
             if not all_comments:
                 add_comment_log("没有找到评论，等待下次检查", 'info')
+                # 使用评论系统独立的检查间隔
                 time.sleep(comment_config.get('comment_check_interval', 30))
                 continue
             
@@ -2881,25 +2940,25 @@ def comment_monitor_worker():
                 
                 add_comment_log(f"检查评论: {commenter_name} 在《{video_title}》- {comment_content[:30]}...", 'info')
                 
-                # 检查是否为新评论
+                # 检查是否为新评论 - 使用评论系统独立的配置
                 if comment_config.get('only_reply_new_comments', True):
                     if comment_time < comment_program_start_time:
                         add_comment_log(f"跳过旧评论: {commenter_name}", 'info')
                         continue
                 
-                # 检查是否已回复过
+                # 检查是否已回复过 - 使用评论系统独立的缓存
                 cache_key = f"{video_id}_{comment_id}"
                 if cache_key in comment_cache:
                     add_comment_log(f"已回复过: {commenter_name}", 'info')
                     continue
                 
-                # 匹配回复规则
+                # 匹配回复规则 - 使用评论系统独立的规则
                 reply_message = ""
                 reply_image = ""
                 reply_type = "text"
                 matched_rule = None
                 
-                # 检查关键词规则
+                # 检查关键词规则 - 使用comment_rules而不是rules
                 for rule in comment_rules:
                     if not rule.get('enabled', True):
                         continue
@@ -2917,7 +2976,7 @@ def comment_monitor_worker():
                     if matched_rule:
                         break
                 
-                # 如果没有匹配规则，使用默认回复
+                # 如果没有匹配规则，使用默认回复 - 使用评论系统独立配置
                 if not matched_rule and comment_config.get('default_comment_reply_enabled', False):
                     reply_message = comment_config.get('default_comment_reply_message', '')
                     reply_image = comment_config.get('default_comment_reply_image', '')
@@ -2937,7 +2996,7 @@ def comment_monitor_worker():
                     else:
                         add_comment_log(f"回复 {commenter_name} 在《{video_title}》的评论失败", 'error')
             
-            # 等待下次检查
+            # 等待下次检查 - 使用评论系统独立配置
             check_interval = comment_config.get('comment_check_interval', 30)
             time.sleep(check_interval)
             
@@ -3239,17 +3298,31 @@ def validate_comment_keywords_file():
     except Exception as e:
         return jsonify({'success': False, 'error': f'文件验证失败: {str(e)}'})
 
+# 确保在系统启动时添加一些初始日志，方便测试
 if __name__ == '__main__':
+    # 首先确保日志数组已初始化
+    if 'message_logs' not in globals():
+        message_logs = []
+    if 'comment_logs' not in globals():
+        comment_logs = []
+        
+    # 首先加载配置和规则
     load_rules()
     load_comment_config()
     load_comment_rules()
     
-    # 添加启动日志
-    add_log("BiliGo - B站私信自动回复系统启动中...", 'info')
-    add_log("系统初始化完成", 'success')
-    add_log("Web服务器启动在端口 4999", 'info')
-    add_log("请在浏览器中访问: http://localhost:4999", 'info')
-    add_log("评论回复系统: http://localhost:4999/comment", 'info')
+    # 添加启动日志到私信系统
+    add_log("BiliGo - B站私信自动回复系统启动中...", 'info', system='message')
+    add_log("系统初始化完成", 'success', system='message')
+    add_log("Web服务器启动在端口 4999", 'info', system='message')
+    add_log("请在浏览器中访问: http://localhost:4999", 'info', system='message')
+    add_log("评论回复系统: http://localhost:4999/comment", 'info', system='message')
+    add_log("日志系统已就绪", 'success', system='message')
+    
+    # 添加启动日志到评论系统
+    add_log("评论回复系统已初始化", 'info', system='comment')
+    add_log("评论监控功能就绪", 'success', system='comment')
+    add_log("评论日志系统已就绪", 'success', system='comment')
     
     print("BiliGo - B站私信自动回复系统启动中...")
     print("请在浏览器中访问: http://localhost:4999")

@@ -15,5 +15,7 @@
   "follow_check_interval": 30,
   "message_check_interval": 0.09,
   "send_delay_interval": 1.0,
-  "auto_restart_interval": 300
+  "auto_restart_interval": 300,
+  "sessdata": "ea9a34f6%2C1773056451%2Cef1c1%2A91CjD7Hhv-1sq_6oD23ntYk_jlUx8OSSXDbBuZPx_Ce3CbV4OqHPIIG4E8sJdHg5KJ5DYSVjliWnRfVVhXZXI5eXJxTzhJRGRHUXhCMTlQNExBQkl5SVNnMlp0SzE4aGhvaXh5eVhfWEVfMndsQjI3NXNHd0dBRmxxbFJ5cnpWdEhLWEV3WnZiMzF3IIEC",
+  "bili_jct": "6218681941da8930964cc03c5a8bbf6f"
 }

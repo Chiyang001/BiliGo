@@ -37,6 +37,28 @@
             <!-- 日志控制面板 -->
             <section class="log-control-panel">
                 <h2><i class="fas fa-cogs"></i>日志控制</h2>
+                
+                <!-- 新增：日志类型过滤 -->
+                <div class="control-row">
+                    <div class="control-group">
+                        <label>日志类型</label>
+                        <div class="filter-buttons">
+                            <button class="filter-btn log-type-filter active" data-type="all">
+                                <i class="fas fa-list"></i>
+                                全部日志
+                            </button>
+                            <button class="filter-btn log-type-filter" data-type="message">
+                                <i class="fas fa-envelope"></i>
+                                私信日志
+                            </button>
+                            <button class="filter-btn log-type-filter" data-type="comment">
+                                <i class="fas fa-comments"></i>
+                                评论日志
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="control-row">
                     <div class="control-group">
                         <label>日志级别过滤</label>
