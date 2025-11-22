@@ -992,7 +992,9 @@ def process_single_session(api, my_uid, session):
         max_replies = config.get('max_replies_per_user', 3)
         current_replies = user_reply_counts.get(talker_id, 0)
         if current_replies >= max_replies:
-            add_log(f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，跳过回复", 'debug', system='message')
+            # 只在第一次达到限制时记录日志，避免重复提示
+            if current_replies == max_replies:
+                add_log(f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，后续消息将不再回复", 'info', system='message')
             return []
         
         # 获取最新的一条消息
@@ -1301,7 +1303,6 @@ def monitor_messages():
                     
                     # 筛选需要检查的会话（扩大范围确保不遗漏）
                     check_sessions = []
-                    debug_info = []
                     
                     for session in sessions[:30]:  # 检查前30个会话
                         talker_id = session.get('talker_id')
@@ -1314,17 +1315,9 @@ def monitor_messages():
                         # 检查有新消息的会话
                         if last_msg_time > recorded_time:
                             check_sessions.append(session)
-                            debug_info.append(f"用户{talker_id}: 新消息 {last_msg_time} > {recorded_time}")
                         # 或者最近5分钟内活跃的会话
                         elif current_time - last_msg_time < 300:
                             check_sessions.append(session)
-                            debug_info.append(f"用户{talker_id}: 活跃会话 {current_time - last_msg_time}s前")
-                        else:
-                            debug_info.append(f"用户{talker_id}: 跳过 {last_msg_time} <= {recorded_time}")
-                    
-                    # 每30秒输出一次调试信息
-                    if current_time % 30 == 0 and debug_info:
-                        add_log(f"会话检查: {len(check_sessions)}/{len(sessions)} 个会话需要处理", 'debug')
                     
                     if not check_sessions:
                         time.sleep(0.2)
@@ -1338,6 +1331,9 @@ def monitor_messages():
                             break
                         
                         try:
+                            # 获取会话ID用于日志
+                            session_talker_id = session.get('talker_id', 'unknown')
+                            
                             results = process_single_session(api, my_uid, session)
                             
                             if not results:
@@ -1416,7 +1412,10 @@ def monitor_messages():
                                     error_count += 1
                         
                         except Exception as e:
-                            add_log(f"处理会话异常: {e}", 'error')
+                            import traceback
+                            error_detail = traceback.format_exc()
+                            add_log(f"处理会话 {session_talker_id} 异常: {e}", 'error')
+                            logger.error(f"会话处理详细错误:\n{error_detail}")
                             error_count += 1
                             # 继续处理下一个会话，不中断循环
                             continue
@@ -1435,10 +1434,16 @@ def monitor_messages():
                         add_log(f"📊 本轮回复了 {reply_count} 条消息，总计处理 {processed_count} 条", 'info')
                     
                     # 检查是否需要自动重启（可配置间隔）
+                    # 只有在有错误或异常情况下才触发自动重启
                     current_time_check = int(time.time())
                     restart_interval = config.get('auto_restart_interval', 300)
-                    if current_time_check - last_reply_time >= restart_interval:
-                        add_log(f"🔄 已连续 {current_time_check - last_reply_time} 秒无回复消息，执行自动重启", 'warning')
+                    time_since_last_reply = current_time_check - last_reply_time
+                    
+                    # 自动重启条件：长时间无回复 且 有连续错误
+                    should_restart = (time_since_last_reply >= restart_interval and consecutive_errors > 3)
+                    
+                    if should_restart:
+                        add_log(f"🔄 已连续 {time_since_last_reply} 秒无回复消息且有 {consecutive_errors} 个连续错误，执行自动重启", 'warning')
                         
                         # 增强的重启机制
                         restart_success = False
@@ -1540,22 +1545,50 @@ def monitor_messages():
                     monitoring = False
                     break
                 except Exception as e:
+                    import traceback
+                    error_detail = traceback.format_exc()
                     add_log(f"监控循环异常: {e}", 'error')
+                    logger.error(f"详细错误信息:\n{error_detail}")
                     error_count += 1
                     consecutive_errors += 1
                     
-                    # 如果连续错误太多，重新初始化
-                    if consecutive_errors > 10:
-                        add_log("连续错误过多，重新初始化系统", 'warning')
+                    # 如果连续错误太多，执行完整的系统重置
+                    if consecutive_errors > 5:
+                        add_log(f"连续错误 {consecutive_errors} 次，执行系统重置", 'warning')
                         try:
+                            # 清理所有缓存
+                            message_cache.clear()
+                            last_message_times.clear()
+                            user_reply_counts.clear()
+                            
+                            # 强制垃圾回收
+                            import gc
+                            gc.collect()
+                            
+                            # 重新创建API对象
                             api = BilibiliAPI(config['sessdata'], config['bili_jct'])
-                            consecutive_errors = 0
+                            
+                            # 测试API连接
+                            test_uid = api.get_my_uid()
+                            if test_uid:
+                                add_log(f"系统重置成功，用户UID: {test_uid}", 'success')
+                                consecutive_errors = 0
+                                last_reply_time = int(time.time())  # 重置最后回复时间
+                            else:
+                                add_log("系统重置失败：无法获取用户信息", 'error')
+                                if consecutive_errors > 15:
+                                    add_log("连续错误超过15次，停止监控", 'error')
+                                    monitoring = False
+                                    break
                         except Exception as init_e:
-                            add_log(f"系统重新初始化失败: {init_e}", 'error')
-                            break
-                        time.sleep(0.3)  # 进一步缩短系统重新初始化后的等待时间
+                            add_log(f"系统重置失败: {init_e}", 'error')
+                            if consecutive_errors > 15:
+                                add_log("连续错误超过15次，停止监控", 'error')
+                                monitoring = False
+                                break
+                        time.sleep(2)  # 重置后等待2秒
                     else:
-                        time.sleep(0.2)  # 进一步缩短一般错误的等待时间
+                        time.sleep(1)  # 一般错误等待1秒
         
         except Exception as e:
             add_log(f"监控系统异常: {e}", 'error')

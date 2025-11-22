@@ -279,7 +279,7 @@ python app.py
 
 ## 📝 更新日志
 
-### v2.1 (2025-11-22)
+### v2.1 (2024-11-22)
 
 #### 🎉 新增功能
 - ✨ 添加"检查更新"按钮，快速跳转到 GitHub Releases
@@ -371,4 +371,3 @@ SOFTWARE.
 Made with ❤️ by [Chiyang001](https://github.com/Chiyang001)
 
 </div>
-
