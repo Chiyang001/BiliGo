@@ -984,6 +984,10 @@ def process_single_session(api, my_uid, session):
     global message_cache, last_message_times, program_start_time, user_reply_counts
     
     try:
+        # 安全检查：确保session是有效的字典
+        if not session or not isinstance(session, dict):
+            return []
+            
         talker_id = session.get('talker_id')
         if not talker_id:
             return []
@@ -1242,6 +1246,13 @@ def monitor_messages():
                     
                     consecutive_errors = 0  # 重置连续错误计数
                     
+                    # 验证返回的数据结构
+                    data = sessions_data.get('data')
+                    if not data or not isinstance(data, dict):
+                        add_log("API返回数据格式异常，跳过本轮", 'warning', system='message')
+                        time.sleep(1)
+                        continue
+                    
                     # 定期缓存清理，避免长时间运行内存负荷过大
                     if current_time % 300 == 0:  # 每5分钟清理一次
                         try:
@@ -1298,25 +1309,45 @@ def monitor_messages():
                         time.sleep(0.2)
                         continue
                     
-                    # 按最后消息时间排序
-                    sessions.sort(key=lambda x: x.get('last_msg', {}).get('timestamp', 0), reverse=True)
+                    # 过滤掉无效的会话（None 或空对象）
+                    sessions = [s for s in sessions if s and isinstance(s, dict)]
+                    if not sessions:
+                        time.sleep(0.2)
+                        continue
+                    
+                    # 按最后消息时间排序（安全版本）
+                    try:
+                        sessions.sort(key=lambda x: x.get('last_msg', {}).get('timestamp', 0) if x.get('last_msg') else 0, reverse=True)
+                    except Exception as sort_error:
+                        add_log(f"会话排序异常: {sort_error}，使用原始顺序", 'warning', system='message')
+                        # 如果排序失败，继续使用原始顺序
                     
                     # 筛选需要检查的会话（扩大范围确保不遗漏）
                     check_sessions = []
                     
                     for session in sessions[:30]:  # 检查前30个会话
+                        # 安全检查：确保session是有效的字典
+                        if not session or not isinstance(session, dict):
+                            continue
+                            
                         talker_id = session.get('talker_id')
                         if not talker_id:
                             continue
                         
-                        last_msg_time = session.get('last_msg', {}).get('timestamp', 0)
+                        # 安全获取最后消息时间
+                        last_msg = session.get('last_msg')
+                        if last_msg and isinstance(last_msg, dict):
+                            last_msg_time = last_msg.get('timestamp', 0)
+                        else:
+                            last_msg_time = 0
+                        
                         recorded_time = last_message_times.get(talker_id, 0)
                         
                         # 检查有新消息的会话
                         if last_msg_time > recorded_time:
                             check_sessions.append(session)
                         # 或者最近5分钟内活跃的会话
-                        elif current_time - last_msg_time < 300:
+                        elif last_msg_time > 0 and current_time - last_msg_time < 300:
                             check_sessions.append(session)
                     
                     if not check_sessions:
