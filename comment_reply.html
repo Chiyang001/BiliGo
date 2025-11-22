@@ -7,7 +7,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="format-detection" content="telephone=no">
     <title>BiliGo - B站回复管理工具</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <link rel="stylesheet" href="comment_style.css">
 </head>
 <body>
@@ -21,11 +20,20 @@
                 <span class="subtitle">B站回复管理工具</span>
             </div>
             <div class="header-actions">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 12px; color: #666; font-weight: 500;">v2.1</span>
+                    <button class="btn-switch btn-secondary" onclick="openTutorial()" title="使用教程">
+                        📖 使用教程
+                    </button>
+                    <button class="btn-switch btn-secondary" onclick="checkUpdate()" title="检查更新">
+                        🔄 检查更新
+                    </button>
+                </div>
                 <button class="btn-secondary btn-switch" onclick="switchToMessageMode()">
-                    <i class="bi bi-chat-dots-fill"></i> 切换到私信模式
+                    💬 切换到私信模式
                 </button>
                 <div class="status-indicator">
-                    <i class="bi bi-circle-fill status-icon"></i>
+                    <span class="status-icon">●</span>
                     <span id="status">未启动</span>
                 </div>
             </div>
@@ -33,21 +41,21 @@
 
         <div class="main-content">
             <section class="control-panel">
-                <h2><i class="bi bi-sliders"></i> 评论回复控制</h2>
+                <h2>⚙️ 评论回复控制</h2>
                 <div class="button-group">
                     <button id="start-btn" class="btn-primary" onclick="startCommentMonitoring()">
-                        <i class="bi bi-play-fill"></i> 开始监控评论
+                        ▶️ 开始监控评论
                     </button>
                     <button id="stop-btn" class="btn-danger" onclick="stopCommentMonitoring()" disabled>
-                        <i class="bi bi-stop-fill"></i> 停止监控评论
+                        ⏹️ 停止监控评论
                     </button>
                 </div>
                 
                 <!-- 评论监控配置 -->
                 <div class="collapsible-section" style="margin-top: 20px;">
                     <div class="collapsible-header" onclick="toggleCommentConfig()">
-                        <h3><i class="bi bi-gear-fill"></i> 评论监控配置</h3>
-                        <i class="bi bi-chevron-down toggle-icon" id="comment-toggle-icon"></i>
+                        <h3>⚙️ 评论监控配置</h3>
+                        <span class="toggle-icon" id="comment-toggle-icon">▼</span>
                     </div>
                     
                     <div class="collapsible-content" id="comment-config-content" style="display: none;">
@@ -61,7 +69,7 @@
                             <label for="comment-send-delay">回复发送间隔 (秒):</label>
                             <input type="number" id="comment-send-delay" min="1" max="10" step="0.1" value="2.0" placeholder="2.0">
                             <p class="help-text">
-                                <i class="bi bi-exclamation-triangle-fill" style="color: #ff6b6b;"></i>
+                                ⚠️
                                 两次评论回复之间的等待时间，建议2秒以上避免触发风控
                             </p>
                         </div>
@@ -75,49 +83,49 @@
                         </div>
                         
                         <button class="btn-primary" onclick="saveCommentConfig()">
-                            <i class="bi bi-save-fill"></i> 保存监控配置
+                            💾 保存监控配置
                         </button>
                     </div>
                 </div>
                 
                 <div class="button-group" style="margin-top: 20px;">
                     <button class="btn-secondary" onclick="exportCommentConfig()" title="导出评论回复配置">
-                        <i class="bi bi-download"></i> 导出配置
+                        📎 导出配置
                     </button>
                     <button class="btn-primary" onclick="openCommentImportModal()" title="导入评论回复配置">
-                        <i class="bi bi-upload"></i> 导入配置
+                        📎 导入配置
                     </button>
                     <button class="btn-success" onclick="importFromMessageConfig()" title="从私信配置导入">
-                        <i class="bi bi-arrow-down-circle"></i> 导入私信配置
+                        🔄 导入私信配置
                     </button>
                 </div>
             </section>
 
             <section class="config-panel">
-                <h2><i class="bi bi-gear-fill"></i> 登录配置</h2>
+                <h2>⚙️ 登录配置</h2>
                 <div class="form-row">
                     <label for="sessdata">SESSDATA:</label>
                     <div class="input-wrapper">
-                        <i class="bi bi-key-fill"></i>
+                        🔑
                         <input type="password" id="sessdata" placeholder="请输入B站SESSDATA">
                     </div>
                 </div>
                 <div class="form-row">
                     <label for="bili_jct">bili_jct:</label>
                     <div class="input-wrapper">
-                        <i class="bi bi-shield-lock-fill"></i>
+                        🔒
                         <input type="password" id="bili_jct" placeholder="请输入bili_jct">
                     </div>
                 </div>
                 <button class="btn-primary" onclick="saveCommentLoginConfig()">
-                    <i class="bi bi-save-fill"></i> 保存登录配置
+                    💾 保存登录配置
                 </button>
             </section>
 
             <section class="reply-settings-container">
                 <div class="reply-settings-row">
                     <div class="default-reply-panel half-width">
-                        <h2><i class="bi bi-chat-dots-fill"></i> 默认评论回复设置</h2>
+                        <h2>💬 默认评论回复设置</h2>
                         <div class="form-row">
                             <div class="checkbox-wrapper">
                                 <input type="checkbox" id="default-comment-reply-enabled">
@@ -150,30 +158,30 @@
                             <div class="image-selector">
                                 <input type="text" id="default-comment-reply-image-path" placeholder="请选择图片文件" readonly>
                                 <button type="button" class="btn-secondary" onclick="openImageBrowser('default-comment')">
-                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                    📁 选择图片
                                 </button>
                             </div>
                             <div id="default-comment-image-preview" class="image-preview" style="display: none;"></div>
                         </div>
                         
                         <button class="btn-primary" onclick="saveDefaultCommentReply()">
-                            <i class="bi bi-save-fill"></i> 保存默认回复设置
+                            💾 保存默认回复设置
                         </button>
                     </div>
 
                     <div class="keyword-panel half-width">
-                        <h2><i class="bi bi-chat-square-text-fill"></i> 评论关键词回复设置</h2>
+                        <h2>💬📝 评论关键词回复设置</h2>
                         <div class="form-row">
                             <label for="comment-rule-title">规则标题:</label>
                             <div class="input-wrapper">
-                                <i class="bi bi-tag-fill"></i>
+                                🏷️
                                 <input type="text" id="comment-rule-title" placeholder="例如：感谢回复、问题解答">
                             </div>
                         </div>
                         <div class="form-row">
                             <label for="comment-keywords">关键词 (用中文逗号分隔):</label>
                             <div class="input-wrapper">
-                                <i class="bi bi-hash"></i>
+                                🔤
                                 <input type="text" id="comment-keywords" placeholder="例如：谢谢，感谢，不错">
                             </div>
                         </div>
@@ -202,14 +210,14 @@
                             <div class="image-selector">
                                 <input type="text" id="comment-rule-reply-image-path" placeholder="请选择图片文件" readonly>
                                 <button type="button" class="btn-secondary" onclick="openImageBrowser('comment-rule')">
-                                    <i class="bi bi-folder2-open"></i> 选择图片
+                                    📁 选择图片
                                 </button>
                             </div>
                             <div id="comment-rule-image-preview" class="image-preview" style="display: none;"></div>
                         </div>
                         
                         <button class="btn-primary" onclick="addCommentRule()">
-                            <i class="bi bi-plus-circle-fill"></i> 添加评论回复规则
+                            ➕ 添加评论回复规则
                         </button>
                     </div>
                 </div>
@@ -217,40 +225,40 @@
 
             <section class="rules-panel">
                 <div class="rules-header">
-                    <h2><i class="bi bi-list-check"></i> 评论回复规则列表</h2>
+                    <h2>📝 评论回复规则列表</h2>
                     <div class="rules-actions">
                     </div>
                 </div>
                 <div class="pagination">
                     <button id="prev-page" class="btn-icon" onclick="changePage(-1)" disabled>
-                        <i class="bi bi-chevron-left"></i>
+                        ◀️
                     </button>
                     <span id="page-info">第 1 页，共 1 页</span>
                     <button id="next-page" class="btn-icon" onclick="changePage(1)" disabled>
-                        <i class="bi bi-chevron-right"></i>
+                        ▶️
                     </button>
                 </div>
                 <div id="comment-rules-list" class="rules-list"></div>
                 <div class="pagination">
                     <button id="prev-page-bottom" class="btn-icon" onclick="changePage(-1)" disabled>
-                        <i class="bi bi-chevron-left"></i>
+                        ◀️
                     </button>
                     <span id="page-info-bottom">第 1 页，共 1 页</span>
                     <button id="next-page-bottom" class="btn-icon" onclick="changePage(1)" disabled>
-                        <i class="bi bi-chevron-right"></i>
+                        ▶️
                     </button>
                 </div>
             </section>
 
             <section class="log-panel">
-                <h2><i class="bi bi-journal-text"></i> 系统日志</h2>
+                <h2>📝 系统日志</h2>
                 <div class="log-redirect">
                     <div class="log-redirect-content">
-                        <i class="bi bi-file-earmark-text"></i>
+                        📄
                         <h3>查看系统日志</h3>
                         <p>点击下方按钮跳转到专门的日志页面查看详细的系统运行日志</p>
                         <button class="btn-primary" onclick="goToLogsPage()">
-                            <i class="bi bi-box-arrow-up-right"></i>
+                            🔗
                             打开日志页面
                         </button>
                     </div>
@@ -267,32 +275,32 @@
     <div id="image-browser-modal" class="modal">
         <div class="modal-content image-browser-content">
             <div class="modal-header">
-                <h3><i class="bi bi-folder2-open"></i> 选择图片</h3>
+                <h3>📁 选择图片</h3>
                 <button class="close-btn" onclick="closeImageBrowser()">
-                    <i class="bi bi-x-lg"></i>
+                    ❌
                 </button>
             </div>
             <div class="modal-body">
                 <div class="browser-toolbar">
                     <div class="current-path">
-                        <i class="bi bi-folder-fill"></i>
+                        📂
                         <span id="current-path-text">加载中...</span>
                     </div>
                     <div class="quick-nav">
                         <button class="btn-secondary btn-sm" onclick="goToHomeDirectory()">
-                            <i class="bi bi-house-fill"></i> 主目录
+                            🏠 主目录
                         </button>
                     </div>
                 </div>
                 <div id="file-list" class="file-list">
                     <div class="loading">
-                        <i class="bi bi-arrow-clockwise spin"></i> 加载中...
+                        🔄 加载中...
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="closeImageBrowser()">
-                    <i class="bi bi-x"></i> 取消
+                    ❌ 取消
                 </button>
             </div>
         </div>
@@ -302,9 +310,9 @@
     <div id="comment-import-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="bi bi-upload"></i> 导入评论回复配置</h3>
+                <h3>📤 导入评论回复配置</h3>
                 <button class="close-btn" onclick="closeCommentImportModal()">
-                    <i class="bi bi-x-lg"></i>
+                    ❌
                 </button>
             </div>
             <div class="modal-body">
@@ -313,7 +321,7 @@
                     <div class="file-upload-area" id="comment-file-upload-area">
                         <input type="file" id="comment-keywords-file" accept=".json" style="display: none;" onchange="handleCommentFileSelect(event)">
                         <div class="upload-placeholder" onclick="document.getElementById('comment-keywords-file').click()">
-                            <i class="bi bi-cloud-upload-fill"></i>
+                            ☁️
                             <p>点击选择文件或拖拽文件到此处</p>
                             <small>支持 .json 格式，文件大小不超过1MB</small>
                         </div>
@@ -322,13 +330,13 @@
                 
                 <div id="comment-file-info" class="file-info" style="display: none;">
                     <div class="file-details">
-                        <i class="bi bi-file-earmark-text-fill"></i>
+                        📄
                         <div class="file-text">
                             <strong id="comment-file-name"></strong>
                             <small id="comment-file-size"></small>
                         </div>
                         <button class="btn-icon" onclick="clearCommentSelectedFile()" title="清除选择">
-                            <i class="bi bi-x"></i>
+                            ❌
                         </button>
                     </div>
                 </div>
@@ -350,10 +358,10 @@
             </div>
             <div class="modal-footer">
                 <button id="comment-import-btn" class="btn-primary" onclick="importCommentConfig()" disabled>
-                    <i class="bi bi-upload"></i> 导入
+                    📤 导入
                 </button>
                 <button class="btn-secondary" onclick="closeCommentImportModal()">
-                    <i class="bi bi-x"></i> 取消
+                    ❌ 取消
                 </button>
             </div>
         </div>
@@ -363,23 +371,23 @@
     <div id="comment-edit-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="bi bi-pencil-square"></i> 编辑评论回复规则</h3>
+                <h3>✏️ 编辑评论回复规则</h3>
                 <button class="close-btn" onclick="closeCommentEditModal()">
-                    <i class="bi bi-x-lg"></i>
+                    ❌
                 </button>
             </div>
             <div class="modal-body">
                 <div class="form-row">
                     <label for="edit-comment-rule-title">规则标题:</label>
                     <div class="input-wrapper">
-                        <i class="bi bi-tag-fill"></i>
+                        🏷️
                         <input type="text" id="edit-comment-rule-title" placeholder="例如：感谢回复、问题解答">
                     </div>
                 </div>
                 <div class="form-row">
                     <label for="edit-comment-keywords">关键词 (用中文逗号分隔):</label>
                     <div class="input-wrapper">
-                        <i class="bi bi-hash"></i>
+                        🔤
                         <input type="text" id="edit-comment-keywords" placeholder="例如：谢谢，感谢，不错">
                     </div>
                 </div>
@@ -408,7 +416,7 @@
                     <div class="image-selector">
                         <input type="text" id="edit-comment-reply-image-path" placeholder="请选择图片文件" readonly>
                         <button type="button" class="btn-secondary" onclick="openImageBrowser('edit-comment')">
-                            <i class="bi bi-folder2-open"></i> 选择图片
+                            📁 选择图片
                         </button>
                     </div>
                     <div id="edit-comment-image-preview" class="image-preview" style="display: none;"></div>
@@ -416,10 +424,10 @@
             </div>
             <div class="modal-footer">
                 <button class="btn-primary" onclick="saveEditCommentRule()">
-                    <i class="bi bi-check-lg"></i> 保存
+                    ✅ 保存
                 </button>
                 <button class="btn-secondary" onclick="closeCommentEditModal()">
-                    <i class="bi bi-x"></i> 取消
+                    ❌ 取消
                 </button>
             </div>
         </div>

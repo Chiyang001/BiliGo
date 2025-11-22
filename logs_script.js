@@ -124,6 +124,16 @@ function goToCommentMode() {
     window.location.href = 'comment';
 }
 
+// 检查更新
+function checkUpdate() {
+    window.open('https://github.com/Chiyang001/BiliGo/releases/', '_blank');
+}
+
+// 打开使用教程
+function openTutorial() {
+    window.open('https://www.bilibili.com/video/BV1F8e4z7Eae/', '_blank');
+}
+
 // 更新系统状态
 function updateStatus() {
     // 设置超时控制

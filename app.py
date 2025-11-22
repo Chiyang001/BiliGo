@@ -34,7 +34,8 @@ config = {
     'unfollow_reply_type': 'text',  # 取消关注回复类型：'text' 或 'image'
     'unfollow_reply_image': '',  # 取消关注回复图片路径
     'only_reply_new_messages': False,  # 是否仅回复新消息（程序启动后的消息）
-    'follow_check_interval': 30,  # 检查关注者的间隔（秒）
+    'max_replies_per_user': 3,  # 单用户最大回复次数
+    'follow_check_interval': 300,  # 检查关注者的间隔（秒），默认5分钟避免触发风控
     'message_check_interval': 0.05,  # 消息监测间隔（秒）
     'send_delay_interval': 1.0,  # 发送消息等待间隔（秒）
     'auto_restart_interval': 300  # 自动重启间隔（秒）
@@ -47,6 +48,7 @@ monitor_thread = None
 message_logs = []  # 私信日志
 message_cache = {}
 last_message_times = defaultdict(int)
+user_reply_counts = defaultdict(int)  # 用户回复次数计数器
 rule_matcher_cache = {}
 last_send_time = 0
 # 关注者监控相关变量
@@ -143,14 +145,18 @@ class BilibiliAPI:
             return None
     
     def get_latest_message(self, talker_id):
-        """快速获取最新消息"""
+        """快速获取最新消息（增强异常处理）"""
         try:
             msgs_data = self.get_session_msgs(talker_id, size=1)
             if msgs_data and msgs_data.get('code') == 0:
                 messages = msgs_data.get('data', {}).get('messages', [])
                 return messages[0] if messages else None
+            elif msgs_data and msgs_data.get('code') != 0:
+                # API返回错误，记录但不抛出异常
+                logger.debug(f"获取消息失败 (用户{talker_id}): {msgs_data.get('message', '未知错误')}")
             return None
-        except:
+        except Exception as e:
+            logger.debug(f"获取最新消息异常 (用户{talker_id}): {e}")
             return None
     
     def send_msg(self, receiver_id, msg_type=1, content=""):
@@ -772,8 +778,8 @@ def check_followers_changes(api):
     try:
         current_time = int(time.time())
         
-        # 从配置中获取检查间隔，默认30秒避免触发风控
-        check_interval = config.get('follow_check_interval', 30)
+        # 从配置中获取检查间隔，默认300秒（5分钟）避免触发风控
+        check_interval = config.get('follow_check_interval', 300)
         if current_time - last_follow_check < check_interval:
             return {'new_followers': [], 'unfollowers': []}
         
@@ -830,7 +836,7 @@ def check_followers_changes(api):
                             # 更新关注历史
                             follow_history[follower_mid] = follow_time
             
-            # 3. 检测取消关注者（更可靠的验证）
+            # 3. 检测取消关注者（优化版本，避免重复API调用）
             if config.get('unfollow_reply_enabled', False):
                 # 获取所有新关注者的mid集合
                 new_follower_mids = {f['mid'] for f in new_followers if f.get('mid')}
@@ -840,27 +846,14 @@ def check_followers_changes(api):
                 for unfollower_mid in lost_followers:
                     # 确保不是新关注者（避免误判）
                     if unfollower_mid not in new_follower_mids and unfollower_mid not in unfollowers_cache:
-                        # 双重验证：检查该用户是否在最近获取的关注者列表中
-                        # 通过重新获取关注者列表进行验证
-                        try:
-                            # 获取最新的关注者列表（限制为50个）
-                            recent_followers = api.get_recent_followers(limit=50)
-                            current_follower_mids = {f['mid'] for f in recent_followers if f.get('mid')}
-                            
-                            if unfollower_mid in current_follower_mids:
-                                # 用户仍在关注列表中，跳过处理
-                                continue
-                                
-                            # 确认用户确实取消关注
-                            unfollowers.append({'mid': unfollower_mid})
-                            unfollowers_cache.add(unfollower_mid)
-                            add_log(f"💔 确认取消关注: UID {unfollower_mid}", 'warning')
-                            # 从欢迎消息缓存中移除
-                            if unfollower_mid in welcome_sent_cache:
-                                welcome_sent_cache.remove(unfollower_mid)
-                        except Exception as e:
-                            add_log(f"验证取消关注状态失败: {e}", 'warning')
-                            continue
+                        # 直接确认取消关注，不再重复调用API验证
+                        # 因为我们已经从最新的关注者列表中获取了数据
+                        unfollowers.append({'mid': unfollower_mid})
+                        unfollowers_cache.add(unfollower_mid)
+                        add_log(f"💔 检测到取消关注: UID {unfollower_mid}", 'warning')
+                        # 从欢迎消息缓存中移除
+                        if unfollower_mid in welcome_sent_cache:
+                            welcome_sent_cache.remove(unfollower_mid)
             
             # 4. 更新关注者缓存（在所有检测完成后）
             followers_cache = current_followers.copy()
@@ -988,11 +981,18 @@ def send_unfollow_goodbye_message(api, unfollower):
 
 def process_single_session(api, my_uid, session):
     """处理单个会话的消息（只检测最后一条消息）"""
-    global message_cache, last_message_times, program_start_time
+    global message_cache, last_message_times, program_start_time, user_reply_counts
     
     try:
         talker_id = session.get('talker_id')
         if not talker_id:
+            return []
+        
+        # 检查用户回复次数限制
+        max_replies = config.get('max_replies_per_user', 3)
+        current_replies = user_reply_counts.get(talker_id, 0)
+        if current_replies >= max_replies:
+            add_log(f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，跳过回复", 'debug', system='message')
             return []
         
         # 获取最新的一条消息
@@ -1003,7 +1003,7 @@ def process_single_session(api, my_uid, session):
         msg_timestamp = latest_msg.get('timestamp', 0)
         sender_uid = latest_msg.get('sender_uid')
         
-        # 检查是否启用了"仅回复新消息"功能
+        # 检查是否启用了“仅回复新消息”功能
         if config.get('only_reply_new_messages', False):
             # 如果消息时间早于程序启动时间，跳过处理
             if msg_timestamp < program_start_time:
@@ -1096,6 +1096,8 @@ def process_single_session(api, my_uid, session):
 def monitor_messages():
     """监控消息的主循环（增强稳定性版本）"""
     global monitoring, message_cache, last_message_times, last_send_time, monitor_thread
+    global user_reply_counts, followers_cache, welcome_sent_cache, last_follow_check
+    global unfollowers_cache, follow_history
     
     if not config.get('sessdata') or not config.get('bili_jct'):
         add_log("未配置登录信息，无法启动监控", 'error', system='message')
@@ -1133,9 +1135,13 @@ def monitor_messages():
             # 初始化全局变量
             message_cache = {}
             last_message_times = defaultdict(int)
+            user_reply_counts = defaultdict(int)  # 初始化用户回复计数器
             last_send_time = 0
             followers_cache = set()
+            welcome_sent_cache = set()
             last_follow_check = 0
+            unfollowers_cache = set()
+            follow_history = {}
             
             last_cleanup = int(time.time())
             last_api_reset = int(time.time())
@@ -1150,10 +1156,20 @@ def monitor_messages():
                     loop_start = time.time()
                     current_time = int(time.time())
                     
-                    # 心跳检测 - 每60秒输出一次状态
+                    # 心跳检测 - 每60秒输出一次状态并进行健康检查
                     if current_time - last_heartbeat >= 60:
                         add_log(f"💓 系统运行正常: 处理{processed_count}条消息, 错误{error_count}次, 活跃会话{len(last_message_times)}个", 'info', system='message')
                         last_heartbeat = current_time
+                        
+                        # 健康检查：如果错误率过高，重新初始化API
+                        if processed_count > 0 and error_count > processed_count * 0.5:
+                            add_log(f"⚠️ 错误率过高 ({error_count}/{processed_count})，重新初始化API", 'warning', system='message')
+                            try:
+                                api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+                                error_count = 0  # 重置错误计数
+                                consecutive_errors = 0
+                            except Exception as e:
+                                add_log(f"健康检查后API重新初始化失败: {e}", 'error', system='message')
                     
                     # 每5分钟强制清理缓存（更频繁清理）
                     if current_time - last_cleanup > 300:
@@ -1244,7 +1260,7 @@ def monitor_messages():
                             followers_changes = check_followers_changes(api)
                             
                             # 处理新关注者
-                            for follower in followers_changes['new_followers']:
+                            for follower in followers_changes.get('new_followers', []):
                                 if not monitoring:  # 检查是否仍在监控中
                                     break
                                 try:
@@ -1258,7 +1274,7 @@ def monitor_messages():
                                     error_count += 1
                             
                             # 处理取消关注者
-                            for unfollower in followers_changes['unfollowers']:
+                            for unfollower in followers_changes.get('unfollowers', []):
                                 if not monitoring:  # 检查是否仍在监控中
                                     break
                                 try:
@@ -1273,6 +1289,7 @@ def monitor_messages():
                         except Exception as e:
                             add_log(f"实时检测关注者变化异常: {e}", 'warning')
                             error_count += 1
+                            # 异常后继续运行，不中断监控循环
                     
                     sessions = sessions_data.get('data', {}).get('session_list', [])
                     if not sessions:
@@ -1323,6 +1340,9 @@ def monitor_messages():
                         try:
                             results = process_single_session(api, my_uid, session)
                             
+                            if not results:
+                                continue
+                            
                             for result in results:
                                 # 发送回复（带发送成功验证）
                                 try:
@@ -1364,7 +1384,12 @@ def monitor_messages():
                                             verification_success = True  # 假设发送成功，避免卡住
                                         
                                         if verification_success:
-                                            add_log(f"✅ 已成功回复用户 {result['talker_id']} (规则: {result['rule']['title']}) 内容: {reply_content[:20]}...", 'success')
+                                            # 成功发送后，增加用户回复计数
+                                            user_reply_counts[result['talker_id']] += 1
+                                            current_count = user_reply_counts[result['talker_id']]
+                                            max_count = config.get('max_replies_per_user', 3)
+                                            
+                                            add_log(f"✅ 已成功回复用户 {result['talker_id']} (规则: {result['rule']['title']}) 内容: {reply_content[:20]}... (第{current_count}/{max_count}次)", 'success')
                                             reply_count += 1
                                             processed_count += 1
                                         else:
@@ -1393,6 +1418,8 @@ def monitor_messages():
                         except Exception as e:
                             add_log(f"处理会话异常: {e}", 'error')
                             error_count += 1
+                            # 继续处理下一个会话，不中断循环
+                            continue
                     
                     # 每处理10轮后，强制清理一次缓存
                     if processed_count > 0 and processed_count % 10 == 0:
@@ -1426,8 +1453,10 @@ def monitor_messages():
                                 # 清理所有缓存和状态
                                 message_cache.clear()
                                 last_message_times.clear()
+                                user_reply_counts.clear()  # 清理用户回复计数
                                 last_send_time = 0
                                 followers_cache.clear()
+                                welcome_sent_cache.clear()
                                 last_follow_check = 0
                                 unfollowers_cache.clear()
                                 follow_history.clear()
@@ -1676,9 +1705,10 @@ def start_monitoring():
     monitor_thread = None
     
     # 清理全局状态
-    global message_cache, last_message_times, last_send_time, followers_cache, last_follow_check, unfollowers_cache, follow_history
+    global message_cache, last_message_times, last_send_time, followers_cache, last_follow_check, unfollowers_cache, follow_history, user_reply_counts
     message_cache = {}
     last_message_times = defaultdict(int)
+    user_reply_counts = defaultdict(int)  # 重置用户回复计数
     last_send_time = 0
     followers_cache = set()
     last_follow_check = 0
@@ -2121,13 +2151,36 @@ def handle_new_message_config():
                 else:
                     add_log("已关闭仅回复新消息模式，会回复所有未处理的消息", 'success')
         
+        # 更新单用户最大回复次数配置
+        if 'max_replies_per_user' in data:
+            old_max = config.get('max_replies_per_user', 3)
+            new_max = data['max_replies_per_user']
+            
+            # 验证输入值
+            if isinstance(new_max, int) and 1 <= new_max <= 100:
+                config['max_replies_per_user'] = new_max
+                
+                # 记录配置变更
+                if old_max != new_max:
+                    add_log(f"单用户最大回复次数已设置为 {new_max} 次", 'success')
+                    
+                    # 如果减少了限制，清理现有计数
+                    if new_max < old_max:
+                        global user_reply_counts
+                        # 重置所有用户的回复计数，让新配置立即生效
+                        user_reply_counts.clear()
+                        add_log("已清理用户回复计数，新配置立即生效", 'info')
+            else:
+                return jsonify({'success': False, 'error': '单用户最大回复次数必须在1-100之间'})
+        
         save_config()
-        add_log("仅回复新消息配置已更新", 'success')
+        add_log("消息设置配置已更新", 'success')
         return jsonify({'success': True})
     else:
         # GET请求，返回当前配置
         return jsonify({
-            'only_reply_new_messages': config.get('only_reply_new_messages', False)
+            'only_reply_new_messages': config.get('only_reply_new_messages', False),
+            'max_replies_per_user': config.get('max_replies_per_user', 3)
         })
 
 @app.route('/api/follow-check-interval-config', methods=['GET', 'POST'])
@@ -2145,21 +2198,21 @@ def handle_follow_check_interval_config():
             # 验证间隔值的合理性
             try:
                 interval = int(interval)
-                if interval < 5:
-                    return jsonify({'success': False, 'error': '检查间隔不能少于5秒'})
-                elif interval > 300:
-                    return jsonify({'success': False, 'error': '检查间隔不能超过300秒（5分钟）'})
+                if interval < 300:
+                    return jsonify({'success': False, 'error': '检查间隔不能少于300秒（5分钟），避免触发B站风控'})
+                elif interval > 3600:
+                    return jsonify({'success': False, 'error': '检查间隔不能超过3600秒（1小时）'})
                 
-                old_value = config.get('follow_check_interval', 30)
+                old_value = config.get('follow_check_interval', 300)
                 config['follow_check_interval'] = interval
                 
                 # 记录配置变更和风控提示
                 if old_value != interval:
                     add_log(f"关注者检查间隔已更新: {old_value}秒 -> {interval}秒", 'success')
-                    if interval < 30:
-                        add_log(f"⚠️ 警告：检查间隔设置为{interval}秒，可能触发B站风控系统，建议设置为30秒以上", 'warning')
-                    elif interval >= 30:
-                        add_log(f"✅ 检查间隔设置为{interval}秒，有助于避免触发B站风控", 'success')
+                    if interval < 600:
+                        add_log(f"⚠️ 提示：检查间隔设置为{interval}秒（{interval//60}分钟），建议设置为10分钟以上更安全", 'warning')
+                    else:
+                        add_log(f"✅ 检查间隔设置为{interval}秒（{interval//60}分钟），有助于避免触发B站风控", 'success')
                 
             except (ValueError, TypeError):
                 return jsonify({'success': False, 'error': '检查间隔必须是有效的数字'})
@@ -2170,7 +2223,7 @@ def handle_follow_check_interval_config():
     else:
         # GET请求，返回当前配置
         return jsonify({
-            'follow_check_interval': config.get('follow_check_interval', 30)
+            'follow_check_interval': config.get('follow_check_interval', 300)
         })
 
 @app.route('/api/timing-config', methods=['GET', 'POST'])

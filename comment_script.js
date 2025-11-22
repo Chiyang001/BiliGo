@@ -163,13 +163,13 @@ function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     
-    let icon = 'info-circle-fill';
-    if (type === 'success') icon = 'check-circle-fill';
-    if (type === 'error') icon = 'exclamation-circle-fill';
-    if (type === 'warning') icon = 'exclamation-triangle-fill';
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '❌';
+    if (type === 'warning') icon = '⚠️';
     
     toast.innerHTML = `
-        <i class="bi bi-${icon} toast-icon"></i>
+        <span class="toast-icon">${icon}</span>
         <div class="toast-message">${message}</div>
     `;
     
@@ -185,6 +185,16 @@ function showToast(message, type = 'info') {
 // 切换到私信模式
 function switchToMessageMode() {
     window.location.href = 'index.html';
+}
+
+// 检查更新
+function checkUpdate() {
+    window.open('https://github.com/Chiyang001/BiliGo/releases/', '_blank');
+}
+
+// 打开使用教程
+function openTutorial() {
+    window.open('https://www.bilibili.com/video/BV1F8e4z7Eae/', '_blank');
 }
 
 // 跳转到日志页面
@@ -450,17 +460,17 @@ function updateCommentRulesDisplay() {
     const currentRules = sortedRules.slice(startIndex, endIndex);
     
     container.innerHTML = currentRules.map(rule => {
-        const enabledStatus = rule.enabled ? '<i class="bi bi-check-circle-fill" style="color: #2ed573;"></i>' : '<i class="bi bi-x-circle-fill" style="color: #ff4757;"></i>';
+        const enabledStatus = rule.enabled ? '<span style="color: #2ed573;">✅</span>' : '<span style="color: #ff4757;">❌</span>';
         
         let replyContent = '';
         const replyType = rule.reply_type || 'text';
         
         if (replyType === 'image') {
             const imageName = rule.reply_image ? rule.reply_image.split(/[/\\]/).pop() : '未选择图片';
-            replyContent = `<i class="bi bi-image-fill" style="color: #007bff;"></i> 图片回复: ${imageName}`;
+            replyContent = `<span style="color: #007bff;">🖼️</span> 图片回复: ${imageName}`;
         } else {
             const replyText = rule.reply && rule.reply.length > 100 ? rule.reply.substring(0, 100) + '...' : (rule.reply || '');
-            replyContent = `<i class="bi bi-chat-text-fill" style="color: #28a745;"></i> 文字回复: ${replyText}`;
+            replyContent = `<span style="color: #28a745;">💬</span> 文字回复: ${replyText}`;
         }
         
         return `
@@ -469,10 +479,10 @@ function updateCommentRulesDisplay() {
             <div class="rule-keywords">关键词: ${rule.keyword || ''}</div>
             <div class="rule-reply" title="${rule.reply || rule.reply_image || ''}">${replyContent}</div>
             <div class="rule-actions">
-                <button class="edit-btn" onclick="editCommentRule(${rule.id})"><i class="bi bi-pencil-fill"></i> 编辑</button>
-                <button class="delete-btn" onclick="deleteCommentRule(${rule.id})"><i class="bi bi-trash-fill"></i> 删除</button>
+                <button class="edit-btn" onclick="editCommentRule(${rule.id})">✏️ 编辑</button>
+                <button class="delete-btn" onclick="deleteCommentRule(${rule.id})">🗑️ 删除</button>
                 <button class="toggle-btn" onclick="toggleCommentRule(${rule.id})">
-                    <i class="bi bi-${rule.enabled ? 'toggle-on' : 'toggle-off'}"></i> 
+                    ${rule.enabled ? '🔴' : '🟢'} 
                     ${rule.enabled ? '禁用' : '启用'}
                 </button>
             </div>
@@ -1003,11 +1013,11 @@ function browsePath(path) {
         if (data.success) {
             displayFileList(data.items);
         } else {
-            fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);"><i class="bi bi-exclamation-circle"></i> ${data.error}</div>`;
+            fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);">⚠️ ${data.error}</div>`;
         }
     })
     .catch(error => {
-        fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);"><i class="bi bi-exclamation-circle"></i> 加载失败: ${error}</div>`;
+        fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);">⚠️ 加载失败: ${error}</div>`;
     });
 }
 
@@ -1023,9 +1033,9 @@ function displayFileList(items) {
         let icon, details = '';
         
         if (item.type === 'directory') {
-            icon = item.name === '..' ? 'bi-arrow-up' : 'bi-folder-fill';
+            icon = item.name === '..' ? '⬆️' : '📁';
         } else {
-            icon = 'bi-file-earmark-image';
+            icon = '🖼️';
             details = `${item.extension} • ${item.size}`;
         }
         
@@ -1034,7 +1044,7 @@ function displayFileList(items) {
         
         return `
             <div class="file-item ${item.type}" onclick="selectFileItem('${encodedPath}', '${item.type}', this)">
-                <i class="bi ${icon} file-icon"></i>
+                <span class="file-icon">${icon}</span>
                 <div class="file-info">
                     <div class="file-name">${escapedName}</div>
                     ${details ? `<div class="file-details">${details}</div>` : ''}
@@ -1132,19 +1142,19 @@ function showImagePreview(target, imagePath) {
             preview.innerHTML = `
                 <img src="data:${data.mime_type};base64,${data.image_data}" alt="预览图片" style="max-width: 200px; max-height: 150px; border-radius: 8px;">
                 <div class="image-info">
-                    <i class="bi bi-file-earmark-image"></i> ${fileName}
+                    🖼️ ${fileName}
                     <br><small>${data.file_size}</small>
                 </div>
             `;
         } else {
             preview.innerHTML = `
                 <div style="color: var(--text-light); text-align: center; padding: 20px;">
-                    <i class="bi bi-image" style="font-size: 24px; margin-bottom: 8px;"></i>
+                    🖼️
                     <div>无法预览图片</div>
                     <small>${data.error || '未知错误'}</small>
                 </div>
                 <div class="image-info">
-                    <i class="bi bi-file-earmark-image"></i> ${fileName}
+                    🖼️ ${fileName}
                 </div>
             `;
         }
@@ -1153,12 +1163,12 @@ function showImagePreview(target, imagePath) {
     .catch(error => {
         preview.innerHTML = `
             <div style="color: var(--text-light); text-align: center; padding: 20px;">
-                <i class="bi bi-image" style="font-size: 24px; margin-bottom: 8px;"></i>
+                🖼️
                 <div>无法预览图片</div>
                 <small>网络错误</small>
             </div>
             <div class="image-info">
-                <i class="bi bi-file-earmark-image"></i> ${fileName}
+                🖼️ ${fileName}
             </div>
         `;
         preview.style.display = 'block';
@@ -1268,7 +1278,7 @@ function importCommentConfig() {
     const importBtn = document.getElementById('comment-import-btn');
     const originalText = importBtn.innerHTML;
     importBtn.disabled = true;
-    importBtn.innerHTML = '<i class="bi bi-arrow-clockwise spin"></i> 导入中...';
+    importBtn.innerHTML = '🔄 导入中...';
     
     fetch('/api/import-comment-config', {
         method: 'POST',
