@@ -187,16 +187,6 @@ function switchToMessageMode() {
     window.location.href = 'index.html';
 }
 
-// 检查更新
-function checkUpdate() {
-    window.open('https://github.com/Chiyang001/BiliGo/releases/', '_blank');
-}
-
-// 打开使用教程
-function openTutorial() {
-    window.open('https://www.bilibili.com/video/BV1F8e4z7Eae/', '_blank');
-}
-
 // 跳转到日志页面
 function goToLogsPage() {
     window.location.href = 'logs.html';
