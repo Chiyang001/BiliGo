@@ -3,6 +3,13 @@
   "default_reply_message": "您好，我现在不在，稍后会回复您的消息。",
   "default_reply_type": "text",
   "default_reply_image": "",
+  "separate_reply_by_follow": false,
+  "followed_reply_message": "您好，感谢您的关注！我现在不在，稍后会回复您的消息。",
+  "followed_reply_type": "text",
+  "followed_reply_image": "",
+  "unfollowed_reply_message": "您好，我现在不在，稍后会回复您的消息。",
+  "unfollowed_reply_type": "text",
+  "unfollowed_reply_image": "",
   "follow_reply_enabled": false,
   "follow_reply_message": "感谢您的关注！欢迎来到我的频道~",
   "follow_reply_type": "text",
@@ -17,6 +24,16 @@
   "message_check_interval": 0.09,
   "send_delay_interval": 1.0,
   "auto_restart_interval": 300,
+  "multi_account_mode": false,
+  "accounts": [],
+  "email_notification": {
+    "enabled": false,
+    "smtp_server": "smtp.qq.com",
+    "smtp_port": 587,
+    "sender_email": "3083248889@qq.com",
+    "sender_password": "qrcsceyxuddbdhdg",
+    "receiver_email": ""
+  },
   "sessdata": "",
   "bili_jct": ""
 }

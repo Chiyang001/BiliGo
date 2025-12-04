@@ -21,7 +21,7 @@
             </div>
             <div class="header-actions">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 12px; color: #666; font-weight: 500;">v2.1</span>
+                    <span style="font-size: 12px; color: #666; font-weight: 500;">v2.3</span>
                     <button class="btn-switch btn-secondary" onclick="openTutorial()" title="使用教程">
                         📖 使用教程
                     </button>
@@ -121,24 +121,56 @@
             </section>
 
             <section class="config-panel">
-                <h2>⚙️ 登录配置</h2>
+                <h2>👤 账号配置</h2>
                 <div class="form-row">
-                    <label for="sessdata">SESSDATA:</label>
-                    <div class="input-wrapper">
-                        🔑
-                        <input type="password" id="sessdata" placeholder="请输入B站SESSDATA">
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="multi-account-mode" onchange="toggleAccountMode()">
+                        <label for="multi-account-mode">启用多账号模式</label>
                     </div>
+                    <p class="help-text">
+                        ℹ️
+                        启用后可以同时监控多个B站账号的私信，每个账号独立运行
+                    </p>
                 </div>
-                <div class="form-row">
-                    <label for="bili_jct">bili_jct:</label>
-                    <div class="input-wrapper">
-                        🔒
-                        <input type="password" id="bili_jct" placeholder="请输入bili_jct">
+                
+                <!-- 单账号配置区域 -->
+                <div id="single-account-config" style="margin-top: 15px;">
+                    <div class="form-row">
+                        <label for="sessdata">SESSDATA:</label>
+                        <div class="input-wrapper">
+                            🔑
+                            <input type="password" id="sessdata" placeholder="请输入B站SESSDATA">
+                        </div>
                     </div>
+                    <div class="form-row">
+                        <label for="bili_jct">bili_jct:</label>
+                        <div class="input-wrapper">
+                            🔒
+                            <input type="password" id="bili_jct" placeholder="请输入bili_jct">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label for="single-email">错误提醒邮箱（可选）:</label>
+                        <div class="input-wrapper">
+                            📧
+                            <input type="email" id="single-email" placeholder="接收错误通知的邮箱">
+                        </div>
+                        <p class="help-text">当系统出现错误或登录失效时，会向此邮箱发送详细的错误信息</p>
+                    </div>
+                    <button class="btn-primary" onclick="saveConfig()">
+                        💾 保存配置
+                    </button>
                 </div>
-                <button class="btn-primary" onclick="saveConfig()">
-                    💾 保存配置
-                </button>
+                
+                <!-- 多账号配置区域 -->
+                <div id="multi-account-config" style="margin-top: 15px; display: none;">
+                    <div id="accounts-list">
+                        <!-- 账号列表将通过JavaScript动态加载 -->
+                    </div>
+                    <button class="btn-primary" onclick="openAddAccountModal()" style="margin-top: 10px;">
+                        ➕ 添加账号
+                    </button>
+                </div>
             </section>
 
             <section class="reply-settings-container">
@@ -154,33 +186,109 @@
                         </div>
                         
                         <div class="form-row">
-                            <label>回复类型:</label>
-                            <div class="radio-group">
-                                <div class="radio-wrapper">
-                                    <input type="radio" id="default-reply-text" name="default-reply-type" value="text" checked>
-                                    <label for="default-reply-text">文字回复</label>
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="separate-reply-by-follow" onchange="toggleSeparateReply()">
+                                <label for="separate-reply-by-follow">区分已关注/未关注用户</label>
+                            </div>
+                            <p class="help-text">启用后，可以为已关注和未关注用户设置不同的默认回复内容</p>
+                        </div>
+                        
+                        <!-- 统一默认回复（不区分用户类型） -->
+                        <div id="unified-reply-section">
+                            <div class="form-row">
+                                <label>回复类型:</label>
+                                <div class="radio-group">
+                                    <div class="radio-wrapper">
+                                        <input type="radio" id="default-reply-text" name="default-reply-type" value="text" checked>
+                                        <label for="default-reply-text">文字回复</label>
+                                    </div>
+                                    <div class="radio-wrapper">
+                                        <input type="radio" id="default-reply-image" name="default-reply-type" value="image">
+                                        <label for="default-reply-image">图片回复</label>
+                                    </div>
                                 </div>
-                                <div class="radio-wrapper">
-                                    <input type="radio" id="default-reply-image" name="default-reply-type" value="image">
-                                    <label for="default-reply-image">图片回复</label>
+                            </div>
+                            
+                            <div id="default-text-content" class="form-row">
+                                <label for="default-reply-message">默认回复内容:</label>
+                                <textarea id="default-reply-message" placeholder="请输入默认回复内容，例如：您好，我现在不在，稍后会回复您的消息。"></textarea>
+                            </div>
+                            
+                            <div id="default-image-content" class="form-row" style="display: none;">
+                                <label for="default-reply-image-path">选择图片:</label>
+                                <div class="image-selector">
+                                    <input type="text" id="default-reply-image-path" placeholder="请选择图片文件" readonly>
+                                    <button type="button" class="btn-secondary" onclick="openImageBrowser('default')">
+                                        📁 选择图片
+                                    </button>
                                 </div>
+                                <div id="default-image-preview" class="image-preview" style="display: none;"></div>
                             </div>
                         </div>
                         
-                        <div id="default-text-content" class="form-row">
-                            <label for="default-reply-message">默认回复内容:</label>
-                            <textarea id="default-reply-message" placeholder="请输入默认回复内容，例如：您好，我现在不在，稍后会回复您的消息。"></textarea>
-                        </div>
-                        
-                        <div id="default-image-content" class="form-row" style="display: none;">
-                            <label for="default-reply-image-path">选择图片:</label>
-                            <div class="image-selector">
-                                <input type="text" id="default-reply-image-path" placeholder="请选择图片文件" readonly>
-                                <button type="button" class="btn-secondary" onclick="openImageBrowser('default')">
-                                    📁 选择图片
-                                </button>
+                        <!-- 区分用户类型的回复 -->
+                        <div id="separate-reply-section" style="display: none;">
+                            <h3 style="margin-top: 15px; color: #28a745;">✅ 已关注用户回复</h3>
+                            <div class="form-row">
+                                <label>回复类型:</label>
+                                <div class="radio-group">
+                                    <div class="radio-wrapper">
+                                        <input type="radio" id="followed-reply-text" name="followed-reply-type" value="text" checked>
+                                        <label for="followed-reply-text">文字回复</label>
+                                    </div>
+                                    <div class="radio-wrapper">
+                                        <input type="radio" id="followed-reply-image" name="followed-reply-type" value="image">
+                                        <label for="followed-reply-image">图片回复</label>
+                                    </div>
+                                </div>
                             </div>
-                            <div id="default-image-preview" class="image-preview" style="display: none;"></div>
+                            
+                            <div id="followed-text-content" class="form-row">
+                                <label for="followed-reply-message">回复内容:</label>
+                                <textarea id="followed-reply-message" placeholder="例如：您好，感谢您的关注！我现在不在，稍后会回复您的消息。"></textarea>
+                            </div>
+                            
+                            <div id="followed-image-content" class="form-row" style="display: none;">
+                                <label for="followed-reply-image-path">选择图片:</label>
+                                <div class="image-selector">
+                                    <input type="text" id="followed-reply-image-path" placeholder="请选择图片文件" readonly>
+                                    <button type="button" class="btn-secondary" onclick="openImageBrowser('followed')">
+                                        📁 选择图片
+                                    </button>
+                                </div>
+                                <div id="followed-image-preview" class="image-preview" style="display: none;"></div>
+                            </div>
+                            
+                            <h3 style="margin-top: 20px; color: #6c757d;">❌ 未关注用户回复</h3>
+                            <div class="form-row">
+                                <label>回复类型:</label>
+                                <div class="radio-group">
+                                    <div class="radio-wrapper">
+                                        <input type="radio" id="unfollowed-reply-text" name="unfollowed-reply-type" value="text" checked>
+                                        <label for="unfollowed-reply-text">文字回复</label>
+                                    </div>
+                                    <div class="radio-wrapper">
+                                        <input type="radio" id="unfollowed-reply-image" name="unfollowed-reply-type" value="image">
+                                        <label for="unfollowed-reply-image">图片回复</label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div id="unfollowed-text-content" class="form-row">
+                                <label for="unfollowed-reply-message">回复内容:</label>
+                                <textarea id="unfollowed-reply-message" placeholder="例如：您好，我现在不在，稍后会回复您的消息。"></textarea>
+                            </div>
+                            
+                            <div id="unfollowed-image-content" class="form-row" style="display: none;">
+                                <label for="unfollowed-reply-image-path">选择图片:</label>
+                                <div class="image-selector">
+                                    <input type="text" id="unfollowed-reply-image-path" placeholder="请选择图片文件" readonly>
+                                    <button type="button" class="btn-secondary" onclick="openImageBrowser('unfollowed')">
+                                        📁 选择图片
+                                    </button>
+                                </div>
+                                <div id="unfollowed-image-preview" class="image-preview" style="display: none;"></div>
+                            </div>
                         </div>
                         
                         <button class="btn-primary" onclick="saveDefaultReply()">
@@ -577,6 +685,40 @@
                 <button class="btn-secondary" onclick="closeEditModal()">
                     ✕ 取消
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加账号模态框 -->
+    <div id="add-account-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>➕ 添加账号</h2>
+                <span class="close" onclick="closeAddAccountModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label for="account-name">账号名称:</label>
+                    <input type="text" id="account-name" placeholder="例如：主账号、小号1" required>
+                    <p class="help-text">给账号起个容易识别的名字</p>
+                </div>
+                <div class="form-row">
+                    <label for="account-sessdata">SESSDATA:</label>
+                    <input type="password" id="account-sessdata" placeholder="请输入B站SESSDATA" required>
+                </div>
+                <div class="form-row">
+                    <label for="account-bili-jct">bili_jct:</label>
+                    <input type="password" id="account-bili-jct" placeholder="请输入bili_jct" required>
+                </div>
+                <div class="form-row">
+                    <label for="account-email">错误提醒邮箱（可选）:</label>
+                    <input type="email" id="account-email" placeholder="接收错误通知的邮箱">
+                    <p class="help-text">当此账号出现错误或登录失效时，系统会向此邮箱发送详细的错误信息</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeAddAccountModal()">取消</button>
+                <button class="btn-primary" onclick="addAccount()">添加</button>
             </div>
         </div>
     </div>

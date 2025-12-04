@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', function() {
     loadNewMessageConfig();
     loadFollowCheckIntervalConfig();
     loadTimingConfig();
+    loadAccounts();  // 加载多账号列表
+    initMultiAccountMode();  // 初始化多账号模式
 });
 
 // 全局变量
@@ -28,6 +30,22 @@ function initReplyTypeHandlers() {
     defaultRadios.forEach(radio => {
         radio.addEventListener('change', function() {
             toggleDefaultReplyContent(this.value);
+        });
+    });
+    
+    // 已关注用户回复类型切换
+    const followedRadios = document.querySelectorAll('input[name="followed-reply-type"]');
+    followedRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            toggleFollowedReplyContent(this.value);
+        });
+    });
+    
+    // 未关注用户回复类型切换
+    const unfollowedRadios = document.querySelectorAll('input[name="unfollowed-reply-type"]');
+    unfollowedRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            toggleUnfollowedReplyContent(this.value);
         });
     });
     
@@ -62,6 +80,49 @@ function initReplyTypeHandlers() {
             toggleUnfollowReplyContent(this.value);
         });
     });
+}
+
+// 切换区分用户类型的回复显示
+function toggleSeparateReply() {
+    const separateEnabled = document.getElementById('separate-reply-by-follow').checked;
+    const unifiedSection = document.getElementById('unified-reply-section');
+    const separateSection = document.getElementById('separate-reply-section');
+    
+    if (separateEnabled) {
+        unifiedSection.style.display = 'none';
+        separateSection.style.display = 'block';
+    } else {
+        unifiedSection.style.display = 'block';
+        separateSection.style.display = 'none';
+    }
+}
+
+// 切换已关注用户回复内容显示
+function toggleFollowedReplyContent(type) {
+    const textContent = document.getElementById('followed-text-content');
+    const imageContent = document.getElementById('followed-image-content');
+    
+    if (type === 'text') {
+        textContent.style.display = 'block';
+        imageContent.style.display = 'none';
+    } else {
+        textContent.style.display = 'none';
+        imageContent.style.display = 'block';
+    }
+}
+
+// 切换未关注用户回复内容显示
+function toggleUnfollowedReplyContent(type) {
+    const textContent = document.getElementById('unfollowed-text-content');
+    const imageContent = document.getElementById('unfollowed-image-content');
+    
+    if (type === 'text') {
+        textContent.style.display = 'block';
+        imageContent.style.display = 'none';
+    } else {
+        textContent.style.display = 'none';
+        imageContent.style.display = 'block';
+    }
 }
 
 // 切换默认回复内容显示
@@ -270,6 +331,7 @@ function showToast(message, type = 'info') {
 function saveConfig() {
     const sessdata = document.getElementById('sessdata').value;
     const bili_jct = document.getElementById('bili_jct').value;
+    const email = document.getElementById('single-email').value;
     
     if (!sessdata || !bili_jct) {
         showToast('请填写完整的登录配置', 'error');
@@ -283,22 +345,26 @@ function saveConfig() {
         },
         body: JSON.stringify({
             sessdata: sessdata,
-            bili_jct: bili_jct
+            bili_jct: bili_jct,
+            email_notification: {
+                enabled: email ? true : false,
+                receiver_email: email
+            }
         })
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showToast('关注者检测测试完成', 'success');
-            addLog('关注者检测测试完成: ' + data.message, 'success');
+            showToast('配置保存成功', 'success');
+            addLog('配置保存成功', 'success');
         } else {
-            showToast('测试失败: ' + data.error, 'error');
-            addLog('关注者检测测试失败: ' + data.error, 'error');
+            showToast('保存失败: ' + data.error, 'error');
+            addLog('保存失败: ' + data.error, 'error');
         }
     })
     .catch(error => {
-        showToast('测试失败: ' + error, 'error');
-        addLog('关注者检测测试失败: ' + error, 'error');
+        showToast('保存失败: ' + error, 'error');
+        addLog('保存失败: ' + error, 'error');
     });
 }
 
@@ -412,21 +478,51 @@ function loadConfig() {
             document.getElementById('bili_jct').value = data.bili_jct;
         }
         
+        // 加载邮箱配置
+        if (data.email_notification && data.email_notification.receiver_email) {
+            document.getElementById('single-email').value = data.email_notification.receiver_email;
+        }
+        
         // 加载默认回复设置
         if (document.getElementById('default-reply-enabled')) {
             document.getElementById('default-reply-enabled').checked = data.default_reply_enabled || false;
             
-            // 设置回复类型
+            // 加载区分用户类型的设置
+            const separateByFollow = data.separate_reply_by_follow || false;
+            document.getElementById('separate-reply-by-follow').checked = separateByFollow;
+            toggleSeparateReply();
+            
+            // 设置统一回复类型
             const replyType = data.default_reply_type || 'text';
             document.querySelector(`input[name="default-reply-type"][value="${replyType}"]`).checked = true;
             toggleDefaultReplyContent(replyType);
             
-            // 设置内容
+            // 设置统一回复内容
             document.getElementById('default-reply-message').value = data.default_reply_message || '您好，我现在不在，稍后会回复您的消息。';
             
             if (data.default_reply_image) {
                 document.getElementById('default-reply-image-path').value = data.default_reply_image;
                 showImagePreview('default', data.default_reply_image);
+            }
+            
+            // 加载已关注用户回复设置
+            const followedReplyType = data.followed_reply_type || 'text';
+            document.querySelector(`input[name="followed-reply-type"][value="${followedReplyType}"]`).checked = true;
+            toggleFollowedReplyContent(followedReplyType);
+            document.getElementById('followed-reply-message').value = data.followed_reply_message || '您好，感谢您的关注！我现在不在，稍后会回复您的消息。';
+            if (data.followed_reply_image) {
+                document.getElementById('followed-reply-image-path').value = data.followed_reply_image;
+                showImagePreview('followed', data.followed_reply_image);
+            }
+            
+            // 加载未关注用户回复设置
+            const unfollowedReplyType = data.unfollowed_reply_type || 'text';
+            document.querySelector(`input[name="unfollowed-reply-type"][value="${unfollowedReplyType}"]`).checked = true;
+            toggleUnfollowedReplyContent(unfollowedReplyType);
+            document.getElementById('unfollowed-reply-message').value = data.unfollowed_reply_message || '您好，我现在不在，稍后会回复您的消息。';
+            if (data.unfollowed_reply_image) {
+                document.getElementById('unfollowed-reply-image-path').value = data.unfollowed_reply_image;
+                showImagePreview('unfollowed', data.unfollowed_reply_image);
             }
         }
         
@@ -451,29 +547,79 @@ function loadConfig() {
 // 保存默认回复设置
 function saveDefaultReply() {
     const enabled = document.getElementById('default-reply-enabled').checked;
-    const replyType = document.querySelector('input[name="default-reply-type"]:checked').value;
+    const separateByFollow = document.getElementById('separate-reply-by-follow').checked;
     
     let configData = {
         default_reply_enabled: enabled,
-        default_reply_type: replyType
+        separate_reply_by_follow: separateByFollow
     };
     
-    if (replyType === 'text') {
-        const message = document.getElementById('default-reply-message').value.trim();
-        if (!message) {
-            showToast('请填写默认回复内容', 'warning');
-            return;
+    if (separateByFollow) {
+        // 保存已关注用户回复设置
+        const followedReplyType = document.querySelector('input[name="followed-reply-type"]:checked').value;
+        configData.followed_reply_type = followedReplyType;
+        
+        if (followedReplyType === 'text') {
+            const message = document.getElementById('followed-reply-message').value.trim();
+            if (enabled && !message) {
+                showToast('请填写已关注用户的回复内容', 'warning');
+                return;
+            }
+            configData.followed_reply_message = message;
+            configData.followed_reply_image = '';
+        } else {
+            const imagePath = document.getElementById('followed-reply-image-path').value.trim();
+            if (enabled && !imagePath) {
+                showToast('请选择已关注用户的回复图片', 'warning');
+                return;
+            }
+            configData.followed_reply_message = '';
+            configData.followed_reply_image = imagePath;
         }
-        configData.default_reply_message = message;
-        configData.default_reply_image = '';
+        
+        // 保存未关注用户回复设置
+        const unfollowedReplyType = document.querySelector('input[name="unfollowed-reply-type"]:checked').value;
+        configData.unfollowed_reply_type = unfollowedReplyType;
+        
+        if (unfollowedReplyType === 'text') {
+            const message = document.getElementById('unfollowed-reply-message').value.trim();
+            if (enabled && !message) {
+                showToast('请填写未关注用户的回复内容', 'warning');
+                return;
+            }
+            configData.unfollowed_reply_message = message;
+            configData.unfollowed_reply_image = '';
+        } else {
+            const imagePath = document.getElementById('unfollowed-reply-image-path').value.trim();
+            if (enabled && !imagePath) {
+                showToast('请选择未关注用户的回复图片', 'warning');
+                return;
+            }
+            configData.unfollowed_reply_message = '';
+            configData.unfollowed_reply_image = imagePath;
+        }
     } else {
-        const imagePath = document.getElementById('default-reply-image-path').value.trim();
-        if (!imagePath) {
-            showToast('请选择默认回复图片', 'warning');
-            return;
+        // 保存统一的默认回复设置
+        const replyType = document.querySelector('input[name="default-reply-type"]:checked').value;
+        configData.default_reply_type = replyType;
+        
+        if (replyType === 'text') {
+            const message = document.getElementById('default-reply-message').value.trim();
+            if (enabled && !message) {
+                showToast('请填写默认回复内容', 'warning');
+                return;
+            }
+            configData.default_reply_message = message;
+            configData.default_reply_image = '';
+        } else {
+            const imagePath = document.getElementById('default-reply-image-path').value.trim();
+            if (enabled && !imagePath) {
+                showToast('请选择默认回复图片', 'warning');
+                return;
+            }
+            configData.default_reply_image = imagePath;
+            configData.default_reply_message = '';
         }
-        configData.default_reply_image = imagePath;
-        configData.default_reply_message = '';
     }
     
     fetch('/api/config', {
@@ -1123,6 +1269,12 @@ function confirmImageSelection() {
     if (currentImageBrowserTarget === 'default') {
         document.getElementById('default-reply-image-path').value = selectedImagePath;
         showImagePreview('default', selectedImagePath);
+    } else if (currentImageBrowserTarget === 'followed') {
+        document.getElementById('followed-reply-image-path').value = selectedImagePath;
+        showImagePreview('followed', selectedImagePath);
+    } else if (currentImageBrowserTarget === 'unfollowed') {
+        document.getElementById('unfollowed-reply-image-path').value = selectedImagePath;
+        showImagePreview('unfollowed', selectedImagePath);
     } else if (currentImageBrowserTarget === 'rule') {
         document.getElementById('rule-reply-image-path').value = selectedImagePath;
         showImagePreview('rule', selectedImagePath);
@@ -1999,5 +2151,258 @@ function checkUpdate() {
 
 // 打开使用教程
 function openTutorial() {
-    window.open('https://www.bilibili.com/video/BV1F8e4z7Eae/', '_blank');
+    window.open('https://www.bilibili.com/video/BV1N4UvBaE2U/', '_blank');
+}
+
+
+// ==================== 多账号管理功能 ====================
+
+// 加载账号列表
+function loadAccounts() {
+    fetch('/api/accounts')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                updateAccountsList(data.accounts);
+                
+                // 更新多账号模式开关
+                const multiModeCheckbox = document.getElementById('multi-account-mode');
+                if (multiModeCheckbox) {
+                    multiModeCheckbox.checked = data.multi_account_mode || false;
+                }
+            }
+        })
+        .catch(error => {
+            console.error('加载账号列表失败:', error);
+        });
+}
+
+// 更新账号列表显示
+function updateAccountsList(accounts) {
+    const accountsList = document.getElementById('accounts-list');
+    if (!accountsList) return;
+    
+    if (!accounts || accounts.length === 0) {
+        accountsList.innerHTML = '<p class="help-text">暂无账号，点击下方按钮添加</p>';
+        return;
+    }
+    
+    let html = '<div class="accounts-container">';
+    accounts.forEach(account => {
+        const statusClass = account.enabled ? 'enabled' : 'disabled';
+        const statusText = account.enabled ? '已启用' : '已禁用';
+        const statusIcon = account.enabled ? '✅' : '⏸️';
+        
+        html += `
+            <div class="account-item ${statusClass}">
+                <div class="account-info">
+                    <div class="account-name">${statusIcon} ${account.name}</div>
+                    <div class="account-details">
+                        <span>UID: ${account.uid || '未知'}</span>
+                        <span>SESSDATA: ${account.sessdata_preview}</span>
+                    </div>
+                </div>
+                <div class="account-actions">
+                    <button class="btn-small ${account.enabled ? 'btn-warning' : 'btn-success'}" 
+                            onclick="toggleAccount('${account.name}', ${!account.enabled})">
+                        ${account.enabled ? '禁用' : '启用'}
+                    </button>
+                    <button class="btn-small btn-danger" onclick="deleteAccount('${account.name}')">
+                        删除
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    html += '</div>';
+    
+    accountsList.innerHTML = html;
+}
+
+// 切换账号模式显示
+function toggleAccountMode() {
+    const multiMode = document.getElementById('multi-account-mode').checked;
+    const singleConfig = document.getElementById('single-account-config');
+    const multiConfig = document.getElementById('multi-account-config');
+    
+    if (multiMode) {
+        singleConfig.style.display = 'none';
+        multiConfig.style.display = 'block';
+    } else {
+        singleConfig.style.display = 'block';
+        multiConfig.style.display = 'none';
+    }
+    
+    // 保存模式切换
+    toggleMultiAccountMode(multiMode);
+}
+
+// 初始化多账号模式
+function initMultiAccountMode() {
+    const multiModeCheckbox = document.getElementById('multi-account-mode');
+    if (multiModeCheckbox) {
+        // 初始化显示状态
+        toggleAccountMode();
+    }
+}
+
+// 切换多账号模式
+function toggleMultiAccountMode(enabled) {
+    fetch('/api/accounts', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            action: 'toggle_mode',
+            enabled: enabled
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+        } else {
+            showToast(data.error || '切换模式失败', 'error');
+            // 恢复复选框状态
+            document.getElementById('multi-account-mode').checked = !enabled;
+        }
+    })
+    .catch(error => {
+        showToast('切换模式失败: ' + error, 'error');
+        document.getElementById('multi-account-mode').checked = !enabled;
+    });
+}
+
+// 打开添加账号模态框
+function openAddAccountModal() {
+    const modal = document.getElementById('add-account-modal');
+    if (modal) {
+        modal.style.display = 'block';
+        // 清空输入框
+        document.getElementById('account-name').value = '';
+        document.getElementById('account-sessdata').value = '';
+        document.getElementById('account-bili-jct').value = '';
+        document.getElementById('account-email').value = '';
+    }
+}
+
+// 关闭添加账号模态框
+function closeAddAccountModal() {
+    const modal = document.getElementById('add-account-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// 添加账号
+function addAccount() {
+    const name = document.getElementById('account-name').value.trim();
+    const sessdata = document.getElementById('account-sessdata').value.trim();
+    const bili_jct = document.getElementById('account-bili-jct').value.trim();
+    const email = document.getElementById('account-email').value.trim();
+    
+    if (!name) {
+        showToast('请输入账号名称', 'error');
+        return;
+    }
+    
+    if (!sessdata || !bili_jct) {
+        showToast('请填写完整的登录信息', 'error');
+        return;
+    }
+    
+    // 显示加载提示
+    showToast('正在验证账号...', 'info');
+    
+    fetch('/api/accounts', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            action: 'add',
+            name: name,
+            sessdata: sessdata,
+            bili_jct: bili_jct,
+            email: email
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+            closeAddAccountModal();
+            loadAccounts();  // 重新加载账号列表
+        } else {
+            showToast(data.error || '添加账号失败', 'error');
+        }
+    })
+    .catch(error => {
+        showToast('添加账号失败: ' + error, 'error');
+    });
+}
+
+// 切换账号启用状态
+function toggleAccount(name, enabled) {
+    fetch('/api/accounts', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            action: 'update',
+            name: name,
+            enabled: enabled
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+            loadAccounts();  // 重新加载账号列表
+        } else {
+            showToast(data.error || '操作失败', 'error');
+        }
+    })
+    .catch(error => {
+        showToast('操作失败: ' + error, 'error');
+    });
+}
+
+// 删除账号
+function deleteAccount(name) {
+    if (!confirm(`确定要删除账号 "${name}" 吗？此操作不可恢复。`)) {
+        return;
+    }
+    
+    fetch('/api/accounts', {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            name: name
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+            loadAccounts();  // 重新加载账号列表
+        } else {
+            showToast(data.error || '删除失败', 'error');
+        }
+    })
+    .catch(error => {
+        showToast('删除失败: ' + error, 'error');
+    });
+}
+
+// 点击模态框外部关闭
+window.onclick = function(event) {
+    const addAccountModal = document.getElementById('add-account-modal');
+    if (event.target == addAccountModal) {
+        closeAddAccountModal();
+    }
 }

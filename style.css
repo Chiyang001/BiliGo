@@ -1327,3 +1327,156 @@ footer a:hover {
         height: 80px;
     }
 }
+
+/* =
+=================== 多账号管理样式 ==================== */
+
+.accounts-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.account-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 2px solid #e0e0e0;
+    transition: all 0.3s ease;
+}
+
+.account-item.enabled {
+    border-color: #4CAF50;
+    background: #f1f8f4;
+}
+
+.account-item.disabled {
+    border-color: #ccc;
+    background: #f5f5f5;
+    opacity: 0.7;
+}
+
+.account-info {
+    flex: 1;
+}
+
+.account-name {
+    font-size: 16px;
+    font-weight: bold;
+    color: #333;
+    margin-bottom: 5px;
+}
+
+.account-details {
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    gap: 15px;
+}
+
+.account-details span {
+    background: #fff;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+}
+
+.account-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 13px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-small.btn-success {
+    background: #4CAF50;
+    color: white;
+}
+
+.btn-small.btn-success:hover {
+    background: #45a049;
+}
+
+.btn-small.btn-warning {
+    background: #ff9800;
+    color: white;
+}
+
+.btn-small.btn-warning:hover {
+    background: #e68900;
+}
+
+.btn-small.btn-danger {
+    background: #f44336;
+    color: white;
+}
+
+.btn-small.btn-danger:hover {
+    background: #da190b;
+}
+
+/* 添加账号模态框样式 */
+#add-account-modal .modal-content {
+    max-width: 500px;
+}
+
+#add-account-modal .form-row {
+    margin-bottom: 15px;
+}
+
+#add-account-modal .form-row label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: #333;
+}
+
+#add-account-modal .form-row input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+#add-account-modal .form-row input:focus {
+    outline: none;
+    border-color: #00a1d6;
+    box-shadow: 0 0 0 2px rgba(0, 161, 214, 0.1);
+}
+
+#add-account-modal .help-text {
+    margin-top: 5px;
+    font-size: 12px;
+    color: #666;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .account-item {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .account-actions {
+        width: 100%;
+        margin-top: 10px;
+        justify-content: flex-end;
+    }
+    
+    .account-details {
+        flex-direction: column;
+        gap: 5px;
+    }
+}
