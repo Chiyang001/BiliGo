@@ -127,6 +127,181 @@ class BilibiliAPI:
             'Referer': 'https://message.bilibili.com/'
         })
     
+    @staticmethod
+    def get_qrcode_login_url():
+        """获取扫码登录的二维码URL"""
+        try:
+            url = 'https://passport.bilibili.com/x/passport-login/web/qrcode/generate'
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': 'https://passport.bilibili.com/'
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            result = response.json()
+            
+            if result.get('code') == 0:
+                data = result.get('data', {})
+                return {
+                    'success': True,
+                    'url': data.get('url'),  # 二维码内容URL
+                    'qrcode_key': data.get('qrcode_key')  # 用于轮询的key
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': result.get('message', '获取二维码失败')
+                }
+        except Exception as e:
+            logger.error(f"获取扫码登录二维码失败: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    @staticmethod
+    def poll_qrcode_status(qrcode_key):
+        """轮询扫码登录状态"""
+        try:
+            url = 'https://passport.bilibili.com/x/passport-login/web/qrcode/poll'
+            params = {
+                'qrcode_key': qrcode_key
+            }
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://passport.bilibili.com/',
+                'Origin': 'https://passport.bilibili.com'
+            }
+            
+            # 创建session来保持cookie
+            session = requests.Session()
+            session.headers.update(headers)
+            
+            response = session.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            result = response.json()
+            
+            logger.info(f"扫码轮询响应: code={result.get('code')}, data={result.get('data')}")
+            
+            if result.get('code') == 0:
+                data = result.get('data', {})
+                code = data.get('code')
+                
+                # code: 86101-未扫码, 86090-已扫码未确认, 86038-二维码已失效, 0-成功
+                if code == 0:
+                    # 登录成功
+                    logger.info("扫码登录成功，开始提取cookie")
+                    
+                    # 方法1: 从响应的Set-Cookie头中提取
+                    sessdata = ''
+                    bili_jct = ''
+                    
+                    # 检查响应头中的Set-Cookie
+                    set_cookie_headers = response.headers.get('Set-Cookie', '')
+                    logger.info(f"Set-Cookie头: {set_cookie_headers[:200] if set_cookie_headers else 'None'}")
+                    
+                    # 从session.cookies中提取
+                    for cookie in session.cookies:
+                        logger.info(f"Cookie: {cookie.name}={cookie.value[:20]}...")
+                        if cookie.name == 'SESSDATA':
+                            sessdata = cookie.value
+                        elif cookie.name == 'bili_jct':
+                            bili_jct = cookie.value
+                    
+                    # 方法2: 如果响应中有url，访问该url获取cookie
+                    if (not sessdata or not bili_jct) and data.get('url'):
+                        url_with_params = data.get('url')
+                        logger.info(f"尝试从跳转URL获取cookie: {url_with_params[:100]}...")
+                        try:
+                            cookie_response = session.get(url_with_params, allow_redirects=True, timeout=10)
+                            logger.info(f"跳转URL响应状态: {cookie_response.status_code}")
+                            
+                            for cookie in session.cookies:
+                                if cookie.name == 'SESSDATA':
+                                    sessdata = cookie.value
+                                elif cookie.name == 'bili_jct':
+                                    bili_jct = cookie.value
+                        except Exception as e:
+                            logger.error(f"访问跳转URL失败: {e}")
+                    
+                    # 方法3: 访问B站主页激活cookie
+                    if not sessdata or not bili_jct:
+                        logger.info("尝试访问B站主页激活cookie")
+                        try:
+                            home_response = session.get('https://www.bilibili.com', timeout=10)
+                            logger.info(f"主页响应状态: {home_response.status_code}")
+                            
+                            for cookie in session.cookies:
+                                if cookie.name == 'SESSDATA':
+                                    sessdata = cookie.value
+                                elif cookie.name == 'bili_jct':
+                                    bili_jct = cookie.value
+                        except Exception as e:
+                            logger.error(f"访问主页失败: {e}")
+                    
+                    if sessdata and bili_jct:
+                        logger.info(f"成功获取cookie - SESSDATA长度: {len(sessdata)}, bili_jct长度: {len(bili_jct)}")
+                        return {
+                            'success': True,
+                            'status': 'success',
+                            'sessdata': sessdata,
+                            'bili_jct': bili_jct
+                        }
+                    else:
+                        logger.warning(f"未能获取完整cookie - SESSDATA: {bool(sessdata)}, bili_jct: {bool(bili_jct)}")
+                        logger.warning(f"完整响应数据: {data}")
+                        
+                        # 返回更详细的错误信息
+                        missing = []
+                        if not sessdata:
+                            missing.append('SESSDATA')
+                        if not bili_jct:
+                            missing.append('bili_jct')
+                        
+                        return {
+                            'success': False,
+                            'status': 'error',
+                            'message': f'获取登录凭证失败（缺少: {", ".join(missing)}），请尝试手动输入Cookie'
+                        }
+                elif code == 86101:
+                    return {
+                        'success': True,
+                        'status': 'waiting',
+                        'message': '等待扫码'
+                    }
+                elif code == 86090:
+                    return {
+                        'success': True,
+                        'status': 'scanned',
+                        'message': '已扫码，等待确认'
+                    }
+                elif code == 86038:
+                    return {
+                        'success': False,
+                        'status': 'expired',
+                        'message': '二维码已失效'
+                    }
+                else:
+                    logger.warning(f"未知的扫码状态码: {code}, 消息: {data.get('message', '未知')}")
+                    return {
+                        'success': False,
+                        'status': 'error',
+                        'message': data.get('message', f'未知状态码: {code}')
+                    }
+            else:
+                return {
+                    'success': False,
+                    'status': 'error',
+                    'message': result.get('message', '轮询失败')
+                }
+        except Exception as e:
+            logger.error(f"轮询扫码状态失败: {e}")
+            return {
+                'success': False,
+                'status': 'error',
+                'message': str(e)
+            }
+    
     def get_sessions(self):
         """获取私信会话列表（极速版）"""
         url = 'https://api.vc.bilibili.com/session_svr/v1/session_svr/get_sessions'
@@ -4765,6 +4940,43 @@ def reset_all_data():
         
     except Exception as e:
         error_msg = f"清除数据失败: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({'success': False, 'error': error_msg})
+
+@app.route('/api/qrcode-login/generate', methods=['GET'])
+def generate_qrcode():
+    """生成扫码登录二维码"""
+    try:
+        result = BilibiliAPI.get_qrcode_login_url()
+        return jsonify(result)
+    except Exception as e:
+        error_msg = f"生成二维码失败: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({'success': False, 'error': error_msg})
+
+@app.route('/api/qrcode-login/poll', methods=['POST'])
+def poll_qrcode():
+    """轮询扫码登录状态"""
+    try:
+        data = request.get_json()
+        qrcode_key = data.get('qrcode_key')
+        
+        if not qrcode_key:
+            return jsonify({'success': False, 'error': '缺少qrcode_key参数'})
+        
+        result = BilibiliAPI.poll_qrcode_status(qrcode_key)
+        
+        # 如果登录成功，自动保存配置
+        if result.get('success') and result.get('status') == 'success':
+            global config
+            config['sessdata'] = result.get('sessdata')
+            config['bili_jct'] = result.get('bili_jct')
+            save_config()
+            add_log('扫码登录成功，配置已自动保存', 'success')
+        
+        return jsonify(result)
+    except Exception as e:
+        error_msg = f"轮询扫码状态失败: {str(e)}"
         logger.error(error_msg)
         return jsonify({'success': False, 'error': error_msg})
 

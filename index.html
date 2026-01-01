@@ -224,16 +224,32 @@
                 
                 <!-- 单账号配置区域 -->
                 <div id="single-account-config" style="margin-top: 15px;">
+                    <div class="info-banner" style="margin-bottom: 15px;">
+                        <div class="info-banner-icon">🔐</div>
+                        <div class="info-banner-content">
+                            <strong>两种登录方式</strong>
+                            <p>方式1：手动输入Cookie（SESSDATA和bili_jct）</p>
+                            <p>方式2：使用哔哩哔哩扫码登录（推荐，更安全便捷）</p>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <button class="btn-primary" onclick="showQRCodeLogin()" style="width: 100%;">
+                            📱 扫码登录
+                        </button>
+                    </div>
+                    
+                    <!-- Cookie输入区域 - 始终显示 -->
                     <div class="form-row">
                         <label for="sessdata">🔑 SESSDATA:</label>
                         <div class="input-wrapper">
-                            <input type="password" id="sessdata" placeholder="请输入B站SESSDATA">
+                            <input type="password" id="sessdata" placeholder="请输入B站SESSDATA或使用扫码登录">
                         </div>
                     </div>
                     <div class="form-row">
                         <label for="bili_jct">🔒 bili_jct:</label>
                         <div class="input-wrapper">
-                            <input type="password" id="bili_jct" placeholder="请输入bili_jct">
+                            <input type="password" id="bili_jct" placeholder="请输入bili_jct或使用扫码登录">
                         </div>
                     </div>
                     <button class="btn-primary" onclick="saveConfig()">
@@ -858,6 +874,61 @@
                 <button class="btn-danger" onclick="executeResetAllData()">
                     🗑️ 确认清除
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 扫码登录模态框 -->
+    <div id="qrcode-login-modal" class="modal">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3>📱 哔哩哔哩扫码登录</h3>
+                <button class="close-btn" onclick="closeQRCodeLoginModal()">
+                    ✕
+                </button>
+            </div>
+            <div class="modal-body" style="text-align: center; padding: 30px;">
+                <div id="qrcode-container" style="margin: 20px auto;">
+                    <div id="qrcode-loading" style="display: none;">
+                        <div style="font-size: 48px; margin-bottom: 15px;">⏳</div>
+                        <p style="color: #666;">正在生成二维码...</p>
+                    </div>
+                    <div id="qrcode-display" style="display: none;">
+                        <div id="qrcode-image" style="margin: 0 auto; max-width: 280px;"></div>
+                        <div id="qrcode-status" style="margin-top: 20px; font-size: 16px; color: #666;">
+                            <p>📱 请使用哔哩哔哩APP扫描二维码</p>
+                        </div>
+                    </div>
+                    <div id="qrcode-error" style="display: none; color: #dc3545;">
+                        <div style="font-size: 48px; margin-bottom: 15px;">❌</div>
+                        <p id="qrcode-error-message"></p>
+                        <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border: 1px solid #ffc107; text-align: left;">
+                            <p style="margin: 0 0 10px 0; font-weight: 600; color: #856404;">💡 备用方案：</p>
+                            <p style="margin: 0; color: #856404; font-size: 14px; line-height: 1.6;">
+                                如果扫码登录失败，您可以关闭此窗口，在下方的输入框中手动输入Cookie。
+                                <br>在浏览器中登录B站后，从浏览器开发者工具中复制SESSDATA和bili_jct即可。
+                            </p>
+                        </div>
+                        <button class="btn-primary" onclick="retryQRCodeLogin()" style="margin-top: 15px; width: 100%;">
+                            🔄 重新生成二维码
+                        </button>
+                    </div>
+                    <div id="qrcode-success" style="display: none; color: #28a745;">
+                        <div style="font-size: 64px; margin-bottom: 15px;">✅</div>
+                        <p style="font-size: 18px; font-weight: 600;">登录成功！</p>
+                        <p style="color: #666; margin-top: 10px;">配置已自动保存</p>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 25px; padding: 15px; background: #f8f9fa; border-radius: 8px; text-align: left; border: 1px solid #e5e9ef;">
+                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #333;">💡 使用说明：</p>
+                    <ol style="margin: 0; padding-left: 20px; line-height: 1.8; color: #666; font-size: 14px;">
+                        <li>打开哔哩哔哩APP</li>
+                        <li>点击右上角扫一扫</li>
+                        <li>扫描上方二维码</li>
+                        <li>在APP中确认登录</li>
+                    </ol>
+                </div>
             </div>
         </div>
     </div>

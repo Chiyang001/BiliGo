@@ -1373,3 +1373,213 @@ if (window.innerWidth <= 768) {
         }
     });
 }
+
+
+// ==================== 评论系统扫码登录相关函数 ====================
+
+let commentQrcodePollingInterval = null;
+let currentCommentQRCodeKey = null;
+let isCommentQRCodeLoginSuccess = false; // 添加标志位，防止重复处理
+
+// 显示扫码登录
+function showCommentQRCodeLogin() {
+    document.getElementById('comment-qrcode-login-modal').style.display = 'block';
+    
+    // 重置标志位和显示状态
+    isCommentQRCodeLoginSuccess = false;
+    document.getElementById('comment-qrcode-loading').style.display = 'block';
+    document.getElementById('comment-qrcode-display').style.display = 'none';
+    document.getElementById('comment-qrcode-error').style.display = 'none';
+    document.getElementById('comment-qrcode-success').style.display = 'none';
+    
+    // 生成二维码
+    generateCommentQRCode();
+}
+
+// 生成二维码
+function generateCommentQRCode() {
+    fetch('/api/qrcode-login/generate')
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            currentCommentQRCodeKey = data.qrcode_key;
+            
+            // 显示二维码
+            document.getElementById('comment-qrcode-loading').style.display = 'none';
+            document.getElementById('comment-qrcode-display').style.display = 'block';
+            
+            // 使用Google Chart API生成二维码图片
+            const qrcodeContainer = document.getElementById('comment-qrcode-image');
+            qrcodeContainer.innerHTML = '';
+            
+            const qrcodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(data.url)}`;
+            const img = document.createElement('img');
+            img.src = qrcodeUrl;
+            img.style.width = '100%';
+            img.style.border = '2px solid #e0e0e0';
+            img.style.borderRadius = '8px';
+            qrcodeContainer.appendChild(img);
+            
+            // 开始轮询状态
+            startCommentQRCodePolling();
+        } else {
+            showCommentQRCodeError(data.error || '生成二维码失败');
+        }
+    })
+    .catch(error => {
+        console.error('生成二维码失败:', error);
+        showCommentQRCodeError('网络错误，请重试');
+    });
+}
+
+// 开始轮询二维码状态
+function startCommentQRCodePolling() {
+    // 清除之前的轮询
+    if (commentQrcodePollingInterval) {
+        clearInterval(commentQrcodePollingInterval);
+    }
+    
+    // 重置成功标志
+    isCommentQRCodeLoginSuccess = false;
+    
+    // 每2秒轮询一次
+    commentQrcodePollingInterval = setInterval(() => {
+        pollCommentQRCodeStatus();
+    }, 2000);
+    
+    // 3分钟后自动停止轮询（二维码过期）
+    setTimeout(() => {
+        if (commentQrcodePollingInterval && !isCommentQRCodeLoginSuccess) {
+            clearInterval(commentQrcodePollingInterval);
+            commentQrcodePollingInterval = null;
+            
+            // 检查是否还在等待扫码状态
+            const displayElement = document.getElementById('comment-qrcode-display');
+            if (displayElement && displayElement.style.display !== 'none') {
+                showCommentQRCodeError('二维码已过期，请重新生成');
+            }
+        }
+    }, 180000);
+}
+
+// 轮询二维码状态
+function pollCommentQRCodeStatus() {
+    if (!currentCommentQRCodeKey || isCommentQRCodeLoginSuccess) return;
+    
+    fetch('/api/qrcode-login/poll', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            qrcode_key: currentCommentQRCodeKey
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('扫码状态:', data);
+        
+        // 如果已经成功，不再处理后续响应
+        if (isCommentQRCodeLoginSuccess) {
+            return;
+        }
+        
+        if (data.success) {
+            const status = data.status;
+            const statusElement = document.getElementById('comment-qrcode-status');
+            
+            if (status === 'waiting') {
+                statusElement.innerHTML = '<p>📱 请使用哔哩哔哩APP扫描二维码</p>';
+            } else if (status === 'scanned') {
+                statusElement.innerHTML = '<p style="color: #00a1d6; font-weight: 600;">✅ 已扫码，请在APP中确认登录</p>';
+            } else if (status === 'success') {
+                // 登录成功 - 立即设置标志位并停止轮询
+                isCommentQRCodeLoginSuccess = true;
+                clearInterval(commentQrcodePollingInterval);
+                commentQrcodePollingInterval = null;
+                
+                // 显示成功状态
+                document.getElementById('comment-qrcode-display').style.display = 'none';
+                document.getElementById('comment-qrcode-success').style.display = 'block';
+                
+                showToast('扫码登录成功！', 'success');
+                addCommentLog('扫码登录成功，配置已自动保存', 'success');
+                
+                // 3秒后关闭模态框并刷新配置
+                setTimeout(() => {
+                    closeCommentQRCodeLoginModal();
+                    loadCommentConfig();
+                }, 3000);
+            }
+        } else {
+            // 只有在未成功的情况下才处理错误
+            if (!isCommentQRCodeLoginSuccess) {
+                if (data.status === 'expired') {
+                    clearInterval(commentQrcodePollingInterval);
+                    commentQrcodePollingInterval = null;
+                    showCommentQRCodeError('二维码已过期，请重新生成');
+                } else if (data.status === 'error') {
+                    clearInterval(commentQrcodePollingInterval);
+                    commentQrcodePollingInterval = null;
+                    showCommentQRCodeError(data.message || '登录失败，请重试');
+                    console.error('扫码登录错误:', data);
+                } else {
+                    console.error('轮询状态失败:', data.message);
+                }
+            }
+        }
+    })
+    .catch(error => {
+        console.error('轮询状态失败:', error);
+        // 网络错误不停止轮询，继续尝试
+    });
+}
+
+// 显示二维码错误
+function showCommentQRCodeError(message) {
+    // 如果已经成功，不显示错误
+    if (isCommentQRCodeLoginSuccess) {
+        return;
+    }
+    
+    document.getElementById('comment-qrcode-loading').style.display = 'none';
+    document.getElementById('comment-qrcode-display').style.display = 'none';
+    document.getElementById('comment-qrcode-error').style.display = 'block';
+    document.getElementById('comment-qrcode-error-message').textContent = message;
+    
+    // 清除轮询
+    if (commentQrcodePollingInterval) {
+        clearInterval(commentQrcodePollingInterval);
+        commentQrcodePollingInterval = null;
+    }
+}
+
+// 重试生成二维码
+function retryCommentQRCodeLogin() {
+    isCommentQRCodeLoginSuccess = false;
+    document.getElementById('comment-qrcode-error').style.display = 'none';
+    document.getElementById('comment-qrcode-loading').style.display = 'block';
+    generateCommentQRCode();
+}
+
+// 关闭扫码登录模态框
+function closeCommentQRCodeLoginModal() {
+    document.getElementById('comment-qrcode-login-modal').style.display = 'none';
+    
+    // 清除轮询
+    if (commentQrcodePollingInterval) {
+        clearInterval(commentQrcodePollingInterval);
+        commentQrcodePollingInterval = null;
+    }
+    
+    currentCommentQRCodeKey = null;
+    isCommentQRCodeLoginSuccess = false;
+}
+
+// 点击模态框外部关闭
+window.addEventListener('click', function(event) {
+    const commentQrcodeModal = document.getElementById('comment-qrcode-login-modal');
+    if (event.target === commentQrcodeModal) {
+        closeCommentQRCodeLoginModal();
+    }
+});

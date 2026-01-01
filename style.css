@@ -1686,3 +1686,112 @@ a:hover {
 .danger-zone .btn-danger {
     width: 100%;
 }
+
+/* 扫码登录模态框样式 */
+#qrcode-login-modal .modal-content {
+    max-width: 450px;
+}
+
+#qrcode-container {
+    min-height: 350px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#qrcode-image {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+#qrcode-image img {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+}
+
+#qrcode-image img:hover {
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+
+#qrcode-status {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+#qrcode-success {
+    animation: scaleIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.5);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* 登录方式切换按钮样式 */
+.button-group button {
+    transition: all 0.3s ease;
+}
+
+.button-group button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 161, 214, 0.2);
+}
+
+/* 信息横幅样式增强 */
+.info-banner {
+    animation: slideInDown 0.5s ease-out;
+}
+
+@keyframes slideInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 扫码登录加载动画 */
+#qrcode-loading {
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+#qrcode-loading > div:first-child {
+    animation: rotate 2s linear infinite;
+}
+
+@keyframes rotate {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+

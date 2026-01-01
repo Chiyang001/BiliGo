@@ -1316,3 +1316,45 @@ footer a:hover {
         height: 80px;
     }
 }
+
+/* 评论系统扫码登录模态框样式 */
+#comment-qrcode-login-modal .modal-content {
+    max-width: 450px;
+}
+
+#comment-qrcode-container {
+    min-height: 350px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#comment-qrcode-image {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+#comment-qrcode-image img {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
+}
+
+#comment-qrcode-image img:hover {
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+
+#comment-qrcode-status {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+#comment-qrcode-success {
+    animation: scaleIn 0.5s ease-in-out;
+}
+
+/* 评论系统扫码登录加载动画 */
+#comment-qrcode-loading {
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+#comment-qrcode-loading > div:first-child {
+    animation: rotate 2s linear infinite;
+}
