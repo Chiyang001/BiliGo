@@ -21,7 +21,7 @@
             </div>
             <div class="header-actions">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 12px; color: #666; font-weight: 500;">v2.3</span>
+                    <span style="font-size: 13px; color: #00a1d6; font-weight: 600; padding: 4px 12px; background: linear-gradient(135deg, #e3f2fd 0%, #f0f8ff 100%); border-radius: 20px; border: 1px solid #b3e5fc;">Ver.2026-0101</span>
                     <button class="btn-switch btn-secondary" onclick="openTutorial()" title="使用教程">
                         📖 使用教程
                     </button>
@@ -69,8 +69,7 @@
                             <label for="send-delay-interval">发送等待间隔 (秒):</label>
                             <input type="number" id="send-delay-interval" min="0.1" max="10" step="0.1" value="1.0" placeholder="1.0">
                             <p class="help-text">
-                                ⚠️
-                                两次发送消息之间的等待时间，建议1秒以上避免触发风控
+                                ⚠️ 两次发送消息之间的等待时间，建议1秒以上避免触发风控
                             </p>
                         </div>
                         
@@ -95,14 +94,12 @@
                 </div>
                 
                 <div class="form-row" style="margin-top: 15px;">
-                    <label for="max-replies-per-user">单用户最大回复次数:</label>
+                    <label for="max-replies-per-user">👤 单用户最大回复次数:</label>
                     <div class="input-wrapper">
-                        👤
                         <input type="number" id="max-replies-per-user" min="1" max="100" value="3" placeholder="3">
                     </div>
                     <p class="help-text">
-                        ℹ️
-                        设置对同一个用户的最大回复次数，避免重复回复同一用户，建议设置3-5次
+                        ℹ️ 设置对同一个用户的最大回复次数，避免重复回复同一用户，建议设置3-5次
                     </p>
                 </div>
                 
@@ -118,57 +115,129 @@
                         📎 导入配置
                     </button>
                 </div>
+                
+                <!-- 危险操作区域 -->
+                <div class="danger-zone" style="margin-top: 30px;">
+                    <div class="danger-zone-header">
+                        <h3>⚠️ 危险操作</h3>
+                    </div>
+                    <div class="danger-zone-content">
+                        <p class="danger-zone-description">
+                            以下操作将清除所有配置和数据，恢复到初始状态。此操作不可撤销，请谨慎操作！
+                        </p>
+                        <button class="btn-danger" onclick="confirmResetAllData()">
+                            🗑️ 清除所有数据
+                        </button>
+                    </div>
+                </div>
             </section>
 
             <section class="config-panel">
                 <h2>👤 账号配置</h2>
-                <div class="form-row">
-                    <div class="checkbox-wrapper">
-                        <input type="checkbox" id="multi-account-mode" onchange="toggleAccountMode()">
-                        <label for="multi-account-mode">启用多账号模式</label>
+                
+                <!-- 多账号提示 -->
+                <div class="info-banner" style="margin-bottom: 20px;">
+                    <div class="info-banner-icon">💡</div>
+                    <div class="info-banner-content">
+                        <strong>多账号使用提示</strong>
+                        <p>如需同时管理多个B站账号，建议使用以下方式：</p>
+                        <ul style="margin: 8px 0 0 20px; line-height: 1.8;">
+                            <li><strong>Docker部署：</strong>为每个账号创建独立的容器实例</li>
+                            <li><strong>多开BiliGo：</strong>在不同端口运行多个BiliGo实例（如4999、5000、5001等）</li>
+                        </ul>
+                        <p style="margin-top: 8px; color: #666; font-size: 13px;">注：内置多账号功能已移除，以上方式可实现更稳定的多账号管理</p>
                     </div>
-                    <p class="help-text">
-                        ℹ️
-                        启用后可以同时监控多个B站账号的私信，每个账号独立运行
-                    </p>
+                </div>
+                
+                <!-- 邮件提醒配置区域 -->
+                <div class="collapsible-section" style="margin-top: 20px;">
+                    <div class="collapsible-header" onclick="toggleEmailConfig()">
+                        <h3>📧 邮件提醒配置</h3>
+                        <span class="toggle-icon" id="email-toggle-icon">▼</span>
+                    </div>
+                    
+                    <div class="collapsible-content" id="email-config-content" style="display: none;">
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="email-notification-enabled" onchange="toggleEmailNotification()">
+                                <label for="email-notification-enabled">启用邮件提醒</label>
+                            </div>
+                            <p class="help-text">启用后，系统出现错误或登录失效时会发送邮件通知</p>
+                        </div>
+                        
+                        <div id="email-settings" style="display: none;">
+                            <div class="form-row">
+                                <label for="sender-email">📧 发送邮箱:</label>
+                                <div class="input-wrapper">
+                                    <input type="email" id="sender-email" placeholder="例如：your_email@qq.com">
+                                </div>
+                                <p class="help-text">用于发送通知邮件的QQ邮箱地址</p>
+                            </div>
+                            
+                            <div class="form-row">
+                                <label for="sender-password">🔑 邮箱授权码:</label>
+                                <div class="input-wrapper">
+                                    <input type="password" id="sender-password" placeholder="请输入QQ邮箱授权码">
+                                </div>
+                                <p class="help-text">
+                                    ⚠️ 不是QQ密码！请在QQ邮箱设置中生成授权码
+                                    <br>
+                                    <a href="#" onclick="showEmailSetupGuide()" style="color: #007bff; text-decoration: none;">📖 点击查看获取授权码教程</a>
+                                </p>
+                            </div>
+                            
+                            <div class="form-row">
+                                <label for="receiver-email">📬 接收邮箱:</label>
+                                <div class="input-wrapper">
+                                    <input type="email" id="receiver-email" placeholder="例如：your_email@qq.com">
+                                </div>
+                                <p class="help-text">接收错误通知的邮箱地址（可以与发送邮箱相同）</p>
+                            </div>
+                            
+                            <div class="form-row">
+                                <label for="smtp-server">🌐 SMTP服务器:</label>
+                                <div class="input-wrapper">
+                                    <input type="text" id="smtp-server" value="smtp.qq.com" readonly>
+                                </div>
+                                <p class="help-text">QQ邮箱SMTP服务器地址（已预设）</p>
+                            </div>
+                            
+                            <div class="form-row">
+                                <label for="smtp-port">🔌 SMTP端口:</label>
+                                <div class="input-wrapper">
+                                    <input type="number" id="smtp-port" value="587" readonly>
+                                </div>
+                                <p class="help-text">QQ邮箱SMTP端口（已预设）</p>
+                            </div>
+                            
+                            <div class="button-group">
+                                <button class="btn-primary" onclick="saveEmailConfig()">
+                                    💾 保存邮件配置
+                                </button>
+                                <button class="btn-secondary" onclick="testEmailNotification()">
+                                    📧 发送测试邮件
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 
                 <!-- 单账号配置区域 -->
                 <div id="single-account-config" style="margin-top: 15px;">
                     <div class="form-row">
-                        <label for="sessdata">SESSDATA:</label>
+                        <label for="sessdata">🔑 SESSDATA:</label>
                         <div class="input-wrapper">
-                            🔑
                             <input type="password" id="sessdata" placeholder="请输入B站SESSDATA">
                         </div>
                     </div>
                     <div class="form-row">
-                        <label for="bili_jct">bili_jct:</label>
+                        <label for="bili_jct">🔒 bili_jct:</label>
                         <div class="input-wrapper">
-                            🔒
                             <input type="password" id="bili_jct" placeholder="请输入bili_jct">
                         </div>
                     </div>
-                    <div class="form-row">
-                        <label for="single-email">错误提醒邮箱（可选）:</label>
-                        <div class="input-wrapper">
-                            📧
-                            <input type="email" id="single-email" placeholder="接收错误通知的邮箱">
-                        </div>
-                        <p class="help-text">当系统出现错误或登录失效时，会向此邮箱发送详细的错误信息</p>
-                    </div>
                     <button class="btn-primary" onclick="saveConfig()">
                         💾 保存配置
-                    </button>
-                </div>
-                
-                <!-- 多账号配置区域 -->
-                <div id="multi-account-config" style="margin-top: 15px; display: none;">
-                    <div id="accounts-list">
-                        <!-- 账号列表将通过JavaScript动态加载 -->
-                    </div>
-                    <button class="btn-primary" onclick="openAddAccountModal()" style="margin-top: 10px;">
-                        ➕ 添加账号
                     </button>
                 </div>
             </section>
@@ -337,14 +406,12 @@
                         </div>
                         
                         <div class="form-row">
-                            <label for="follow-check-interval">关注者检查间隔 (秒):</label>
+                            <label for="follow-check-interval">⏰ 关注者检查间隔 (秒):</label>
                             <div class="input-wrapper">
-                                ⏰
-                                <input type="number" id="follow-check-interval" min="300" max="3600" step="60" value="300" placeholder="300">
+                                <input type="number" id="follow-check-interval" min="1800" max="3600" step="60" value="1800" placeholder="1800">
                             </div>
                             <p class="help-text">
-                                ⚠️
-                                最低5分钟（300秒），建议设置为10分钟以上，间隔过短可能触发B站风控系统导致无法正常检测关注者
+                                ⚠️ 最低30分钟（1800秒），建议设置为30分钟以上，间隔过短可能触发B站风控系统导致无法正常检测关注者
                             </p>
                         </div>
                         
@@ -412,16 +479,14 @@
                     <div class="keyword-panel half-width">
                         <h2>💬📝 关键词回复设置</h2>
                         <div class="form-row">
-                            <label for="rule-title">规则标题:</label>
+                            <label for="rule-title">🏷️ 规则标题:</label>
                             <div class="input-wrapper">
-                                🏷️
                                 <input type="text" id="rule-title" placeholder="例如：问候回复、帮助说明">
                             </div>
                         </div>
                         <div class="form-row">
-                            <label for="keywords">关键词 (用中文逗号分隔):</label>
+                            <label for="keywords"># 关键词 (用中文逗号分隔):</label>
                             <div class="input-wrapper">
-                                # 
                                 <input type="text" id="keywords" placeholder="例如：你好，帮助，问题">
                             </div>
                         </div>
@@ -494,8 +559,7 @@
                 <h2>📜 系统日志</h2>
                 <div class="log-redirect">
                     <div class="log-redirect-content">
-                        📄
-                        <h3>查看系统日志</h3>
+                        <h3>📄 查看系统日志</h3>
                         <p>点击下方按钮跳转到专门的日志页面查看详细的系统运行日志</p>
                         <button class="btn-primary" onclick="goToLogsPage()">
                             🔗
@@ -507,7 +571,7 @@
         </div>
 
         <footer>
-            <p>© 2025 <a href="https://space.bilibili.com/404891612" target="_blank">炽阳001</a> | BiliGo 自动回复系统</p>
+            <p>© 2026 <a href="https://space.bilibili.com/404891612" target="_blank">炽阳001</a> | BiliGo 自动回复系统</p>
         </footer>
     </div>
 
@@ -523,8 +587,7 @@
             <div class="modal-body">
                 <div class="browser-toolbar">
                     <div class="current-path">
-                        📁
-                        <span id="current-path-text">加载中...</span>
+                        <span id="current-path-text">📁 加载中...</span>
                     </div>
                     <div class="quick-nav">
                         <button class="btn-secondary btn-sm" onclick="goToHomeDirectory()">
@@ -570,9 +633,8 @@
                 
                 <div id="file-info" class="file-info" style="display: none;">
                     <div class="file-details">
-                        📄
                         <div class="file-text">
-                            <strong id="file-name"></strong>
+                            <strong id="file-name">📄 </strong>
                             <small id="file-size"></small>
                         </div>
                         <button class="btn-icon" onclick="clearSelectedFile()" title="清除选择">
@@ -583,8 +645,7 @@
                 
                 <div id="validation-result" class="validation-result" style="display: none;">
                     <div class="validation-header">
-                        ✅
-                        <span>文件验证结果</span>
+                        <span>✅ 文件验证结果</span>
                     </div>
                     <div class="validation-details">
                         <p><strong>总规则数:</strong> <span id="total-rules">0</span></p>
@@ -634,16 +695,14 @@
             </div>
             <div class="modal-body">
                 <div class="form-row">
-                    <label for="edit-rule-title">规则标题:</label>
+                    <label for="edit-rule-title">🏷️ 规则标题:</label>
                     <div class="input-wrapper">
-                        🏷️
                         <input type="text" id="edit-rule-title" placeholder="例如：问候回复、帮助说明">
                     </div>
                 </div>
                 <div class="form-row">
-                    <label for="edit-keywords">关键词 (用中文逗号分隔):</label>
+                    <label for="edit-keywords"># 关键词 (用中文逗号分隔):</label>
                     <div class="input-wrapper">
-                        #
                         <input type="text" id="edit-keywords" placeholder="例如：你好，帮助，问题">
                     </div>
                 </div>
@@ -689,36 +748,116 @@
         </div>
     </div>
 
-    <!-- 添加账号模态框 -->
-    <div id="add-account-modal" class="modal">
+    <!-- 邮箱设置教程模态框 -->
+    <div id="email-setup-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>➕ 添加账号</h2>
-                <span class="close" onclick="closeAddAccountModal()">&times;</span>
+                <h3>📧 QQ邮箱授权码获取教程</h3>
+                <button class="close-btn" onclick="closeEmailSetupGuide()">
+                    ✕
+                </button>
             </div>
             <div class="modal-body">
-                <div class="form-row">
-                    <label for="account-name">账号名称:</label>
-                    <input type="text" id="account-name" placeholder="例如：主账号、小号1" required>
-                    <p class="help-text">给账号起个容易识别的名字</p>
+                <div class="tutorial-step">
+                    <h4>📱 第一步：登录QQ邮箱</h4>
+                    <p>在浏览器中打开 <a href="https://mail.qq.com" target="_blank" style="color: #007bff;">https://mail.qq.com</a> 并登录您的QQ邮箱</p>
                 </div>
-                <div class="form-row">
-                    <label for="account-sessdata">SESSDATA:</label>
-                    <input type="password" id="account-sessdata" placeholder="请输入B站SESSDATA" required>
+                
+                <div class="tutorial-step">
+                    <h4>⚙️ 第二步：进入设置页面</h4>
+                    <p>点击邮箱页面右上角的 <strong>设置</strong> 按钮</p>
                 </div>
-                <div class="form-row">
-                    <label for="account-bili-jct">bili_jct:</label>
-                    <input type="password" id="account-bili-jct" placeholder="请输入bili_jct" required>
+                
+                <div class="tutorial-step">
+                    <h4>🔐 第三步：找到账号与安全</h4>
+                    <p>在设置页面中，点击 <strong>账号与安全</strong> 选项</p>
                 </div>
-                <div class="form-row">
-                    <label for="account-email">错误提醒邮箱（可选）:</label>
-                    <input type="email" id="account-email" placeholder="接收错误通知的邮箱">
-                    <p class="help-text">当此账号出现错误或登录失效时，系统会向此邮箱发送详细的错误信息</p>
+                
+                <div class="tutorial-step">
+                    <h4>🛡️ 第四步：进入安全设置</h4>
+                    <p>在账号与安全页面中，找到并点击 <strong>安全设置</strong></p>
+                </div>
+                
+                <div class="tutorial-step">
+                    <h4>📨 第五步：开启SMTP服务</h4>
+                    <p>找到 <strong>POP3/IMAP/SMTP/Exchange/CardDAV 服务</strong> 选项</p>
+                    <p>开启 <strong>IMAP/SMTP服务</strong> 或 <strong>POP3/SMTP服务</strong></p>
+                </div>
+                
+                <div class="tutorial-step">
+                    <h4>🔑 第六步：生成授权码</h4>
+                    <p>点击 <strong>生成授权码</strong> 按钮</p>
+                    <p>按照提示完成手机验证</p>
+                    <p>⚠️ <strong>重要：</strong>生成的授权码就是您需要填入的"邮箱授权码"，不是您的QQ密码！</p>
+                </div>
+                
+                <div class="tutorial-step">
+                    <h4>📋 第七步：复制授权码</h4>
+                    <p>复制生成的授权码（通常是16位字符）</p>
+                    <p>将授权码粘贴到本页面的"邮箱授权码"输入框中</p>
+                </div>
+                
+                <div class="tutorial-note">
+                    <h4>📝 注意事项：</h4>
+                    <ul>
+                        <li>授权码不是QQ密码，是专门用于第三方应用登录的密码</li>
+                        <li>授权码生成后请妥善保管，遗失需要重新生成</li>
+                        <li>建议发送邮箱和接收邮箱使用同一个QQ邮箱</li>
+                        <li>如果无法生成授权码，请确保已开启邮箱的SMTP服务</li>
+                    </ul>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn-secondary" onclick="closeAddAccountModal()">取消</button>
-                <button class="btn-primary" onclick="addAccount()">添加</button>
+                <button class="btn-primary" onclick="closeEmailSetupGuide()">
+                    ✅ 我知道了
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 清除数据确认模态框 -->
+    <div id="reset-confirm-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="background: #fff3cd; border-bottom: 2px solid #ffc107;">
+                <h3 style="color: #856404;">⚠️ 确认清除所有数据</h3>
+                <button class="close-btn" onclick="closeResetConfirmModal()">
+                    ✕
+                </button>
+            </div>
+            <div class="modal-body">
+                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
+                    <p style="margin: 0; color: #856404; font-weight: 600;">此操作将清除以下所有数据：</p>
+                </div>
+                
+                <ul style="margin: 15px 0; padding-left: 25px; line-height: 2;">
+                    <li>B站账号登录配置（SESSDATA、bili_jct）</li>
+                    <li>所有私信回复规则</li>
+                    <li>所有评论回复规则</li>
+                    <li>默认回复设置</li>
+                    <li>关注者欢迎设置</li>
+                    <li>邮件提醒配置</li>
+                    <li>时间间隔配置</li>
+                    <li>用户回复统计数据</li>
+                </ul>
+                
+                <div style="background: #f8d7da; padding: 15px; border-radius: 5px; margin-top: 20px; border-left: 4px solid #dc3545;">
+                    <p style="margin: 0; color: #721c24; font-weight: 600;">⚠️ 此操作不可撤销！</p>
+                    <p style="margin: 8px 0 0 0; color: #721c24;">建议在清除前先导出配置备份。</p>
+                </div>
+                
+                <div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 5px;">
+                    <p style="margin: 0; color: #004085; font-size: 14px;">
+                        <strong>提示：</strong>如果只是想重新配置，建议直接修改相应设置，无需清除所有数据。
+                    </p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeResetConfirmModal()">
+                    ✕ 取消
+                </button>
+                <button class="btn-danger" onclick="executeResetAllData()">
+                    🗑️ 确认清除
+                </button>
             </div>
         </div>
     </div>

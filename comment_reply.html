@@ -60,8 +60,7 @@
                             <label for="comment-send-delay">回复发送间隔 (秒):</label>
                             <input type="number" id="comment-send-delay" min="1" max="10" step="0.1" value="2.0" placeholder="2.0">
                             <p class="help-text">
-                                ⚠️
-                                两次评论回复之间的等待时间，建议2秒以上避免触发风控
+                                ⚠️ 两次评论回复之间的等待时间，建议2秒以上避免触发风控
                             </p>
                         </div>
                         
@@ -95,16 +94,14 @@
             <section class="config-panel">
                 <h2>⚙️ 登录配置</h2>
                 <div class="form-row">
-                    <label for="sessdata">SESSDATA:</label>
+                    <label for="sessdata">🔑 SESSDATA:</label>
                     <div class="input-wrapper">
-                        🔑
                         <input type="password" id="sessdata" placeholder="请输入B站SESSDATA">
                     </div>
                 </div>
                 <div class="form-row">
-                    <label for="bili_jct">bili_jct:</label>
+                    <label for="bili_jct">🔒 bili_jct:</label>
                     <div class="input-wrapper">
-                        🔒
                         <input type="password" id="bili_jct" placeholder="请输入bili_jct">
                     </div>
                 </div>
@@ -163,16 +160,14 @@
                     <div class="keyword-panel half-width">
                         <h2>💬📝 评论关键词回复设置</h2>
                         <div class="form-row">
-                            <label for="comment-rule-title">规则标题:</label>
+                            <label for="comment-rule-title">🏷️ 规则标题:</label>
                             <div class="input-wrapper">
-                                🏷️
                                 <input type="text" id="comment-rule-title" placeholder="例如：感谢回复、问题解答">
                             </div>
                         </div>
                         <div class="form-row">
-                            <label for="comment-keywords">关键词 (用中文逗号分隔):</label>
+                            <label for="comment-keywords">🔤 关键词 (用中文逗号分隔):</label>
                             <div class="input-wrapper">
-                                🔤
                                 <input type="text" id="comment-keywords" placeholder="例如：谢谢，感谢，不错">
                             </div>
                         </div>
@@ -245,8 +240,7 @@
                 <h2>📝 系统日志</h2>
                 <div class="log-redirect">
                     <div class="log-redirect-content">
-                        📄
-                        <h3>查看系统日志</h3>
+                        <h3>📄 查看系统日志</h3>
                         <p>点击下方按钮跳转到专门的日志页面查看详细的系统运行日志</p>
                         <button class="btn-primary" onclick="goToLogsPage()">
                             🔗
@@ -258,7 +252,7 @@
         </div>
 
         <footer>
-            <p>© 2025 <a href="https://space.bilibili.com/404891612" target="_blank">炽阳001</a> | BiliGo 评论回复管理工具</p>
+            <p>© 2026 <a href="https://space.bilibili.com/404891612" target="_blank">炽阳001</a> | BiliGo 评论回复管理工具</p>
         </footer>
     </div>
 
@@ -274,8 +268,7 @@
             <div class="modal-body">
                 <div class="browser-toolbar">
                     <div class="current-path">
-                        📂
-                        <span id="current-path-text">加载中...</span>
+                        <span id="current-path-text">📂 加载中...</span>
                     </div>
                     <div class="quick-nav">
                         <button class="btn-secondary btn-sm" onclick="goToHomeDirectory()">
@@ -312,8 +305,7 @@
                     <div class="file-upload-area" id="comment-file-upload-area">
                         <input type="file" id="comment-keywords-file" accept=".json" style="display: none;" onchange="handleCommentFileSelect(event)">
                         <div class="upload-placeholder" onclick="document.getElementById('comment-keywords-file').click()">
-                            ☁️
-                            <p>点击选择文件或拖拽文件到此处</p>
+                            <p>☁️ 点击选择文件或拖拽文件到此处</p>
                             <small>支持 .json 格式，文件大小不超过1MB</small>
                         </div>
                     </div>
@@ -321,9 +313,8 @@
                 
                 <div id="comment-file-info" class="file-info" style="display: none;">
                     <div class="file-details">
-                        📄
                         <div class="file-text">
-                            <strong id="comment-file-name"></strong>
+                            <strong id="comment-file-name">📄 </strong>
                             <small id="comment-file-size"></small>
                         </div>
                         <button class="btn-icon" onclick="clearCommentSelectedFile()" title="清除选择">
@@ -369,16 +360,14 @@
             </div>
             <div class="modal-body">
                 <div class="form-row">
-                    <label for="edit-comment-rule-title">规则标题:</label>
+                    <label for="edit-comment-rule-title">🏷️ 规则标题:</label>
                     <div class="input-wrapper">
-                        🏷️
                         <input type="text" id="edit-comment-rule-title" placeholder="例如：感谢回复、问题解答">
                     </div>
                 </div>
                 <div class="form-row">
-                    <label for="edit-comment-keywords">关键词 (用中文逗号分隔):</label>
+                    <label for="edit-comment-keywords">🔤 关键词 (用中文逗号分隔):</label>
                     <div class="input-wrapper">
-                        🔤
                         <input type="text" id="edit-comment-keywords" placeholder="例如：谢谢，感谢，不错">
                     </div>
                 </div>

@@ -42,18 +42,16 @@ config = {
     'unfollow_reply_image': '',  # 取消关注回复图片路径
     'only_reply_new_messages': False,  # 是否仅回复新消息（程序启动后的消息）
     'max_replies_per_user': 3,  # 单用户最大回复次数
-    'follow_check_interval': 300,  # 检查关注者的间隔（秒），默认5分钟避免触发风控
+    'follow_check_interval': 1800,  # 检查关注者的间隔（秒），默认30分钟避免触发风控
     'message_check_interval': 0.05,  # 消息监测间隔（秒）
     'send_delay_interval': 1.0,  # 发送消息等待间隔（秒）
     'auto_restart_interval': 300,  # 自动重启间隔（秒）
-    'multi_account_mode': False,  # 多账号模式开关，默认关闭
-    'accounts': [],  # 多账号列表 [{name, sessdata, bili_jct, enabled, email}]
     'email_notification': {  # 邮件通知配置
         'enabled': False,
         'smtp_server': 'smtp.qq.com',
         'smtp_port': 587,
-        'sender_email': '3083248889@qq.com',
-        'sender_password': 'qrcsceyxuddbdhdg',
+        'sender_email': '',
+        'sender_password': '',
         'receiver_email': ''
     }
 }
@@ -586,8 +584,8 @@ def send_email_notification(subject, body, receiver_email=None):
         
         smtp_server = email_config.get('smtp_server', 'smtp.qq.com')
         smtp_port = email_config.get('smtp_port', 587)
-        sender_email = email_config.get('sender_email', '3083248889@qq.com')
-        sender_password = email_config.get('sender_password', 'qrcsceyxuddbdhdg')
+        sender_email = email_config.get('sender_email', '')
+        sender_password = email_config.get('sender_password', '')
         
         # 创建邮件
         msg = MIMEMultipart()
@@ -598,13 +596,23 @@ def send_email_notification(subject, body, receiver_email=None):
         msg.attach(MIMEText(body, 'html', 'utf-8'))
         
         # 发送邮件
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server = None
+        try:
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
             server.starttls()
             server.login(sender_email, sender_password)
             server.send_message(msg)
-        
-        logger.info(f"邮件通知已发送至: {to_email}")
-        return True
+            
+            logger.info(f"邮件通知已发送至: {to_email}")
+            return True
+            
+        finally:
+            # 安全关闭连接，忽略关闭时的错误
+            if server:
+                try:
+                    server.quit()
+                except:
+                    pass  # 忽略关闭时的错误
         
     except Exception as e:
         logger.error(f"发送邮件通知失败: {e}")
@@ -4488,6 +4496,277 @@ def validate_comment_keywords_file():
         
     except Exception as e:
         return jsonify({'success': False, 'error': f'文件验证失败: {str(e)}'})
+
+@app.route('/api/save_email_config', methods=['POST'])
+def save_email_config():
+    """保存邮件配置"""
+    try:
+        global config
+        data = request.get_json()
+        
+        # 更新邮件配置
+        config['email_notification'] = {
+            'enabled': data.get('enabled', False),
+            'smtp_server': data.get('smtp_server', 'smtp.qq.com'),
+            'smtp_port': data.get('smtp_port', 587),
+            'sender_email': data.get('sender_email', ''),
+            'sender_password': data.get('sender_password', ''),
+            'receiver_email': data.get('receiver_email', '')
+        }
+        
+        # 保存配置到文件
+        save_config()
+        
+        return jsonify({'success': True, 'message': '邮件配置保存成功'})
+        
+    except Exception as e:
+        error_msg = f"保存邮件配置失败: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({'success': False, 'error': error_msg})
+
+@app.route('/api/get_email_config', methods=['GET'])
+def get_email_config():
+    """获取邮件配置"""
+    try:
+        global config
+        email_config = config.get('email_notification', {
+            'enabled': False,
+            'smtp_server': 'smtp.qq.com',
+            'smtp_port': 587,
+            'sender_email': '',
+            'sender_password': '',
+            'receiver_email': ''
+        })
+        
+        return jsonify({'success': True, 'config': email_config})
+        
+    except Exception as e:
+        error_msg = f"获取邮件配置失败: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({'success': False, 'error': error_msg})
+
+@app.route('/api/test_email', methods=['POST'])
+def test_email():
+    """发送测试邮件"""
+    try:
+        data = request.get_json()
+        sender_email = data.get('sender_email', '')
+        sender_password = data.get('sender_password', '')
+        receiver_email = data.get('receiver_email', '')
+        
+        if not sender_email or not sender_password or not receiver_email:
+            return jsonify({'success': False, 'error': '邮件配置信息不完整'})
+        
+        # 临时设置邮件配置用于测试
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        # 创建测试邮件
+        subject = "BiliGo - 邮件配置测试"
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+                <h2 style="color: #00a1d6; border-bottom: 2px solid #00a1d6; padding-bottom: 10px;">
+                    ✅ BiliGo 邮件配置测试成功
+                </h2>
+                
+                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                    <h3 style="margin-top: 0; color: #555;">测试信息</h3>
+                    <p><strong>发送邮箱:</strong> {sender_email}</p>
+                    <p><strong>接收邮箱:</strong> {receiver_email}</p>
+                    <p><strong>测试时间:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                </div>
+                
+                <div style="background-color: #d4edda; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #28a745;">
+                    <h3 style="margin-top: 0; color: #155724;">配置成功</h3>
+                    <p>恭喜！您的邮件配置已经成功设置。当系统出现错误或登录失效时，您将收到详细的邮件通知。</p>
+                </div>
+                
+                <div style="margin-top: 20px; padding: 15px; background-color: #e7f3ff; border-radius: 5px;">
+                    <h3 style="margin-top: 0; color: #0056b3;">功能说明</h3>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>系统错误自动通知</li>
+                        <li>登录状态失效提醒</li>
+                        <li>详细的错误信息和建议操作</li>
+                        <li>相同错误只发送一次通知</li>
+                    </ul>
+                </div>
+                
+                <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+                <p style="color: #666; font-size: 12px; text-align: center;">
+                    这是一封测试邮件，请勿回复。<br>
+                    如果您收到此邮件，说明邮件配置已成功设置。
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # 创建邮件对象
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+        msg['Subject'] = subject
+        
+        msg.attach(MIMEText(body, 'html', 'utf-8'))
+        
+        # 发送邮件
+        server = None
+        try:
+            server = smtplib.SMTP('smtp.qq.com', 587, timeout=10)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+            
+            logger.info(f"测试邮件已发送至: {receiver_email}")
+            
+            # 成功发送后返回成功，不管关闭连接时是否有错误
+            return jsonify({'success': True, 'message': '测试邮件发送成功'})
+            
+        finally:
+            # 安全关闭连接，忽略关闭时的错误
+            if server:
+                try:
+                    server.quit()
+                except:
+                    pass  # 忽略关闭时的错误
+        
+    except smtplib.SMTPAuthenticationError:
+        return jsonify({'success': False, 'error': '邮箱认证失败，请检查邮箱地址和授权码是否正确'})
+    except smtplib.SMTPException as e:
+        error_msg = str(e)
+        # 如果错误信息包含特定的无害错误，仍然返回成功
+        if 'b\'\\x00\\x00\\x00\'' in error_msg or '(-1,' in error_msg:
+            logger.info(f"测试邮件已发送至: {receiver_email} (忽略关闭连接错误)")
+            return jsonify({'success': True, 'message': '测试邮件发送成功'})
+        return jsonify({'success': False, 'error': f'SMTP错误: {error_msg}'})
+    except Exception as e:
+        error_msg = f"发送测试邮件失败: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({'success': False, 'error': error_msg})
+
+@app.route('/api/reset_all_data', methods=['POST'])
+def reset_all_data():
+    """清除所有数据，恢复初始设置"""
+    try:
+        global config, rules, message_logs, message_cache, last_message_times
+        global followers_cache, welcome_sent_cache, unfollowers_cache, follow_history
+        global monitoring, monitor_thread
+        
+        # 停止监控
+        if monitoring:
+            monitoring = False
+            if monitor_thread and monitor_thread.is_alive():
+                monitor_thread.join(timeout=5)
+        
+        # 重置全局配置为默认值
+        config = {
+            'default_reply_enabled': False,
+            'default_reply_message': '您好，我现在不在，稍后会回复您的消息。',
+            'default_reply_type': 'text',
+            'default_reply_image': '',
+            'separate_reply_by_follow': False,
+            'followed_reply_message': '您好，感谢您的关注！我现在不在，稍后会回复您的消息。',
+            'followed_reply_type': 'text',
+            'followed_reply_image': '',
+            'unfollowed_reply_message': '您好，我现在不在，稍后会回复您的消息。',
+            'unfollowed_reply_type': 'text',
+            'unfollowed_reply_image': '',
+            'follow_reply_enabled': False,
+            'follow_reply_message': '感谢您的关注！欢迎来到我的频道~',
+            'follow_reply_type': 'text',
+            'follow_reply_image': '',
+            'unfollow_reply_enabled': False,
+            'unfollow_reply_message': '很遗憾看到您取消了关注，希望我们还有机会再见！',
+            'unfollow_reply_type': 'text',
+            'unfollow_reply_image': '',
+            'only_reply_new_messages': False,
+            'max_replies_per_user': 3,
+            'follow_check_interval': 1800,
+            'message_check_interval': 0.05,
+            'send_delay_interval': 1.0,
+            'auto_restart_interval': 300,
+            'email_notification': {
+                'enabled': False,
+                'smtp_server': 'smtp.qq.com',
+                'smtp_port': 587,
+                'sender_email': '',
+                'sender_password': '',
+                'receiver_email': ''
+            },
+            'sessdata': '',
+            'bili_jct': ''
+        }
+        
+        # 清空规则
+        rules = []
+        
+        # 清空缓存和统计
+        message_cache = {}
+        last_message_times = defaultdict(int)
+        followers_cache = set()
+        welcome_sent_cache = set()
+        unfollowers_cache = set()
+        follow_history = {}
+        
+        # 清空日志
+        message_logs = []
+        
+        # 保存清空后的配置
+        init_config_paths()
+        save_config()
+        save_rules()
+        
+        # 删除用户回复统计文件
+        if os.path.exists(USER_REPLY_STATS_FILE):
+            os.remove(USER_REPLY_STATS_FILE)
+        
+        # 清空评论系统数据
+        from comment_reply_system import comment_reply_system
+        
+        # 停止评论监控
+        if comment_reply_system.is_monitoring():
+            comment_reply_system.stop_monitoring()
+        
+        # 重置评论系统配置
+        comment_reply_system.config = {
+            'comment_reply_enabled': False,
+            'default_comment_reply_enabled': False,
+            'default_comment_reply_message': '感谢您的评论！',
+            'default_comment_reply_type': 'text',
+            'default_comment_reply_image': '',
+            'comment_check_interval': 60,
+            'comment_send_delay': 3.0,
+            'only_reply_new_comments': True,
+            'max_videos_to_check': 10,
+            'max_comments_per_video': 20,
+        }
+        
+        # 清空评论规则
+        comment_reply_system.rules = []
+        
+        # 清空评论缓存和日志
+        comment_reply_system.comment_cache = {}
+        comment_reply_system.logs = []
+        
+        # 保存评论系统配置
+        comment_reply_system.save_config()
+        comment_reply_system.save_rules()
+        
+        logger.info("所有数据已清除，恢复初始设置")
+        add_log("所有数据已清除，系统已恢复初始设置", 'warning')
+        
+        return jsonify({
+            'success': True,
+            'message': '所有数据已清除，系统已恢复初始设置'
+        })
+        
+    except Exception as e:
+        error_msg = f"清除数据失败: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({'success': False, 'error': error_msg})
 
 # 确保在系统启动时添加一些初始日志，方便测试
 if __name__ == '__main__':

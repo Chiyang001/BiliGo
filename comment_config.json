@@ -1,13 +1,12 @@
 {
-  "sessdata": "ea9a34f6%2C1773056451%2Cef1c1%2A91CjD7Hhv-1sq_6oD23ntYk_jlUx8OSSXDbBuZPx_Ce3CbV4OqHPIIG4E8sJdHg5KJ5DYSVjliWnRfVVhXZXI5eXJxTzhJRGRHUXhCMTlQNExBQkl5SVNnMlp0SzE4aGhvaXh5eVhfWEVfMndsQjI3NXNHd0dBRmxxbFJ5cnpWdEhLWEV3WnZiMzF3IIEC",
-  "bili_jct": "6218681941da8930964cc03c5a8bbf6f",
+  "comment_reply_enabled": false,
   "default_comment_reply_enabled": false,
-  "default_comment_reply_message": "您好，我现在不在，稍后会回复您的消息。",
+  "default_comment_reply_message": "感谢您的评论！",
   "default_comment_reply_type": "text",
   "default_comment_reply_image": "",
-  "comment_check_interval": 10,
-  "max_videos_to_check": 20,
-  "comments_per_video": 10,
-  "comment_send_delay": 1,
-  "only_reply_new_comments": true
+  "comment_check_interval": 60,
+  "comment_send_delay": 3.0,
+  "only_reply_new_comments": true,
+  "max_videos_to_check": 10,
+  "max_comments_per_video": 20
 }

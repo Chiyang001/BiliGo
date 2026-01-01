@@ -1480,3 +1480,209 @@ footer a:hover {
         gap: 5px;
     }
 }
+/* 邮件配置相关样式 */
+.tutorial-step {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius);
+    border-left: 4px solid var(--primary-color);
+}
+
+.tutorial-step h4 {
+    color: var(--primary-color);
+    margin-bottom: 8px;
+    font-size: 16px;
+}
+
+.tutorial-step p {
+    margin-bottom: 5px;
+    line-height: 1.6;
+}
+
+.tutorial-note {
+    margin-top: 20px;
+    padding: 15px;
+    background: #fff3cd;
+    border-radius: var(--radius);
+    border-left: 4px solid var(--warning-color);
+}
+
+.tutorial-note h4 {
+    color: #856404;
+    margin-bottom: 10px;
+}
+
+.tutorial-note ul {
+    margin-left: 20px;
+}
+
+.tutorial-note li {
+    margin-bottom: 5px;
+    color: #856404;
+}
+
+/* 可收纳区域样式 */
+.collapsible-section {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--card-bg);
+    box-shadow: var(--shadow);
+}
+
+.collapsible-header {
+    padding: 15px 20px;
+    background: var(--bg-tertiary);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: var(--transition);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.collapsible-header:hover {
+    background: var(--card-hover);
+}
+
+.collapsible-header h3 {
+    margin: 0;
+    color: var(--text-color);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.toggle-icon {
+    font-size: 14px;
+    color: var(--text-light);
+    transition: transform 0.3s ease;
+}
+
+.toggle-icon.rotated {
+    transform: rotate(180deg);
+}
+
+.collapsible-content {
+    padding: 20px;
+    border-top: none;
+}
+
+/* 邮件设置区域样式 */
+#email-settings {
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color);
+    margin-top: 15px;
+}
+
+/* 输入框只读状态样式 */
+input[readonly] {
+    background-color: var(--bg-tertiary) !important;
+    color: var(--text-light) !important;
+    cursor: not-allowed;
+}
+
+/* 链接样式 */
+a {
+    color: var(--primary-color);
+    text-decoration: none;
+    transition: var(--transition);
+}
+
+a:hover {
+    color: var(--primary-hover);
+    text-decoration: underline;
+}
+
+/* 信息提示横幅样式 */
+.info-banner {
+    display: flex;
+    gap: 15px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, #e3f2fd 0%, #f0f8ff 100%);
+    border-left: 4px solid #2196f3;
+    border-radius: var(--radius);
+    box-shadow: 0 2px 8px rgba(33, 150, 243, 0.1);
+}
+
+.info-banner-icon {
+    font-size: 24px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.info-banner-content {
+    flex: 1;
+}
+
+.info-banner-content strong {
+    color: #1976d2;
+    font-size: 15px;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.info-banner-content p {
+    margin: 4px 0;
+    color: var(--text-color);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.info-banner-content ul {
+    list-style-type: disc;
+}
+
+.info-banner-content ul li {
+    color: var(--text-color);
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.info-banner-content ul li strong {
+    display: inline;
+    color: #1976d2;
+    font-size: 14px;
+    margin: 0;
+}
+
+/* 危险操作区域样式 */
+.danger-zone {
+    border: 2px solid #dc3545;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--card-bg);
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.15);
+}
+
+.danger-zone-header {
+    background: linear-gradient(135deg, #fff5f5 0%, #ffe5e5 100%);
+    padding: 12px 20px;
+    border-bottom: 1px solid #dc3545;
+}
+
+.danger-zone-header h3 {
+    margin: 0;
+    color: #dc3545;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.danger-zone-content {
+    padding: 20px;
+}
+
+.danger-zone-description {
+    margin: 0 0 15px 0;
+    color: #721c24;
+    background: #f8d7da;
+    padding: 12px 15px;
+    border-radius: 5px;
+    border-left: 4px solid #dc3545;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.danger-zone .btn-danger {
+    width: 100%;
+}

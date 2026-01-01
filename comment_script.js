@@ -984,7 +984,7 @@ function openImageBrowser(target) {
 
 function browsePath(path) {
     currentBrowserPath = path;
-    document.getElementById('current-path-text').textContent = path;
+    document.getElementById('current-path-text').textContent = '📂 ' + path;
     
     const fileList = document.getElementById('file-list');
     fileList.innerHTML = '<div class="loading"><i class="bi bi-arrow-clockwise spin"></i> 加载中...</div>';

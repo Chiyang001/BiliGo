@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadTimingConfig();
     loadAccounts();  // 加载多账号列表
     initMultiAccountMode();  // 初始化多账号模式
+    loadEmailConfig();  // 加载邮件配置
 });
 
 // 全局变量
@@ -331,7 +332,6 @@ function showToast(message, type = 'info') {
 function saveConfig() {
     const sessdata = document.getElementById('sessdata').value;
     const bili_jct = document.getElementById('bili_jct').value;
-    const email = document.getElementById('single-email').value;
     
     if (!sessdata || !bili_jct) {
         showToast('请填写完整的登录配置', 'error');
@@ -345,11 +345,7 @@ function saveConfig() {
         },
         body: JSON.stringify({
             sessdata: sessdata,
-            bili_jct: bili_jct,
-            email_notification: {
-                enabled: email ? true : false,
-                receiver_email: email
-            }
+            bili_jct: bili_jct
         })
     })
     .then(response => response.json())
@@ -476,11 +472,6 @@ function loadConfig() {
         }
         if (data.bili_jct) {
             document.getElementById('bili_jct').value = data.bili_jct;
-        }
-        
-        // 加载邮箱配置
-        if (data.email_notification && data.email_notification.receiver_email) {
-            document.getElementById('single-email').value = data.email_notification.receiver_email;
         }
         
         // 加载默认回复设置
@@ -1165,7 +1156,7 @@ function openImageBrowser(target) {
 // 浏览指定路径
 function browsePath(path) {
     currentBrowserPath = path;
-    document.getElementById('current-path-text').textContent = path;
+    document.getElementById('current-path-text').textContent = '📁 ' + path;
     
     const fileList = document.getElementById('file-list');
     fileList.innerHTML = '<div class="loading">🔄 加载中...</div>';
@@ -2406,3 +2397,215 @@ window.onclick = function(event) {
         closeAddAccountModal();
     }
 }
+// 邮件配置相关函数
+function toggleEmailConfig() {
+    const content = document.getElementById('email-config-content');
+    const icon = document.getElementById('email-toggle-icon');
+    
+    if (content.style.display === 'none' || content.style.display === '') {
+        content.style.display = 'block';
+        icon.textContent = '▲';
+        icon.classList.add('rotated');
+    } else {
+        content.style.display = 'none';
+        icon.textContent = '▼';
+        icon.classList.remove('rotated');
+    }
+}
+
+function toggleEmailNotification() {
+    const enabled = document.getElementById('email-notification-enabled').checked;
+    const settings = document.getElementById('email-settings');
+    
+    if (enabled) {
+        settings.style.display = 'block';
+    } else {
+        settings.style.display = 'none';
+    }
+}
+
+function showEmailSetupGuide() {
+    document.getElementById('email-setup-modal').style.display = 'block';
+}
+
+function closeEmailSetupGuide() {
+    document.getElementById('email-setup-modal').style.display = 'none';
+}
+
+function saveEmailConfig() {
+    const enabled = document.getElementById('email-notification-enabled').checked;
+    const senderEmail = document.getElementById('sender-email').value.trim();
+    const senderPassword = document.getElementById('sender-password').value.trim();
+    const receiverEmail = document.getElementById('receiver-email').value.trim();
+    const smtpServer = document.getElementById('smtp-server').value.trim();
+    const smtpPort = parseInt(document.getElementById('smtp-port').value);
+    
+    if (enabled) {
+        if (!senderEmail || !senderPassword || !receiverEmail) {
+            showToast('请填写完整的邮件配置信息', 'error');
+            return;
+        }
+        
+        // 验证邮箱格式
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(senderEmail) || !emailRegex.test(receiverEmail)) {
+            showToast('请输入有效的邮箱地址', 'error');
+            return;
+        }
+        
+        // 检查是否为QQ邮箱
+        if (!senderEmail.includes('@qq.com')) {
+            showToast('发送邮箱必须是QQ邮箱（@qq.com）', 'error');
+            return;
+        }
+    }
+    
+    const emailConfig = {
+        enabled: enabled,
+        smtp_server: smtpServer,
+        smtp_port: smtpPort,
+        sender_email: senderEmail,
+        sender_password: senderPassword,
+        receiver_email: receiverEmail
+    };
+    
+    fetch('/api/save_email_config', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(emailConfig)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('邮件配置保存成功', 'success');
+        } else {
+            showToast('保存失败: ' + (data.error || '未知错误'), 'error');
+        }
+    })
+    .catch(error => {
+        console.error('保存邮件配置失败:', error);
+        showToast('保存失败: ' + error.message, 'error');
+    });
+}
+
+function testEmailNotification() {
+    const enabled = document.getElementById('email-notification-enabled').checked;
+    
+    if (!enabled) {
+        showToast('请先启用邮件提醒功能', 'warning');
+        return;
+    }
+    
+    const senderEmail = document.getElementById('sender-email').value.trim();
+    const senderPassword = document.getElementById('sender-password').value.trim();
+    const receiverEmail = document.getElementById('receiver-email').value.trim();
+    
+    if (!senderEmail || !senderPassword || !receiverEmail) {
+        showToast('请先完整填写邮件配置信息', 'error');
+        return;
+    }
+    
+    showToast('正在发送测试邮件...', 'info');
+    
+    fetch('/api/test_email', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            sender_email: senderEmail,
+            sender_password: senderPassword,
+            receiver_email: receiverEmail
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('测试邮件发送成功！请检查您的邮箱', 'success');
+        } else {
+            showToast('测试邮件发送失败: ' + (data.error || '未知错误'), 'error');
+        }
+    })
+    .catch(error => {
+        console.error('发送测试邮件失败:', error);
+        showToast('发送测试邮件失败: ' + error.message, 'error');
+    });
+}
+
+function loadEmailConfig() {
+    fetch('/api/get_email_config')
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.config) {
+            const config = data.config;
+            
+            document.getElementById('email-notification-enabled').checked = config.enabled || false;
+            document.getElementById('sender-email').value = config.sender_email || '';
+            document.getElementById('sender-password').value = config.sender_password || '';
+            document.getElementById('receiver-email').value = config.receiver_email || '';
+            document.getElementById('smtp-server').value = config.smtp_server || 'smtp.qq.com';
+            document.getElementById('smtp-port').value = config.smtp_port || 587;
+            
+            // 根据启用状态显示/隐藏设置区域
+            toggleEmailNotification();
+        }
+    })
+    .catch(error => {
+        console.error('加载邮件配置失败:', error);
+    });
+}
+
+// 在页面加载时调用邮件配置加载
+// 已在上面的DOMContentLoaded中调用
+
+// 清除所有数据相关函数
+function confirmResetAllData() {
+    // 显示确认模态框
+    document.getElementById('reset-confirm-modal').style.display = 'block';
+}
+
+function closeResetConfirmModal() {
+    document.getElementById('reset-confirm-modal').style.display = 'none';
+}
+
+function executeResetAllData() {
+    // 关闭模态框
+    closeResetConfirmModal();
+    
+    // 显示加载提示
+    showToast('正在清除所有数据...', 'info');
+    
+    fetch('/api/reset_all_data', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('所有数据已清除，页面即将刷新...', 'success');
+            
+            // 2秒后刷新页面
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        } else {
+            showToast('清除数据失败: ' + (data.error || '未知错误'), 'error');
+        }
+    })
+    .catch(error => {
+        console.error('清除数据失败:', error);
+        showToast('清除数据失败: ' + error.message, 'error');
+    });
+}
+
+// 点击模态框外部关闭
+window.addEventListener('click', function(event) {
+    const resetModal = document.getElementById('reset-confirm-modal');
+    if (event.target === resetModal) {
+        closeResetConfirmModal();
+    }
+});
