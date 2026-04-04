@@ -307,10 +307,10 @@ function showToast(message, type = 'info') {
     toast.className = `toast ${type}`;
     
     // 根据类型设置图标
-    let icon = 'ℹ️';
-    if (type === 'success') icon = '✅';
-    if (type === 'error') icon = '❌';
-    if (type === 'warning') icon = '⚠️';
+    let icon = '';
+    if (type === 'success') icon = '';
+    if (type === 'error') icon = '';
+    if (type === 'warning') icon = '';
     
     toast.innerHTML = `
         <span class="toast-icon">${icon}</span>
@@ -787,7 +787,7 @@ function updateRulesDisplay() {
     const currentRules = sortedRules.slice(startIndex, endIndex);
     
     container.innerHTML = currentRules.map(rule => {
-        const enabledStatus = rule.enabled ? '<span style="color: #2ed573;">✅</span>' : '<span style="color: #ff4757;">❌</span>';
+        const enabledStatus = rule.enabled ? '<span style="color: #2ed573;"></span>' : '<span style="color: #ff4757;"></span>';
         
         // 根据回复类型显示不同的内容
         let replyContent = '';
@@ -795,10 +795,10 @@ function updateRulesDisplay() {
         
         if (replyType === 'image') {
             const imageName = rule.reply_image ? rule.reply_image.split(/[/\\]/).pop() : '未选择图片';
-            replyContent = `<span style="color: #007bff;">🖼️</span> 图片回复: ${imageName}`;
+            replyContent = `<span style="color: #007bff;"></span> 图片回复: ${imageName}`;
         } else {
             const replyText = rule.reply && rule.reply.length > 100 ? rule.reply.substring(0, 100) + '...' : (rule.reply || '');
-            replyContent = `<span style="color: #28a745;">💬</span> 文字回复: ${replyText}`;
+            replyContent = `<span style="color: #28a745;"></span> 文字回复: ${replyText}`;
         }
         
         return `
@@ -807,10 +807,10 @@ function updateRulesDisplay() {
             <div class="rule-keywords">关键词: ${rule.keyword || ''}</div>
             <div class="rule-reply" title="${rule.reply || rule.reply_image || ''}">${replyContent}</div>
             <div class="rule-actions">
-                <button class="edit-btn" onclick="editRule(${rule.id})">✏️ 编辑</button>
-                <button class="delete-btn" onclick="deleteRule(${rule.id})">🗑️ 删除</button>
+                <button class="edit-btn" onclick="editRule(${rule.id})"> 编辑</button>
+                <button class="delete-btn" onclick="deleteRule(${rule.id})"> 删除</button>
                 <button class="toggle-btn" onclick="toggleRule(${rule.id})">
-                    ${rule.enabled ? '🔵' : '⚪'} 
+                    ${rule.enabled ? '' : ''} 
                     ${rule.enabled ? '禁用' : '启用'}
                 </button>
             </div>
@@ -1156,10 +1156,10 @@ function openImageBrowser(target) {
 // 浏览指定路径
 function browsePath(path) {
     currentBrowserPath = path;
-    document.getElementById('current-path-text').textContent = '📁 ' + path;
+    document.getElementById('current-path-text').textContent = ' ' + path;
     
     const fileList = document.getElementById('file-list');
-    fileList.innerHTML = '<div class="loading">🔄 加载中...</div>';
+    fileList.innerHTML = '<div class="loading"> 加载中...</div>';
     
     fetch('/api/browse-images', {
         method: 'POST',
@@ -1175,11 +1175,11 @@ function browsePath(path) {
         if (data.success) {
             displayFileList(data.items);
         } else {
-            fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);">❌ ${data.error}</div>`;
+            fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);"> ${data.error}</div>`;
         }
     })
     .catch(error => {
-        fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);">❌ 加载失败: ${error}</div>`;
+        fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);"> 加载失败: ${error}</div>`;
     });
 }
 
@@ -1332,19 +1332,19 @@ function showImagePreview(target, imagePath) {
             preview.innerHTML = `
                 <img src="data:${data.mime_type};base64,${data.image_data}" alt="预览图片" style="max-width: 200px; max-height: 150px; border-radius: 8px;">
                 <div class="image-info">
-                    🖼️ ${fileName}
+                     ${fileName}
                     <br><small>${data.file_size}</small>
                 </div>
             `;
         } else {
             preview.innerHTML = `
                 <div style="color: var(--text-light); text-align: center; padding: 20px;">
-                    🖼️
+                    
                     <div>无法预览图片</div>
                     <small>${data.error || '未知错误'}</small>
                 </div>
                 <div class="image-info">
-                    🖼️ ${fileName}
+                     ${fileName}
                 </div>
             `;
         }
@@ -1353,12 +1353,12 @@ function showImagePreview(target, imagePath) {
     .catch(error => {
         preview.innerHTML = `
             <div style="color: var(--text-light); text-align: center; padding: 20px;">
-                🖼️
+                
                 <div>无法预览图片</div>
                 <small>网络错误</small>
             </div>
             <div class="image-info">
-                🖼️ ${fileName}
+                 ${fileName}
             </div>
         `;
         preview.style.display = 'block';
@@ -1408,12 +1408,12 @@ document.addEventListener('keydown', function(event) {
         } else if (event.target.closest('.default-reply-panel')) {
             event.preventDefault();
             saveDefaultReply();
+        } else if (event.target.closest('#unfollow-reply-config-panel')) {
+            event.preventDefault();
+            saveUnfollowReplyConfig();
         } else if (event.target.closest('.follow-reply-panel')) {
             event.preventDefault();
             saveFollowReply();
-        } else if (event.target.closest('.unfollow-reply-panel')) {
-            event.preventDefault();
-            saveUnfollowReplyConfig();
         }
     }
 });
@@ -1462,7 +1462,7 @@ function addLongPressDelete() {
                 const ruleItem = e.target.closest('.rule-item');
                 const ruleTitle = ruleItem.querySelector('.rule-title').textContent;
                 
-                if (confirm(`确定要删除规则"${ruleTitle.replace(/[✓✗]\s*/, '')}"吗？`)) {
+                if (confirm(`确定要删除规则"${ruleTitle.replace(/[]\s*/, '')}"吗？`)) {
                     const deleteBtn = e.target.closest('.delete-btn');
                     const ruleId = deleteBtn.getAttribute('onclick').match(/\d+/)[0];
                     deleteRule(parseInt(ruleId));
@@ -1529,22 +1529,59 @@ function toggleFollowReplyContent(type) {
     }
 }
 
+// 切换关注/取消关注配置面板
+function toggleFollowReplyMode(mode) {
+    const followPanel = document.getElementById('follow-reply-config-panel');
+    const unfollowPanel = document.getElementById('unfollow-reply-config-panel');
+    const followBtn = document.getElementById('follow-mode-btn');
+    const unfollowBtn = document.getElementById('unfollow-mode-btn');
+
+    if (!followPanel || !unfollowPanel || !followBtn || !unfollowBtn) return;
+
+    if (mode === 'unfollow') {
+        followPanel.style.display = 'none';
+        unfollowPanel.style.display = 'block';
+        followBtn.classList.remove('active');
+        unfollowBtn.classList.add('active');
+    } else {
+        followPanel.style.display = 'block';
+        unfollowPanel.style.display = 'none';
+        unfollowBtn.classList.remove('active');
+        followBtn.classList.add('active');
+    }
+}
+
 // 保存关注后回复设置
 function saveFollowReply() {
     const enabled = document.getElementById('follow-reply-enabled').checked;
     const replyType = document.querySelector('input[name="follow-reply-type"]:checked').value;
     const interval = document.getElementById('follow-check-interval').value;
+    const scanPages = document.getElementById('follow-scan-pages').value;
+    const newWindowSeconds = document.getElementById('follow-new-window-seconds').value;
+    const backfillOnFirstRun = document.getElementById('follow-backfill-on-first-run').checked;
     
     // 验证检查间隔
     const intervalNum = parseInt(interval);
-    if (isNaN(intervalNum) || intervalNum < 300 || intervalNum > 3600) {
-        showToast('检查间隔必须在300-3600秒之间（5分钟-1小时）', 'error');
+    if (isNaN(intervalNum) || intervalNum < 1 || intervalNum > 3600) {
+        showToast('检查间隔必须在1-3600秒之间', 'error');
+        return;
+    }
+
+    const scanPagesNum = parseInt(scanPages);
+    if (isNaN(scanPagesNum) || scanPagesNum < 1 || scanPagesNum > 50) {
+        showToast('扫描页数必须在1-50之间', 'error');
+        return;
+    }
+
+    const newWindowSecondsNum = parseInt(newWindowSeconds);
+    if (isNaN(newWindowSecondsNum) || newWindowSecondsNum < 30 || newWindowSecondsNum > 2592000) {
+        showToast('新关注检测窗口必须在30-2592000秒之间', 'error');
         return;
     }
     
     // 风控提示
-    if (intervalNum < 600) {
-        if (!confirm(`检查间隔设置为${intervalNum}秒（${Math.floor(intervalNum/60)}分钟）可能触发B站风控系统，建议设置为10分钟以上。确定要保存吗？`)) {
+    if (intervalNum < 30) {
+        if (!confirm(`检查间隔设置为${intervalNum}秒可能触发B站风控系统，建议设置为30秒以上。确定要保存吗？`)) {
             return;
         }
     }
@@ -1590,7 +1627,10 @@ function saveFollowReply() {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    follow_check_interval: intervalNum
+                    follow_check_interval: intervalNum,
+                    follow_scan_pages: scanPagesNum,
+                    follow_new_window_seconds: newWindowSecondsNum,
+                    follow_backfill_on_first_run: backfillOnFirstRun
                 })
             });
         } else {
@@ -1605,9 +1645,9 @@ function saveFollowReply() {
             
             // 显示风控提示
             if (intervalNum < 30) {
-                showToast('⚠️ 间隔较短，请注意风控风险', 'warning');
+                showToast(' 间隔较短，请注意风控风险', 'warning');
             } else {
-                showToast('✅ 间隔设置合理，有助于避免风控', 'success');
+                showToast(' 间隔设置合理，有助于避免风控', 'success');
             }
         } else {
             throw new Error(data.error || '保存检查间隔设置失败');
@@ -1714,7 +1754,16 @@ function loadFollowCheckIntervalConfig() {
     .then(response => response.json())
     .then(data => {
         if (document.getElementById('follow-check-interval')) {
-            document.getElementById('follow-check-interval').value = data.follow_check_interval || 300;
+            document.getElementById('follow-check-interval').value = data.follow_check_interval || 1800;
+        }
+        if (document.getElementById('follow-scan-pages')) {
+            document.getElementById('follow-scan-pages').value = data.follow_scan_pages || 3;
+        }
+        if (document.getElementById('follow-new-window-seconds')) {
+            document.getElementById('follow-new-window-seconds').value = data.follow_new_window_seconds || 90;
+        }
+        if (document.getElementById('follow-backfill-on-first-run')) {
+            document.getElementById('follow-backfill-on-first-run').checked = data.follow_backfill_on_first_run || false;
         }
     })
     .catch(error => {
@@ -1869,7 +1918,7 @@ function importConfig() {
     const importBtn = document.getElementById('import-btn');
     const originalText = importBtn.innerHTML;
     importBtn.disabled = true;
-    importBtn.innerHTML = '🔄 导入中...';
+    importBtn.innerHTML = ' 导入中...';
     
     fetch('/api/import-config', {
         method: 'POST',
@@ -2107,12 +2156,12 @@ function saveTimingConfig() {
             
             // 显示配置提示
             if (messageCheckInterval <= 0.05) {
-                showToast('✅ 消息监测间隔设置合理，响应速度快', 'success');
+                showToast(' 消息监测间隔设置合理，响应速度快', 'success');
             }
             if (sendDelayInterval >= 1.0) {
-                showToast('✅ 发送间隔设置合理，有助于避免风控', 'success');
+                showToast(' 发送间隔设置合理，有助于避免风控', 'success');
             } else {
-                showToast('⚠️ 发送间隔较短，请注意风控风险', 'warning');
+                showToast(' 发送间隔较短，请注意风控风险', 'warning');
             }
         } else {
             showToast('保存失败: ' + data.error, 'error');
@@ -2140,9 +2189,9 @@ function checkUpdate() {
     window.open('https://github.com/Chiyang001/BiliGo/releases/', '_blank');
 }
 
-// 打开使用教程
-function openTutorial() {
-    window.open('https://www.bilibili.com/video/BV1N4UvBaE2U/', '_blank');
+// 打开教程文档页
+function openDocsPage() {
+    window.location.href = 'docs.html';
 }
 
 
@@ -2182,7 +2231,7 @@ function updateAccountsList(accounts) {
     accounts.forEach(account => {
         const statusClass = account.enabled ? 'enabled' : 'disabled';
         const statusText = account.enabled ? '已启用' : '已禁用';
-        const statusIcon = account.enabled ? '✅' : '⏸️';
+        const statusIcon = account.enabled ? '' : '⏸';
         
         html += `
             <div class="account-item ${statusClass}">
@@ -2266,15 +2315,17 @@ function toggleMultiAccountMode(enabled) {
 }
 
 // 打开添加账号模态框
-function openAddAccountModal() {
+function openAddAccountModal(keepExisting = false) {
     const modal = document.getElementById('add-account-modal');
     if (modal) {
         modal.style.display = 'block';
-        // 清空输入框
-        document.getElementById('account-name').value = '';
-        document.getElementById('account-sessdata').value = '';
-        document.getElementById('account-bili-jct').value = '';
-        document.getElementById('account-email').value = '';
+        if (!keepExisting) {
+            // 清空输入框
+            document.getElementById('account-name').value = '';
+            document.getElementById('account-sessdata').value = '';
+            document.getElementById('account-bili-jct').value = '';
+            document.getElementById('account-email').value = '';
+        }
     }
 }
 
@@ -2615,9 +2666,12 @@ window.addEventListener('click', function(event) {
 let qrcodePollingInterval = null;
 let currentQRCodeKey = null;
 let isQRCodeLoginSuccess = false; // 添加标志位，防止重复处理
+let qrcodeLoginContext = 'single';
+let reopenAddAccountAfterQRCode = false;
 
 // 显示扫码登录
-function showQRCodeLogin() {
+function showQRCodeLogin(context = 'single') {
+    qrcodeLoginContext = context;
     document.getElementById('qrcode-login-modal').style.display = 'block';
     
     // 重置标志位和显示状态
@@ -2629,6 +2683,16 @@ function showQRCodeLogin() {
     
     // 生成二维码
     generateQRCode();
+}
+
+function showAddAccountQRCodeLogin() {
+    const addAccountModal = document.getElementById('add-account-modal');
+    if (addAccountModal) {
+        // 临时隐藏添加账号弹窗，避免层级遮挡二维码弹窗
+        addAccountModal.style.display = 'none';
+        reopenAddAccountAfterQRCode = true;
+    }
+    showQRCodeLogin('add-account');
 }
 
 // 生成二维码
@@ -2708,7 +2772,8 @@ function pollQRCodeStatus() {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            qrcode_key: currentQRCodeKey
+            qrcode_key: currentQRCodeKey,
+            auto_save: qrcodeLoginContext !== 'add-account'
         })
     })
     .then(response => response.json())
@@ -2725,9 +2790,9 @@ function pollQRCodeStatus() {
             const statusElement = document.getElementById('qrcode-status');
             
             if (status === 'waiting') {
-                statusElement.innerHTML = '<p>📱 请使用哔哩哔哩APP扫描二维码</p>';
+                statusElement.innerHTML = '<p> 请使用哔哩哔哩APP扫描二维码</p>';
             } else if (status === 'scanned') {
-                statusElement.innerHTML = '<p style="color: #00a1d6; font-weight: 600;">✅ 已扫码，请在APP中确认登录</p>';
+                statusElement.innerHTML = '<p style="color: #00a1d6; font-weight: 600;"> 已扫码，请在APP中确认登录</p>';
             } else if (status === 'success') {
                 // 登录成功 - 立即设置标志位并停止轮询
                 isQRCodeLoginSuccess = true;
@@ -2738,13 +2803,29 @@ function pollQRCodeStatus() {
                 document.getElementById('qrcode-display').style.display = 'none';
                 document.getElementById('qrcode-success').style.display = 'block';
                 
-                showToast('扫码登录成功！', 'success');
-                addLog('扫码登录成功，配置已自动保存', 'success');
+                const sessdata = data.sessdata || '';
+                const biliJct = data.bili_jct || '';
+                if (qrcodeLoginContext === 'add-account') {
+                    const sessInput = document.getElementById('account-sessdata');
+                    const jctInput = document.getElementById('account-bili-jct');
+                    if (sessInput && jctInput && sessdata && biliJct) {
+                        sessInput.value = sessdata;
+                        jctInput.value = biliJct;
+                    }
+                    showToast('扫码成功，已填充账号Cookie', 'success');
+                    addLog('账号扫码成功，已填充SESSDATA和bili_jct', 'success');
+                } else {
+                    showToast('扫码登录成功！', 'success');
+                    addLog('扫码登录成功，配置已自动保存', 'success');
+                }
                 
                 // 3秒后关闭模态框并刷新配置
                 setTimeout(() => {
+                    const loginContext = qrcodeLoginContext;
                     closeQRCodeLoginModal();
-                    loadConfig();
+                    if (loginContext !== 'add-account') {
+                        loadConfig();
+                    }
                 }, 3000);
             }
         } else {
@@ -2800,6 +2881,7 @@ function retryQRCodeLogin() {
 
 // 关闭扫码登录模态框
 function closeQRCodeLoginModal() {
+    const shouldReopenAddAccount = (qrcodeLoginContext === 'add-account' && reopenAddAccountAfterQRCode);
     document.getElementById('qrcode-login-modal').style.display = 'none';
     
     // 清除轮询
@@ -2810,6 +2892,12 @@ function closeQRCodeLoginModal() {
     
     currentQRCodeKey = null;
     isQRCodeLoginSuccess = false;
+    qrcodeLoginContext = 'single';
+    reopenAddAccountAfterQRCode = false;
+
+    if (shouldReopenAddAccount) {
+        openAddAccountModal(true);
+    }
 }
 
 // 点击模态框外部关闭

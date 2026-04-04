@@ -187,9 +187,10 @@ body {
 
 /* 容器 */
 .container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 20px;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 16px 20px;
 }
 
 /* 头部样式 */
@@ -288,6 +289,7 @@ header {
     grid-template-columns: 1fr 1fr;
     grid-template-rows: auto auto 1fr;
     gap: 25px;
+    min-height: calc(100vh - 140px);
 }
 
 /* 面板通用样式 */
@@ -561,7 +563,7 @@ select:focus {
     grid-column: span 2;
     display: flex;
     flex-direction: column;
-    min-height: 600px;
+    min-height: calc(100vh - 380px);
 }
 
 .log-search {
@@ -632,7 +634,7 @@ select:focus {
     font-family: 'Consolas', 'Courier New', monospace;
     font-size: 13px;
     line-height: 1.6;
-    max-height: 500px;
+    max-height: none;
 }
 
 .log-placeholder {

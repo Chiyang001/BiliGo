@@ -21,16 +21,19 @@
             </div>
             <div class="header-actions">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 13px; color: #00a1d6; font-weight: 600; padding: 4px 12px; background: linear-gradient(135deg, #e3f2fd 0%, #f0f8ff 100%); border-radius: 20px; border: 1px solid #b3e5fc;">Ver.2026-0101</span>
-                    <button class="btn-switch btn-secondary" onclick="openTutorial()" title="使用教程">
-                        📖 使用教程
+                    <span style="font-size: 13px; color: #00a1d6; font-weight: 600; padding: 4px 12px; background: linear-gradient(135deg, #e3f2fd 0%, #f0f8ff 100%); border-radius: 20px; border: 1px solid #b3e5fc;">Ver.20260401</span>
+                    <button class="btn-switch btn-secondary" onclick="openDocsPage()" title="教程文档">
+                         教程文档
                     </button>
                     <button class="btn-switch btn-secondary" onclick="checkUpdate()" title="检查更新">
-                        🔄 检查更新
+                         检查更新
                     </button>
                 </div>
                 <button class="btn-switch btn-primary" onclick="switchToCommentMode()">
-                    📝 切换到评论回复
+                     切换到评论回复
+                </button>
+                <button class="btn-switch btn-danger" onclick="confirmResetAllData()" title="清除所有配置和数据">
+                    清除所有数据
                 </button>
                 <div class="status-indicator">
                     <span class="status-icon">●</span>
@@ -41,13 +44,13 @@
 
         <div class="main-content">
             <section class="control-panel">
-                <h2>⚙️ 系统控制</h2>
+                <h2> 系统控制</h2>
                 <div class="button-group">
                     <button id="start-btn" class="btn-primary" onclick="startMonitoring()">
-                        ▶️ 开始监控
+                        开始监控
                     </button>
                     <button id="stop-btn" class="btn-danger" onclick="stopMonitoring()" disabled>
-                        ⏹️ 停止监控
+                        停止监控
                     </button>
                 </div>
                 
@@ -69,7 +72,7 @@
                             <label for="send-delay-interval">发送等待间隔 (秒):</label>
                             <input type="number" id="send-delay-interval" min="0.1" max="10" step="0.1" value="1.0" placeholder="1.0">
                             <p class="help-text">
-                                ⚠️ 两次发送消息之间的等待时间，建议1秒以上避免触发风控
+                                 两次发送消息之间的等待时间，建议1秒以上避免触发风控
                             </p>
                         </div>
                         
@@ -80,7 +83,7 @@
                         </div>
                         
                         <button class="btn-primary" onclick="saveTimingConfig()">
-                            💾 保存时间配置
+                             保存时间配置
                         </button>
                     </div>
                 </div>
@@ -94,65 +97,45 @@
                 </div>
                 
                 <div class="form-row" style="margin-top: 15px;">
-                    <label for="max-replies-per-user">👤 单用户最大回复次数:</label>
+                    <label for="max-replies-per-user"> 单用户最大回复次数:</label>
                     <div class="input-wrapper">
                         <input type="number" id="max-replies-per-user" min="1" max="100" value="3" placeholder="3">
                     </div>
                     <p class="help-text">
-                        ℹ️ 设置对同一个用户的最大回复次数，避免重复回复同一用户，建议设置3-5次
+                        设置对同一个用户的最大回复次数，避免重复回复同一用户，建议设置3-5次
                     </p>
                 </div>
                 
                 <button class="btn-secondary" onclick="saveNewMessageConfig()" style="margin-top: 10px;">
-                    💾 保存消息设置
+                     保存消息设置
                 </button>
                 
                 <div class="button-group" style="margin-top: 20px;">
                     <button class="btn-secondary" onclick="exportConfig()" title="导出完整配置包">
-                        📎 导出配置
+                         导出配置
                     </button>
                     <button class="btn-primary" onclick="openImportModal()" title="导入完整配置包">
-                        📎 导入配置
+                         导入配置
                     </button>
                 </div>
                 
-                <!-- 危险操作区域 -->
-                <div class="danger-zone" style="margin-top: 30px;">
-                    <div class="danger-zone-header">
-                        <h3>⚠️ 危险操作</h3>
-                    </div>
-                    <div class="danger-zone-content">
-                        <p class="danger-zone-description">
-                            以下操作将清除所有配置和数据，恢复到初始状态。此操作不可撤销，请谨慎操作！
-                        </p>
-                        <button class="btn-danger" onclick="confirmResetAllData()">
-                            🗑️ 清除所有数据
-                        </button>
-                    </div>
-                </div>
             </section>
 
             <section class="config-panel">
-                <h2>👤 账号配置</h2>
+                <h2> 账号配置</h2>
                 
-                <!-- 多账号提示 -->
-                <div class="info-banner" style="margin-bottom: 20px;">
-                    <div class="info-banner-icon">💡</div>
-                    <div class="info-banner-content">
-                        <strong>多账号使用提示</strong>
-                        <p>如需同时管理多个B站账号，建议使用以下方式：</p>
-                        <ul style="margin: 8px 0 0 20px; line-height: 1.8;">
-                            <li><strong>Docker部署：</strong>为每个账号创建独立的容器实例</li>
-                            <li><strong>多开BiliGo：</strong>在不同端口运行多个BiliGo实例（如4999、5000、5001等）</li>
-                        </ul>
-                        <p style="margin-top: 8px; color: #666; font-size: 13px;">注：内置多账号功能已移除，以上方式可实现更稳定的多账号管理</p>
+                <div class="form-row">
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="multi-account-mode" onchange="toggleAccountMode()">
+                        <label for="multi-account-mode">启用多账号并行模式</label>
                     </div>
+                    <p class="help-text">启用后将并行监控多个账号，互不干扰。</p>
                 </div>
                 
                 <!-- 邮件提醒配置区域 -->
                 <div class="collapsible-section" style="margin-top: 20px;">
                     <div class="collapsible-header" onclick="toggleEmailConfig()">
-                        <h3>📧 邮件提醒配置</h3>
+                        <h3> 邮件提醒配置</h3>
                         <span class="toggle-icon" id="email-toggle-icon">▼</span>
                     </div>
                     
@@ -167,7 +150,7 @@
                         
                         <div id="email-settings" style="display: none;">
                             <div class="form-row">
-                                <label for="sender-email">📧 发送邮箱:</label>
+                                <label for="sender-email"> 发送邮箱:</label>
                                 <div class="input-wrapper">
                                     <input type="email" id="sender-email" placeholder="例如：your_email@qq.com">
                                 </div>
@@ -175,19 +158,19 @@
                             </div>
                             
                             <div class="form-row">
-                                <label for="sender-password">🔑 邮箱授权码:</label>
+                                <label for="sender-password"> 邮箱授权码:</label>
                                 <div class="input-wrapper">
                                     <input type="password" id="sender-password" placeholder="请输入QQ邮箱授权码">
                                 </div>
                                 <p class="help-text">
-                                    ⚠️ 不是QQ密码！请在QQ邮箱设置中生成授权码
+                                     不是QQ密码！请在QQ邮箱设置中生成授权码
                                     <br>
-                                    <a href="#" onclick="showEmailSetupGuide()" style="color: #007bff; text-decoration: none;">📖 点击查看获取授权码教程</a>
+                                    <a href="#" onclick="showEmailSetupGuide()" style="color: #007bff; text-decoration: none;"> 点击查看获取授权码教程</a>
                                 </p>
                             </div>
                             
                             <div class="form-row">
-                                <label for="receiver-email">📬 接收邮箱:</label>
+                                <label for="receiver-email"> 接收邮箱:</label>
                                 <div class="input-wrapper">
                                     <input type="email" id="receiver-email" placeholder="例如：your_email@qq.com">
                                 </div>
@@ -195,7 +178,7 @@
                             </div>
                             
                             <div class="form-row">
-                                <label for="smtp-server">🌐 SMTP服务器:</label>
+                                <label for="smtp-server"> SMTP服务器:</label>
                                 <div class="input-wrapper">
                                     <input type="text" id="smtp-server" value="smtp.qq.com" readonly>
                                 </div>
@@ -203,7 +186,7 @@
                             </div>
                             
                             <div class="form-row">
-                                <label for="smtp-port">🔌 SMTP端口:</label>
+                                <label for="smtp-port"> SMTP端口:</label>
                                 <div class="input-wrapper">
                                     <input type="number" id="smtp-port" value="587" readonly>
                                 </div>
@@ -212,10 +195,10 @@
                             
                             <div class="button-group">
                                 <button class="btn-primary" onclick="saveEmailConfig()">
-                                    💾 保存邮件配置
+                                     保存邮件配置
                                 </button>
                                 <button class="btn-secondary" onclick="testEmailNotification()">
-                                    📧 发送测试邮件
+                                     发送测试邮件
                                 </button>
                             </div>
                         </div>
@@ -225,7 +208,7 @@
                 <!-- 单账号配置区域 -->
                 <div id="single-account-config" style="margin-top: 15px;">
                     <div class="info-banner" style="margin-bottom: 15px;">
-                        <div class="info-banner-icon">🔐</div>
+                        <div class="info-banner-icon"></div>
                         <div class="info-banner-content">
                             <strong>两种登录方式</strong>
                             <p>方式1：手动输入Cookie（SESSDATA和bili_jct）</p>
@@ -235,33 +218,46 @@
                     
                     <div style="margin-bottom: 20px;">
                         <button class="btn-primary" onclick="showQRCodeLogin()" style="width: 100%;">
-                            📱 扫码登录
+                             扫码登录
                         </button>
                     </div>
                     
                     <!-- Cookie输入区域 - 始终显示 -->
                     <div class="form-row">
-                        <label for="sessdata">🔑 SESSDATA:</label>
+                        <label for="sessdata"> SESSDATA:</label>
                         <div class="input-wrapper">
                             <input type="password" id="sessdata" placeholder="请输入B站SESSDATA或使用扫码登录">
                         </div>
                     </div>
                     <div class="form-row">
-                        <label for="bili_jct">🔒 bili_jct:</label>
+                        <label for="bili_jct"> bili_jct:</label>
                         <div class="input-wrapper">
                             <input type="password" id="bili_jct" placeholder="请输入bili_jct或使用扫码登录">
                         </div>
                     </div>
                     <button class="btn-primary" onclick="saveConfig()">
-                        💾 保存配置
+                         保存配置
                     </button>
+                </div>
+
+                <div id="multi-account-config" style="margin-top: 15px; display: none;">
+                    <div class="form-row">
+                        <label>账号列表:</label>
+                        <div id="accounts-list">
+                            <p class="help-text">暂无账号，点击下方按钮添加</p>
+                        </div>
+                    </div>
+                    <div class="button-group">
+                        <button class="btn-primary" onclick="openAddAccountModal()">添加账号</button>
+                        <button class="btn-secondary" onclick="loadAccounts()">刷新账号列表</button>
+                    </div>
                 </div>
             </section>
 
             <section class="reply-settings-container">
                 <div class="reply-settings-row">
                     <div class="default-reply-panel half-width">
-                        <h2>💬 默认回复设置</h2>
+                        <h2> 默认回复设置</h2>
                         <div class="form-row">
                             <div class="checkbox-wrapper">
                                 <input type="checkbox" id="default-reply-enabled">
@@ -304,7 +300,7 @@
                                 <div class="image-selector">
                                     <input type="text" id="default-reply-image-path" placeholder="请选择图片文件" readonly>
                                     <button type="button" class="btn-secondary" onclick="openImageBrowser('default')">
-                                        📁 选择图片
+                                         选择图片
                                     </button>
                                 </div>
                                 <div id="default-image-preview" class="image-preview" style="display: none;"></div>
@@ -313,7 +309,7 @@
                         
                         <!-- 区分用户类型的回复 -->
                         <div id="separate-reply-section" style="display: none;">
-                            <h3 style="margin-top: 15px; color: #28a745;">✅ 已关注用户回复</h3>
+                            <h3 style="margin-top: 15px; color: #28a745;"> 已关注用户回复</h3>
                             <div class="form-row">
                                 <label>回复类型:</label>
                                 <div class="radio-group">
@@ -338,13 +334,13 @@
                                 <div class="image-selector">
                                     <input type="text" id="followed-reply-image-path" placeholder="请选择图片文件" readonly>
                                     <button type="button" class="btn-secondary" onclick="openImageBrowser('followed')">
-                                        📁 选择图片
+                                         选择图片
                                     </button>
                                 </div>
                                 <div id="followed-image-preview" class="image-preview" style="display: none;"></div>
                             </div>
                             
-                            <h3 style="margin-top: 20px; color: #6c757d;">❌ 未关注用户回复</h3>
+                            <h3 style="margin-top: 20px; color: #6c757d;"> 未关注用户回复</h3>
                             <div class="form-row">
                                 <label>回复类型:</label>
                                 <div class="radio-group">
@@ -369,7 +365,7 @@
                                 <div class="image-selector">
                                     <input type="text" id="unfollowed-reply-image-path" placeholder="请选择图片文件" readonly>
                                     <button type="button" class="btn-secondary" onclick="openImageBrowser('unfollowed')">
-                                        📁 选择图片
+                                         选择图片
                                     </button>
                                 </div>
                                 <div id="unfollowed-image-preview" class="image-preview" style="display: none;"></div>
@@ -377,12 +373,18 @@
                         </div>
                         
                         <button class="btn-primary" onclick="saveDefaultReply()">
-                            💾 保存默认回复设置
+                             保存默认回复设置
                         </button>
                     </div>
 
                     <div class="follow-reply-panel half-width">
-                        <h2>👤➕ 关注后回复设置</h2>
+                        <h2> 关注后回复设置</h2>
+                        <div class="reply-mode-switch">
+                            <button id="follow-mode-btn" type="button" class="btn-secondary active" onclick="toggleFollowReplyMode('follow')">关注后回复</button>
+                            <button id="unfollow-mode-btn" type="button" class="btn-secondary" onclick="toggleFollowReplyMode('unfollow')">取消关注回复</button>
+                        </div>
+
+                        <div id="follow-reply-config-panel">
                         <div class="form-row">
                             <div class="checkbox-wrapper">
                                 <input type="checkbox" id="follow-reply-enabled">
@@ -415,7 +417,7 @@
                             <div class="image-selector">
                                 <input type="text" id="follow-reply-image-path" placeholder="请选择图片文件" readonly>
                                 <button type="button" class="btn-secondary" onclick="openImageBrowser('follow')">
-                                    📁 选择图片
+                                     选择图片
                                 </button>
                             </div>
                             <div id="follow-image-preview" class="image-preview" style="display: none;"></div>
@@ -424,19 +426,93 @@
                         <div class="form-row">
                             <label for="follow-check-interval">⏰ 关注者检查间隔 (秒):</label>
                             <div class="input-wrapper">
-                                <input type="number" id="follow-check-interval" min="1800" max="3600" step="60" value="1800" placeholder="1800">
+                                <input type="number" id="follow-check-interval" min="1" max="3600" step="1" value="1800" placeholder="1800">
                             </div>
                             <p class="help-text">
-                                ⚠️ 最低30分钟（1800秒），建议设置为30分钟以上，间隔过短可能触发B站风控系统导致无法正常检测关注者
+                                 设置关注者检查间隔，单位为秒。建议根据需要调整，过短可能触发B站风控系统
+                            </p>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="follow-scan-pages"> 关注列表扫描页数:</label>
+                            <div class="input-wrapper">
+                                <input type="number" id="follow-scan-pages" min="1" max="50" step="1" value="3" placeholder="3">
+                            </div>
+                            <p class="help-text">
+                                每页最多约50人，页数越大越不容易漏检，但请求更多，建议3-10页
+                            </p>
+                        </div>
+
+                        <div class="form-row">
+                            <label for="follow-new-window-seconds">⏱ 新关注检测窗口 (秒):</label>
+                            <div class="input-wrapper">
+                                <input type="number" id="follow-new-window-seconds" min="30" max="2592000" step="1" value="90" placeholder="90">
+                            </div>
+                            <p class="help-text">
+                                仅将窗口内的关注判定为“新关注”（默认90秒）。可按需调大，例如86400=24小时
+                            </p>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="follow-backfill-on-first-run">
+                                <label for="follow-backfill-on-first-run">首次启动补发历史关注欢迎</label>
+                            </div>
+                            <p class="help-text">
+                                仅首次初始化缓存时生效，可能触发大量发送与风控，请谨慎启用
                             </p>
                         </div>
                         
                         <div class="button-group">
                             <button class="btn-primary" onclick="saveFollowReply()">
-                                💾 保存关注回复设置
+                                 保存关注回复设置
                             </button>
                             <button class="btn-secondary" onclick="testFollowDetection()">
-                                🔍 测试关注者检测
+                                 测试关注者检测
+                            </button>
+                        </div>
+                        </div>
+
+                        <div id="unfollow-reply-config-panel" style="display: none;">
+                            <div class="form-row">
+                                <div class="checkbox-wrapper">
+                                    <input type="checkbox" id="unfollow-reply-enabled">
+                                    <label for="unfollow-reply-enabled">启用取消关注自动回复</label>
+                                </div>
+                            </div>
+
+                            <div class="form-row">
+                                <label>回复类型:</label>
+                                <div class="radio-group">
+                                    <div class="radio-wrapper">
+                                        <input type="radio" id="unfollow-reply-text" name="unfollow-reply-type" value="text" checked>
+                                        <label for="unfollow-reply-text">文字回复</label>
+                                    </div>
+                                    <div class="radio-wrapper">
+                                        <input type="radio" id="unfollow-reply-image" name="unfollow-reply-type" value="image">
+                                        <label for="unfollow-reply-image">图片回复</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="unfollow-text-content" class="form-row">
+                                <label for="unfollow-reply-message">告别消息:</label>
+                                <textarea id="unfollow-reply-message" placeholder="很遗憾看到您取消了关注，希望我们还有机会再见！"></textarea>
+                            </div>
+
+                            <div id="unfollow-image-content" class="form-row" style="display: none;">
+                                <label for="unfollow-reply-image-path">选择图片:</label>
+                                <div class="image-selector">
+                                    <input type="text" id="unfollow-reply-image-path" placeholder="请选择图片文件" readonly>
+                                    <button type="button" class="btn-secondary" onclick="openImageBrowser('unfollow')">
+                                         选择图片
+                                    </button>
+                                </div>
+                                <div id="unfollow-image-preview" class="image-preview" style="display: none;"></div>
+                            </div>
+
+                            <button class="btn-primary" onclick="saveUnfollowReplyConfig()">
+                                 保存取消关注回复设置
                             </button>
                         </div>
                     </div>
@@ -445,57 +521,11 @@
 
             <section class="unfollow-keyword-container">
                 <div class="unfollow-keyword-row">
-                    <!-- 取消关注回复设置 -->
-                    <div class="unfollow-reply-panel half-width">
-                        <h2>👤➖ 取消关注回复设置</h2>
-                        
-                        <div class="form-row">
-                            <div class="checkbox-wrapper">
-                                <input type="checkbox" id="unfollow-reply-enabled">
-                                <label for="unfollow-reply-enabled">启用取消关注自动回复</label>
-                            </div>
-                        </div>
-                        
-                        <div class="form-row">
-                            <label>回复类型:</label>
-                            <div class="radio-group">
-                                <div class="radio-wrapper">
-                                    <input type="radio" id="unfollow-reply-text" name="unfollow-reply-type" value="text" checked>
-                                    <label for="unfollow-reply-text">文字回复</label>
-                                </div>
-                                <div class="radio-wrapper">
-                                    <input type="radio" id="unfollow-reply-image" name="unfollow-reply-type" value="image">
-                                    <label for="unfollow-reply-image">图片回复</label>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div id="unfollow-text-content" class="form-row">
-                            <label for="unfollow-reply-message">告别消息:</label>
-                            <textarea id="unfollow-reply-message" placeholder="很遗憾看到您取消了关注，希望我们还有机会再见！"></textarea>
-                        </div>
-                        
-                        <div id="unfollow-image-content" class="form-row" style="display: none;">
-                            <label for="unfollow-reply-image-path">选择图片:</label>
-                            <div class="image-selector">
-                                <input type="text" id="unfollow-reply-image-path" placeholder="请选择图片文件" readonly>
-                                <button type="button" class="btn-secondary" onclick="openImageBrowser('unfollow')">
-                                    📁 选择图片
-                                </button>
-                            </div>
-                            <div id="unfollow-image-preview" class="image-preview" style="display: none;"></div>
-                        </div>
-                        
-                        <button class="btn-primary" onclick="saveUnfollowReplyConfig()">
-                            ✅ 保存取消关注回复设置
-                        </button>
-                    </div>
-                    
                     <!-- 关键词回复设置 -->
-                    <div class="keyword-panel half-width">
-                        <h2>💬📝 关键词回复设置</h2>
+                    <div class="keyword-panel">
+                        <h2> 关键词回复设置</h2>
                         <div class="form-row">
-                            <label for="rule-title">🏷️ 规则标题:</label>
+                            <label for="rule-title"> 规则标题:</label>
                             <div class="input-wrapper">
                                 <input type="text" id="rule-title" placeholder="例如：问候回复、帮助说明">
                             </div>
@@ -531,14 +561,14 @@
                             <div class="image-selector">
                                 <input type="text" id="rule-reply-image-path" placeholder="请选择图片文件" readonly>
                                 <button type="button" class="btn-secondary" onclick="openImageBrowser('rule')">
-                                    📁 选择图片
+                                     选择图片
                                 </button>
                             </div>
                             <div id="rule-image-preview" class="image-preview" style="display: none;"></div>
                         </div>
                         
                         <button class="btn-primary" onclick="addRule()">
-                            ➕ 添加规则
+                             添加规则
                         </button>
                     </div>
                 </div>
@@ -546,39 +576,39 @@
 
             <section class="rules-panel">
                 <div class="rules-header">
-                    <h2>📋 回复规则列表</h2>
+                    <h2> 回复规则列表</h2>
                     <div class="rules-actions">
                     </div>
                 </div>
                 <div class="pagination">
                     <button id="prev-page" class="btn-icon" onclick="changePage(-1)" disabled>
-                        ◀
+                        上一页
                     </button>
                     <span id="page-info">第 1 页，共 1 页</span>
                     <button id="next-page" class="btn-icon" onclick="changePage(1)" disabled>
-                        ▶
+                        下一页
                     </button>
                 </div>
                 <div id="rules-list" class="rules-list"></div>
                 <div class="pagination">
                     <button id="prev-page-bottom" class="btn-icon" onclick="changePage(-1)" disabled>
-                        ◀
+                        上一页
                     </button>
                     <span id="page-info-bottom">第 1 页，共 1 页</span>
                     <button id="next-page-bottom" class="btn-icon" onclick="changePage(1)" disabled>
-                        ▶
+                        下一页
                     </button>
                 </div>
             </section>
 
             <section class="log-panel">
-                <h2>📜 系统日志</h2>
+                <h2> 系统日志</h2>
                 <div class="log-redirect">
                     <div class="log-redirect-content">
-                        <h3>📄 查看系统日志</h3>
+                        <h3> 查看系统日志</h3>
                         <p>点击下方按钮跳转到专门的日志页面查看详细的系统运行日志</p>
                         <button class="btn-primary" onclick="goToLogsPage()">
-                            🔗
+                            
                             打开日志页面
                         </button>
                     </div>
@@ -595,31 +625,31 @@
     <div id="image-browser-modal" class="modal">
         <div class="modal-content image-browser-content">
             <div class="modal-header">
-                <h3>📁 选择图片</h3>
+                <h3> 选择图片</h3>
                 <button class="close-btn" onclick="closeImageBrowser()">
-                    ✕
+                    
                 </button>
             </div>
             <div class="modal-body">
                 <div class="browser-toolbar">
                     <div class="current-path">
-                        <span id="current-path-text">📁 加载中...</span>
+                        <span id="current-path-text"> 加载中...</span>
                     </div>
                     <div class="quick-nav">
                         <button class="btn-secondary btn-sm" onclick="goToHomeDirectory()">
-                            🏠 主目录
+                             主目录
                         </button>
                     </div>
                 </div>
                 <div id="file-list" class="file-list">
                     <div class="loading">
-                        🔄 加载中...
+                         加载中...
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="closeImageBrowser()">
-                    ✕ 取消
+                     取消
                 </button>
             </div>
         </div>
@@ -629,9 +659,9 @@
     <div id="import-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>📎 导入配置包</h3>
+                <h3> 导入配置包</h3>
                 <button class="close-btn" onclick="closeImportModal()">
-                    ✕
+                    
                 </button>
             </div>
             <div class="modal-body">
@@ -640,7 +670,7 @@
                     <div class="file-upload-area" id="file-upload-area">
                         <input type="file" id="keywords-file" accept=".json" style="display: none;" onchange="handleFileSelect(event)">
                         <div class="upload-placeholder" onclick="document.getElementById('keywords-file').click()">
-                            ☁️
+                            
                             <p>点击选择文件或拖拽文件到此处</p>
                             <small>支持 .json 格式，文件大小不超过1MB</small>
                         </div>
@@ -650,18 +680,18 @@
                 <div id="file-info" class="file-info" style="display: none;">
                     <div class="file-details">
                         <div class="file-text">
-                            <strong id="file-name">📄 </strong>
+                            <strong id="file-name"> </strong>
                             <small id="file-size"></small>
                         </div>
                         <button class="btn-icon" onclick="clearSelectedFile()" title="清除选择">
-                            ✕
+                            
                         </button>
                     </div>
                 </div>
                 
                 <div id="validation-result" class="validation-result" style="display: none;">
                     <div class="validation-header">
-                        <span>✅ 文件验证结果</span>
+                        <span> 文件验证结果</span>
                     </div>
                     <div class="validation-details">
                         <p><strong>总规则数:</strong> <span id="total-rules">0</span></p>
@@ -691,10 +721,10 @@
             </div>
             <div class="modal-footer">
                 <button id="import-btn" class="btn-primary" onclick="importConfig()" disabled>
-                    📎 导入
+                     导入
                 </button>
                 <button class="btn-secondary" onclick="closeImportModal()">
-                    ✕ 取消
+                     取消
                 </button>
             </div>
         </div>
@@ -704,14 +734,14 @@
     <div id="edit-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>✏️ 编辑规则</h3>
+                <h3> 编辑规则</h3>
                 <button class="close-btn" onclick="closeEditModal()">
-                    ✕
+                    
                 </button>
             </div>
             <div class="modal-body">
                 <div class="form-row">
-                    <label for="edit-rule-title">🏷️ 规则标题:</label>
+                    <label for="edit-rule-title"> 规则标题:</label>
                     <div class="input-wrapper">
                         <input type="text" id="edit-rule-title" placeholder="例如：问候回复、帮助说明">
                     </div>
@@ -747,7 +777,7 @@
                     <div class="image-selector">
                         <input type="text" id="edit-reply-image-path" placeholder="请选择图片文件" readonly>
                         <button type="button" class="btn-secondary" onclick="openImageBrowser('edit')">
-                            📁 选择图片
+                             选择图片
                         </button>
                     </div>
                     <div id="edit-image-preview" class="image-preview" style="display: none;"></div>
@@ -755,10 +785,10 @@
             </div>
             <div class="modal-footer">
                 <button class="btn-primary" onclick="saveEditRule()">
-                    ✅ 保存
+                     保存
                 </button>
                 <button class="btn-secondary" onclick="closeEditModal()">
-                    ✕ 取消
+                     取消
                 </button>
             </div>
         </div>
@@ -768,53 +798,53 @@
     <div id="email-setup-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>📧 QQ邮箱授权码获取教程</h3>
+                <h3> QQ邮箱授权码获取教程</h3>
                 <button class="close-btn" onclick="closeEmailSetupGuide()">
-                    ✕
+                    
                 </button>
             </div>
             <div class="modal-body">
                 <div class="tutorial-step">
-                    <h4>📱 第一步：登录QQ邮箱</h4>
+                    <h4> 第一步：登录QQ邮箱</h4>
                     <p>在浏览器中打开 <a href="https://mail.qq.com" target="_blank" style="color: #007bff;">https://mail.qq.com</a> 并登录您的QQ邮箱</p>
                 </div>
                 
                 <div class="tutorial-step">
-                    <h4>⚙️ 第二步：进入设置页面</h4>
+                    <h4> 第二步：进入设置页面</h4>
                     <p>点击邮箱页面右上角的 <strong>设置</strong> 按钮</p>
                 </div>
                 
                 <div class="tutorial-step">
-                    <h4>🔐 第三步：找到账号与安全</h4>
+                    <h4> 第三步：找到账号与安全</h4>
                     <p>在设置页面中，点击 <strong>账号与安全</strong> 选项</p>
                 </div>
                 
                 <div class="tutorial-step">
-                    <h4>🛡️ 第四步：进入安全设置</h4>
+                    <h4> 第四步：进入安全设置</h4>
                     <p>在账号与安全页面中，找到并点击 <strong>安全设置</strong></p>
                 </div>
                 
                 <div class="tutorial-step">
-                    <h4>📨 第五步：开启SMTP服务</h4>
+                    <h4> 第五步：开启SMTP服务</h4>
                     <p>找到 <strong>POP3/IMAP/SMTP/Exchange/CardDAV 服务</strong> 选项</p>
                     <p>开启 <strong>IMAP/SMTP服务</strong> 或 <strong>POP3/SMTP服务</strong></p>
                 </div>
                 
                 <div class="tutorial-step">
-                    <h4>🔑 第六步：生成授权码</h4>
+                    <h4> 第六步：生成授权码</h4>
                     <p>点击 <strong>生成授权码</strong> 按钮</p>
                     <p>按照提示完成手机验证</p>
-                    <p>⚠️ <strong>重要：</strong>生成的授权码就是您需要填入的"邮箱授权码"，不是您的QQ密码！</p>
+                    <p> <strong>重要：</strong>生成的授权码就是您需要填入的"邮箱授权码"，不是您的QQ密码！</p>
                 </div>
                 
                 <div class="tutorial-step">
-                    <h4>📋 第七步：复制授权码</h4>
+                    <h4> 第七步：复制授权码</h4>
                     <p>复制生成的授权码（通常是16位字符）</p>
                     <p>将授权码粘贴到本页面的"邮箱授权码"输入框中</p>
                 </div>
                 
                 <div class="tutorial-note">
-                    <h4>📝 注意事项：</h4>
+                    <h4> 注意事项：</h4>
                     <ul>
                         <li>授权码不是QQ密码，是专门用于第三方应用登录的密码</li>
                         <li>授权码生成后请妥善保管，遗失需要重新生成</li>
@@ -825,7 +855,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn-primary" onclick="closeEmailSetupGuide()">
-                    ✅ 我知道了
+                     我知道了
                 </button>
             </div>
         </div>
@@ -835,9 +865,9 @@
     <div id="reset-confirm-modal" class="modal">
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header" style="background: #fff3cd; border-bottom: 2px solid #ffc107;">
-                <h3 style="color: #856404;">⚠️ 确认清除所有数据</h3>
+                <h3 style="color: #856404;"> 确认清除所有数据</h3>
                 <button class="close-btn" onclick="closeResetConfirmModal()">
-                    ✕
+                    
                 </button>
             </div>
             <div class="modal-body">
@@ -857,7 +887,7 @@
                 </ul>
                 
                 <div style="background: #f8d7da; padding: 15px; border-radius: 5px; margin-top: 20px; border-left: 4px solid #dc3545;">
-                    <p style="margin: 0; color: #721c24; font-weight: 600;">⚠️ 此操作不可撤销！</p>
+                    <p style="margin: 0; color: #721c24; font-weight: 600;"> 此操作不可撤销！</p>
                     <p style="margin: 8px 0 0 0; color: #721c24;">建议在清除前先导出配置备份。</p>
                 </div>
                 
@@ -869,10 +899,10 @@
             </div>
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="closeResetConfirmModal()">
-                    ✕ 取消
+                     取消
                 </button>
                 <button class="btn-danger" onclick="executeResetAllData()">
-                    🗑️ 确认清除
+                     确认清除
                 </button>
             </div>
         </div>
@@ -882,46 +912,50 @@
     <div id="qrcode-login-modal" class="modal">
         <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
-                <h3>📱 哔哩哔哩扫码登录</h3>
+                <h3> 哔哩哔哩扫码登录</h3>
                 <button class="close-btn" onclick="closeQRCodeLoginModal()">
-                    ✕
+                    
                 </button>
             </div>
             <div class="modal-body" style="text-align: center; padding: 30px;">
                 <div id="qrcode-container" style="margin: 20px auto;">
                     <div id="qrcode-loading" style="display: none;">
-                        <div style="font-size: 48px; margin-bottom: 15px;">⏳</div>
+                        <div class="qrcode-loading-dots" aria-hidden="true">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
                         <p style="color: #666;">正在生成二维码...</p>
                     </div>
                     <div id="qrcode-display" style="display: none;">
                         <div id="qrcode-image" style="margin: 0 auto; max-width: 280px;"></div>
                         <div id="qrcode-status" style="margin-top: 20px; font-size: 16px; color: #666;">
-                            <p>📱 请使用哔哩哔哩APP扫描二维码</p>
+                            <p> 请使用哔哩哔哩APP扫描二维码</p>
                         </div>
                     </div>
                     <div id="qrcode-error" style="display: none; color: #dc3545;">
-                        <div style="font-size: 48px; margin-bottom: 15px;">❌</div>
+                        <div style="font-size: 48px; margin-bottom: 15px;"></div>
                         <p id="qrcode-error-message"></p>
                         <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border: 1px solid #ffc107; text-align: left;">
-                            <p style="margin: 0 0 10px 0; font-weight: 600; color: #856404;">💡 备用方案：</p>
+                            <p style="margin: 0 0 10px 0; font-weight: 600; color: #856404;"> 备用方案：</p>
                             <p style="margin: 0; color: #856404; font-size: 14px; line-height: 1.6;">
                                 如果扫码登录失败，您可以关闭此窗口，在下方的输入框中手动输入Cookie。
                                 <br>在浏览器中登录B站后，从浏览器开发者工具中复制SESSDATA和bili_jct即可。
                             </p>
                         </div>
                         <button class="btn-primary" onclick="retryQRCodeLogin()" style="margin-top: 15px; width: 100%;">
-                            🔄 重新生成二维码
+                             重新生成二维码
                         </button>
                     </div>
                     <div id="qrcode-success" style="display: none; color: #28a745;">
-                        <div style="font-size: 64px; margin-bottom: 15px;">✅</div>
+                        <div style="font-size: 64px; margin-bottom: 15px;"></div>
                         <p style="font-size: 18px; font-weight: 600;">登录成功！</p>
                         <p style="color: #666; margin-top: 10px;">配置已自动保存</p>
                     </div>
                 </div>
                 
                 <div style="margin-top: 25px; padding: 15px; background: #f8f9fa; border-radius: 8px; text-align: left; border: 1px solid #e5e9ef;">
-                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #333;">💡 使用说明：</p>
+                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #333;"> 使用说明：</p>
                     <ol style="margin: 0; padding-left: 20px; line-height: 1.8; color: #666; font-size: 14px;">
                         <li>打开哔哩哔哩APP</li>
                         <li>点击右上角扫一扫</li>
@@ -929,6 +963,41 @@
                         <li>在APP中确认登录</li>
                     </ol>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="add-account-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>添加账号</h3>
+                <button class="close-btn" onclick="closeAddAccountModal()">X</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label for="account-name">账号名称:</label>
+                    <input type="text" id="account-name" placeholder="例如：主号 / 备用号">
+                </div>
+                <div class="form-row">
+                    <button class="btn-secondary" type="button" onclick="showAddAccountQRCodeLogin()" style="width: 100%;">扫码登录填充Cookie</button>
+                    <p class="help-text">扫码成功后会自动填入当前账号的 SESSDATA 与 bili_jct。</p>
+                </div>
+                <div class="form-row">
+                    <label for="account-sessdata">SESSDATA:</label>
+                    <input type="password" id="account-sessdata" placeholder="请输入或扫码填充">
+                </div>
+                <div class="form-row">
+                    <label for="account-bili-jct">bili_jct:</label>
+                    <input type="password" id="account-bili-jct" placeholder="请输入或扫码填充">
+                </div>
+                <div class="form-row">
+                    <label for="account-email">登录失效通知邮箱(可选):</label>
+                    <input type="email" id="account-email" placeholder="例如：notice@qq.com">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="addAccount()">保存账号</button>
+                <button class="btn-secondary" onclick="closeAddAccountModal()">取消</button>
             </div>
         </div>
     </div>

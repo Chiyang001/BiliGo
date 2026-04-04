@@ -20,8 +20,20 @@
                 <span class="subtitle">B站回复管理工具</span>
             </div>
             <div class="header-actions">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 13px; color: #00a1d6; font-weight: 600; padding: 4px 12px; background: linear-gradient(135deg, #e3f2fd 0%, #f0f8ff 100%); border-radius: 20px; border: 1px solid #b3e5fc;">Ver.20260401</span>
+                    <button class="btn-switch btn-secondary" onclick="openDocsPage()" title="教程文档">
+                        教程文档
+                    </button>
+                    <button class="btn-switch btn-secondary" onclick="checkUpdate()" title="检查更新">
+                        检查更新
+                    </button>
+                </div>
                 <button class="btn-secondary btn-switch" onclick="switchToMessageMode()">
-                    💬 切换到私信模式
+                     切换到私信模式
+                </button>
+                <button class="btn-danger btn-switch" onclick="confirmResetAllData()">
+                    清除所有数据
                 </button>
                 <div class="status-indicator">
                     <span class="status-icon">●</span>
@@ -32,35 +44,100 @@
 
         <div class="main-content">
             <section class="control-panel">
-                <h2>⚙️ 评论回复控制</h2>
+                <h2> 评论回复控制</h2>
                 <div class="button-group">
                     <button id="start-btn" class="btn-primary" onclick="startCommentMonitoring()">
-                        ▶️ 开始监控评论
+                        开始监控评论
                     </button>
                     <button id="stop-btn" class="btn-danger" onclick="stopCommentMonitoring()" disabled>
-                        ⏹️ 停止监控评论
+                        停止监控评论
                     </button>
                 </div>
                 
                 <!-- 评论监控配置 -->
                 <div class="collapsible-section" style="margin-top: 20px;">
                     <div class="collapsible-header" onclick="toggleCommentConfig()">
-                        <h3>⚙️ 评论监控配置</h3>
+                        <h3> 评论监控配置</h3>
                         <span class="toggle-icon" id="comment-toggle-icon">▼</span>
                     </div>
                     
                     <div class="collapsible-content" id="comment-config-content" style="display: none;">
                         <div class="form-row">
                             <label for="comment-check-interval">评论检查间隔 (秒):</label>
-                            <input type="number" id="comment-check-interval" min="10" max="300" step="1" value="30" placeholder="30">
-                            <p class="help-text">检查新评论的频率，建议30秒以上避免频率限制</p>
+                            <input type="number" id="comment-check-interval" min="0" step="any" value="5" placeholder="5">
+                            <p class="help-text">检查新评论的频率；可为 0（尽量连续检查）或任意正数，过短可能触发频率限制</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="comment-fetch-gap">多视频评论拉取间隔 (秒):</label>
+                            <input type="number" id="comment-fetch-gap" min="0" step="0.05" value="1" placeholder="1">
+                            <p class="help-text">每轮会依次请求多个稿件的评论接口；此处为相邻两次请求之间的间隔，略大于 0 可明显减少「有时能拉到、有时为 0 条」的风控空返回（建议 0.2～0.5）</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="comment-fetch-mode">评论拉取方式:</label>
+                            <select id="comment-fetch-mode">
+                                <option value="wbi">WBI 签名（与网页接口一致，推荐）</option>
+                                <option value="browser">浏览器（Playwright，需安装 Chromium）</option>
+                            </select>
+                            <p class="help-text">默认使用 WBI 签名接口，避免旧版直连导致的 HTTP 412；若仍异常可尝试浏览器模式（需安装 playwright 与 Chromium）</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="max-videos-to-check">本轮检查的视频数量上限:</label>
+                            <input type="number" id="max-videos-to-check" min="1" max="500" step="1" value="50" placeholder="50">
+                            <p class="help-text">稿件数量大于上限时，由下方「稿件策略」决定取最新稿还是新旧各半；不超过上限时会拉取全部稿件</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="video-list-strategy">稿件数量超过上限时:</label>
+                            <select id="video-list-strategy">
+                                <option value="both_ends">新旧各半（推荐，避免漏掉最旧稿件）</option>
+                                <option value="newest">只扫最新稿件</option>
+                            </select>
+                            <p class="help-text">仅当「投稿总数 &gt; 视频数量上限」时生效；否则始终扫描全部稿件</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="comments-per-video">每个视频拉取的顶层评论条数:</label>
+                            <input type="number" id="comments-per-video" min="1" max="30" step="1" value="10" placeholder="10">
+                            <p class="help-text">单页条数，每页最多 30；与下方「主评论翻页」相乘为单稿可抓到的顶层评论上限</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="comment-main-sort-mode">主评论排序:</label>
+                            <select id="comment-main-sort-mode">
+                                <option value="3">按时间（新评论优先，推荐）</option>
+                                <option value="2">按热度</option>
+                            </select>
+                            <p class="help-text">按热度时新评论可能不在前几页，容易漏检</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="comment-main-pages-max">每个稿件主评论最多翻页数:</label>
+                            <input type="number" id="comment-main-pages-max" min="1" max="50" step="1" value="15" placeholder="15">
+                            <p class="help-text">主评论分页拉取，热门视频评论多需适当增大；请求量 ≈ 稿件数 × 翻页数</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="comment-monitor-sub-replies" checked>
+                                <label for="comment-monitor-sub-replies">监控楼中楼里「回复我的」评论</label>
+                            </div>
+                            <p class="help-text">开启后会拉取每条主评论下的楼中楼，并对直接回复你（含回复你的楼中楼）的评论尝试自动回复</p>
+                        </div>
+                        
+                        <div class="form-row">
+                            <label for="max-sub-pages-per-root">单条主评论下楼中楼最多翻页数:</label>
+                            <input type="number" id="max-sub-pages-per-root" min="1" max="100" step="1" value="15" placeholder="15">
+                            <p class="help-text">每条根评论下最多请求多少页楼中楼，防止热门长楼请求过多</p>
                         </div>
                         
                         <div class="form-row">
                             <label for="comment-send-delay">回复发送间隔 (秒):</label>
                             <input type="number" id="comment-send-delay" min="1" max="10" step="0.1" value="2.0" placeholder="2.0">
                             <p class="help-text">
-                                ⚠️ 两次评论回复之间的等待时间，建议2秒以上避免触发风控
+                                 两次评论回复之间的等待时间，建议2秒以上避免触发风控
                             </p>
                         </div>
                         
@@ -73,28 +150,28 @@
                         </div>
                         
                         <button class="btn-primary" onclick="saveCommentConfig()">
-                            💾 保存监控配置
+                             保存监控配置
                         </button>
                     </div>
                 </div>
                 
                 <div class="button-group" style="margin-top: 20px;">
                     <button class="btn-secondary" onclick="exportCommentConfig()" title="导出评论回复配置">
-                        📎 导出配置
+                         导出配置
                     </button>
                     <button class="btn-primary" onclick="openCommentImportModal()" title="导入评论回复配置">
-                        📎 导入配置
+                         导入配置
                     </button>
                     <button class="btn-success" onclick="importFromMessageConfig()" title="从私信配置导入">
-                        🔄 导入私信配置
+                         导入私信配置
                     </button>
                 </div>
             </section>
 
             <section class="config-panel">
-                <h2>⚙️ 登录配置</h2>
+                <h2> 登录配置</h2>
                 <div class="info-banner" style="margin-bottom: 15px;">
-                    <div class="info-banner-icon">🔐</div>
+                    <div class="info-banner-icon"></div>
                     <div class="info-banner-content">
                         <strong>两种登录方式</strong>
                         <p>方式1：手动输入Cookie（SESSDATA和bili_jct）</p>
@@ -104,31 +181,31 @@
                 
                 <div style="margin-bottom: 20px;">
                     <button class="btn-primary" onclick="showCommentQRCodeLogin()" style="width: 100%;">
-                        📱 扫码登录
+                         扫码登录
                     </button>
                 </div>
                 
                 <div class="form-row">
-                    <label for="sessdata">🔑 SESSDATA:</label>
+                    <label for="sessdata"> SESSDATA:</label>
                     <div class="input-wrapper">
                         <input type="password" id="sessdata" placeholder="请输入B站SESSDATA或使用扫码登录">
                     </div>
                 </div>
                 <div class="form-row">
-                    <label for="bili_jct">🔒 bili_jct:</label>
+                    <label for="bili_jct"> bili_jct:</label>
                     <div class="input-wrapper">
                         <input type="password" id="bili_jct" placeholder="请输入bili_jct或使用扫码登录">
                     </div>
                 </div>
                 <button class="btn-primary" onclick="saveCommentLoginConfig()">
-                    💾 保存登录配置
+                     保存登录配置
                 </button>
             </section>
 
             <section class="reply-settings-container">
                 <div class="reply-settings-row">
                     <div class="default-reply-panel half-width">
-                        <h2>💬 默认评论回复设置</h2>
+                        <h2> 默认评论回复设置</h2>
                         <div class="form-row">
                             <div class="checkbox-wrapper">
                                 <input type="checkbox" id="default-comment-reply-enabled">
@@ -161,43 +238,29 @@
                             <div class="image-selector">
                                 <input type="text" id="default-comment-reply-image-path" placeholder="请选择图片文件" readonly>
                                 <button type="button" class="btn-secondary" onclick="openImageBrowser('default-comment')">
-                                    📁 选择图片
+                                     选择图片
                                 </button>
                             </div>
                             <div id="default-comment-image-preview" class="image-preview" style="display: none;"></div>
                         </div>
                         
                         <button class="btn-primary" onclick="saveDefaultCommentReply()">
-                            💾 保存默认回复设置
+                             保存默认回复设置
                         </button>
                     </div>
 
                     <div class="keyword-panel half-width">
-                        <h2>💬📝 评论关键词回复设置</h2>
+                        <h2> 评论关键词回复设置</h2>
                         <div class="form-row">
-                            <label for="comment-rule-title">🏷️ 规则标题:</label>
+                            <label for="comment-rule-title"> 规则标题:</label>
                             <div class="input-wrapper">
                                 <input type="text" id="comment-rule-title" placeholder="例如：感谢回复、问题解答">
                             </div>
                         </div>
                         <div class="form-row">
-                            <label for="comment-keywords">🔤 关键词 (用中文逗号分隔):</label>
+                            <label for="comment-keywords"> 关键词 (用中文逗号分隔):</label>
                             <div class="input-wrapper">
                                 <input type="text" id="comment-keywords" placeholder="例如：谢谢，感谢，不错">
-                            </div>
-                        </div>
-                        
-                        <div class="form-row">
-                            <label>回复类型:</label>
-                            <div class="radio-group">
-                                <div class="radio-wrapper">
-                                    <input type="radio" id="comment-rule-reply-text" name="comment-rule-reply-type" value="text" checked>
-                                    <label for="comment-rule-reply-text">文字回复</label>
-                                </div>
-                                <div class="radio-wrapper">
-                                    <input type="radio" id="comment-rule-reply-image" name="comment-rule-reply-type" value="image">
-                                    <label for="comment-rule-reply-image">图片回复</label>
-                                </div>
                             </div>
                         </div>
                         
@@ -206,19 +269,8 @@
                             <textarea id="comment-reply" placeholder="请输入评论回复内容"></textarea>
                         </div>
                         
-                        <div id="comment-rule-image-content" class="form-row" style="display: none;">
-                            <label for="comment-rule-reply-image-path">选择图片:</label>
-                            <div class="image-selector">
-                                <input type="text" id="comment-rule-reply-image-path" placeholder="请选择图片文件" readonly>
-                                <button type="button" class="btn-secondary" onclick="openImageBrowser('comment-rule')">
-                                    📁 选择图片
-                                </button>
-                            </div>
-                            <div id="comment-rule-image-preview" class="image-preview" style="display: none;"></div>
-                        </div>
-                        
                         <button class="btn-primary" onclick="addCommentRule()">
-                            ➕ 添加评论回复规则
+                             添加评论回复规则
                         </button>
                     </div>
                 </div>
@@ -226,39 +278,39 @@
 
             <section class="rules-panel">
                 <div class="rules-header">
-                    <h2>📝 评论回复规则列表</h2>
+                    <h2> 评论回复规则列表</h2>
                     <div class="rules-actions">
                     </div>
                 </div>
                 <div class="pagination">
                     <button id="prev-page" class="btn-icon" onclick="changePage(-1)" disabled>
-                        ◀️
+                        上一页
                     </button>
                     <span id="page-info">第 1 页，共 1 页</span>
                     <button id="next-page" class="btn-icon" onclick="changePage(1)" disabled>
-                        ▶️
+                        下一页
                     </button>
                 </div>
                 <div id="comment-rules-list" class="rules-list"></div>
                 <div class="pagination">
                     <button id="prev-page-bottom" class="btn-icon" onclick="changePage(-1)" disabled>
-                        ◀️
+                        上一页
                     </button>
                     <span id="page-info-bottom">第 1 页，共 1 页</span>
                     <button id="next-page-bottom" class="btn-icon" onclick="changePage(1)" disabled>
-                        ▶️
+                        下一页
                     </button>
                 </div>
             </section>
 
             <section class="log-panel">
-                <h2>📝 系统日志</h2>
+                <h2> 系统日志</h2>
                 <div class="log-redirect">
                     <div class="log-redirect-content">
-                        <h3>📄 查看系统日志</h3>
+                        <h3> 查看系统日志</h3>
                         <p>点击下方按钮跳转到专门的日志页面查看详细的系统运行日志</p>
                         <button class="btn-primary" onclick="goToLogsPage()">
-                            🔗
+                            
                             打开日志页面
                         </button>
                     </div>
@@ -275,31 +327,31 @@
     <div id="image-browser-modal" class="modal">
         <div class="modal-content image-browser-content">
             <div class="modal-header">
-                <h3>📁 选择图片</h3>
+                <h3> 选择图片</h3>
                 <button class="close-btn" onclick="closeImageBrowser()">
-                    ❌
+                    
                 </button>
             </div>
             <div class="modal-body">
                 <div class="browser-toolbar">
                     <div class="current-path">
-                        <span id="current-path-text">📂 加载中...</span>
+                        <span id="current-path-text"> 加载中...</span>
                     </div>
                     <div class="quick-nav">
                         <button class="btn-secondary btn-sm" onclick="goToHomeDirectory()">
-                            🏠 主目录
+                             主目录
                         </button>
                     </div>
                 </div>
                 <div id="file-list" class="file-list">
                     <div class="loading">
-                        🔄 加载中...
+                         加载中...
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="closeImageBrowser()">
-                    ❌ 取消
+                     取消
                 </button>
             </div>
         </div>
@@ -309,9 +361,9 @@
     <div id="comment-import-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>📤 导入评论回复配置</h3>
+                <h3> 导入评论回复配置</h3>
                 <button class="close-btn" onclick="closeCommentImportModal()">
-                    ❌
+                    
                 </button>
             </div>
             <div class="modal-body">
@@ -320,7 +372,7 @@
                     <div class="file-upload-area" id="comment-file-upload-area">
                         <input type="file" id="comment-keywords-file" accept=".json" style="display: none;" onchange="handleCommentFileSelect(event)">
                         <div class="upload-placeholder" onclick="document.getElementById('comment-keywords-file').click()">
-                            <p>☁️ 点击选择文件或拖拽文件到此处</p>
+                            <p> 点击选择文件或拖拽文件到此处</p>
                             <small>支持 .json 格式，文件大小不超过1MB</small>
                         </div>
                     </div>
@@ -329,11 +381,11 @@
                 <div id="comment-file-info" class="file-info" style="display: none;">
                     <div class="file-details">
                         <div class="file-text">
-                            <strong id="comment-file-name">📄 </strong>
+                            <strong id="comment-file-name"> </strong>
                             <small id="comment-file-size"></small>
                         </div>
                         <button class="btn-icon" onclick="clearCommentSelectedFile()" title="清除选择">
-                            ❌
+                            
                         </button>
                     </div>
                 </div>
@@ -355,10 +407,10 @@
             </div>
             <div class="modal-footer">
                 <button id="comment-import-btn" class="btn-primary" onclick="importCommentConfig()" disabled>
-                    📤 导入
+                     导入
                 </button>
                 <button class="btn-secondary" onclick="closeCommentImportModal()">
-                    ❌ 取消
+                     取消
                 </button>
             </div>
         </div>
@@ -368,36 +420,22 @@
     <div id="comment-edit-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>✏️ 编辑评论回复规则</h3>
+                <h3> 编辑评论回复规则</h3>
                 <button class="close-btn" onclick="closeCommentEditModal()">
-                    ❌
+                    
                 </button>
             </div>
             <div class="modal-body">
                 <div class="form-row">
-                    <label for="edit-comment-rule-title">🏷️ 规则标题:</label>
+                    <label for="edit-comment-rule-title"> 规则标题:</label>
                     <div class="input-wrapper">
                         <input type="text" id="edit-comment-rule-title" placeholder="例如：感谢回复、问题解答">
                     </div>
                 </div>
                 <div class="form-row">
-                    <label for="edit-comment-keywords">🔤 关键词 (用中文逗号分隔):</label>
+                    <label for="edit-comment-keywords"> 关键词 (用中文逗号分隔):</label>
                     <div class="input-wrapper">
                         <input type="text" id="edit-comment-keywords" placeholder="例如：谢谢，感谢，不错">
-                    </div>
-                </div>
-                
-                <div class="form-row">
-                    <label>回复类型:</label>
-                    <div class="radio-group">
-                        <div class="radio-wrapper">
-                            <input type="radio" id="edit-comment-reply-text" name="edit-comment-reply-type" value="text" checked>
-                            <label for="edit-comment-reply-text">文字回复</label>
-                        </div>
-                        <div class="radio-wrapper">
-                            <input type="radio" id="edit-comment-reply-image" name="edit-comment-reply-type" value="image">
-                            <label for="edit-comment-reply-image">图片回复</label>
-                        </div>
                     </div>
                 </div>
                 
@@ -405,24 +443,13 @@
                     <label for="edit-comment-reply">回复内容:</label>
                     <textarea id="edit-comment-reply" placeholder="请输入评论回复内容"></textarea>
                 </div>
-                
-                <div id="edit-comment-image-content" class="form-row" style="display: none;">
-                    <label for="edit-comment-reply-image-path">选择图片:</label>
-                    <div class="image-selector">
-                        <input type="text" id="edit-comment-reply-image-path" placeholder="请选择图片文件" readonly>
-                        <button type="button" class="btn-secondary" onclick="openImageBrowser('edit-comment')">
-                            📁 选择图片
-                        </button>
-                    </div>
-                    <div id="edit-comment-image-preview" class="image-preview" style="display: none;"></div>
-                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn-primary" onclick="saveEditCommentRule()">
-                    ✅ 保存
+                     保存
                 </button>
                 <button class="btn-secondary" onclick="closeCommentEditModal()">
-                    ❌ 取消
+                     取消
                 </button>
             </div>
         </div>
@@ -432,46 +459,46 @@
     <div id="comment-qrcode-login-modal" class="modal">
         <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
-                <h3>📱 哔哩哔哩扫码登录</h3>
+                <h3> 哔哩哔哩扫码登录</h3>
                 <button class="close-btn" onclick="closeCommentQRCodeLoginModal()">
-                    ✕
+                    
                 </button>
             </div>
             <div class="modal-body" style="text-align: center; padding: 30px;">
                 <div id="comment-qrcode-container" style="margin: 20px auto;">
                     <div id="comment-qrcode-loading" style="display: none;">
-                        <div style="font-size: 48px; margin-bottom: 15px;">⏳</div>
+                        <div style="font-size: 48px; margin-bottom: 15px;">...</div>
                         <p style="color: #666;">正在生成二维码...</p>
                     </div>
                     <div id="comment-qrcode-display" style="display: none;">
                         <div id="comment-qrcode-image" style="margin: 0 auto; max-width: 280px;"></div>
                         <div id="comment-qrcode-status" style="margin-top: 20px; font-size: 16px; color: #666;">
-                            <p>📱 请使用哔哩哔哩APP扫描二维码</p>
+                            <p> 请使用哔哩哔哩APP扫描二维码</p>
                         </div>
                     </div>
                     <div id="comment-qrcode-error" style="display: none; color: #dc3545;">
-                        <div style="font-size: 48px; margin-bottom: 15px;">❌</div>
+                        <div style="font-size: 48px; margin-bottom: 15px;"></div>
                         <p id="comment-qrcode-error-message"></p>
                         <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border: 1px solid #ffc107; text-align: left;">
-                            <p style="margin: 0 0 10px 0; font-weight: 600; color: #856404;">💡 备用方案：</p>
+                            <p style="margin: 0 0 10px 0; font-weight: 600; color: #856404;"> 备用方案：</p>
                             <p style="margin: 0; color: #856404; font-size: 14px; line-height: 1.6;">
                                 如果扫码登录失败，您可以关闭此窗口，在下方的输入框中手动输入Cookie。
                                 <br>在浏览器中登录B站后，从浏览器开发者工具中复制SESSDATA和bili_jct即可。
                             </p>
                         </div>
                         <button class="btn-primary" onclick="retryCommentQRCodeLogin()" style="margin-top: 15px; width: 100%;">
-                            🔄 重新生成二维码
+                             重新生成二维码
                         </button>
                     </div>
                     <div id="comment-qrcode-success" style="display: none; color: #28a745;">
-                        <div style="font-size: 64px; margin-bottom: 15px;">✅</div>
+                        <div style="font-size: 64px; margin-bottom: 15px;"></div>
                         <p style="font-size: 18px; font-weight: 600;">登录成功！</p>
                         <p style="color: #666; margin-top: 10px;">配置已自动保存</p>
                     </div>
                 </div>
                 
                 <div style="margin-top: 25px; padding: 15px; background: #f8f9fa; border-radius: 8px; text-align: left; border: 1px solid #e5e9ef;">
-                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #333;">💡 使用说明：</p>
+                    <p style="margin: 0 0 10px 0; font-weight: 600; color: #333;"> 使用说明：</p>
                     <ol style="margin: 0; padding-left: 20px; line-height: 1.8; color: #666; font-size: 14px;">
                         <li>打开哔哩哔哩APP</li>
                         <li>点击右上角扫一扫</li>
@@ -479,6 +506,48 @@
                         <li>在APP中确认登录</li>
                     </ol>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="reset-confirm-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="background: #fff3cd; border-bottom: 2px solid #ffc107;">
+                <h3 style="color: #000;">确认清除所有数据</h3>
+                <button class="close-btn" onclick="closeResetConfirmModal()">
+                    X
+                </button>
+            </div>
+            <div class="modal-body">
+                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
+                    <p style="margin: 0; color: #000; font-weight: 600;">此操作将清除以下所有数据：</p>
+                </div>
+
+                <ul style="margin: 15px 0; padding-left: 25px; line-height: 2; color: #fff;">
+                    <li>B站账号登录配置（SESSDATA、bili_jct）</li>
+                    <li>所有私信回复规则</li>
+                    <li>所有评论回复规则</li>
+                    <li>默认回复设置</li>
+                    <li>关注者欢迎设置</li>
+                    <li>邮件提醒配置</li>
+                    <li>时间间隔配置</li>
+                    <li>用户回复统计数据</li>
+                </ul>
+
+                <div style="background: #f8d7da; padding: 15px; border-radius: 5px; margin-top: 20px; border-left: 4px solid #dc3545;">
+                    <p style="margin: 0; color: #000; font-weight: 600;">此操作不可撤销！</p>
+                    <p style="margin: 8px 0 0 0; color: #000;">建议在清除前先导出配置备份。</p>
+                </div>
+
+                <div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 5px;">
+                    <p style="margin: 0; color: #000; font-size: 14px;">
+                        <strong>提示：</strong>如果只是想重新配置，建议直接修改相应设置，无需清除所有数据。
+                    </p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeResetConfirmModal()">取消</button>
+                <button class="btn-danger" onclick="executeResetAllData()">确认清除</button>
             </div>
         </div>
     </div>

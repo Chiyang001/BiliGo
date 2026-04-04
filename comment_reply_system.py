@@ -13,6 +13,9 @@ import logging
 import hashlib
 from collections import defaultdict
 
+import bili_wbi
+import comment_monitor_helpers
+
 # 配置日志
 logger = logging.getLogger(__name__)
 
@@ -24,11 +27,18 @@ class CommentReplySystem:
             'default_comment_reply_message': '感谢您的评论！',
             'default_comment_reply_type': 'text',
             'default_comment_reply_image': '',
-            'comment_check_interval': 60,  # 评论检查间隔（秒），默认60秒
+            'comment_check_interval': 5,  # 评论检查间隔（秒），默认5秒
             'comment_send_delay': 3.0,  # 评论回复发送间隔（秒），默认3秒避免风控
             'only_reply_new_comments': True,  # 仅回复新评论
-            'max_videos_to_check': 10,  # 最多检查的视频数量
-            'max_comments_per_video': 20,  # 每个视频最多检查的评论数
+            'max_videos_to_check': 50,
+            'max_comments_per_video': 20,
+            'comment_fetch_gap': 1.0,
+            'comment_fetch_mode': 'wbi',
+            'comment_monitor_sub_replies': True,
+            'max_sub_pages_per_root': 15,
+            'comment_main_sort_mode': 3,
+            'comment_main_pages_max': 15,
+            'video_list_strategy': 'both_ends',
         }
         
         self.rules = []  # 评论回复规则
@@ -169,6 +179,24 @@ class CommentReplySystem:
         """清空日志"""
         self.logs.clear()
     
+    @staticmethod
+    def _merge_main_replies(reply_data):
+        """合并 /x/v2/reply/main 返回的置顶与主列表"""
+        if not reply_data:
+            return []
+        replies = list(reply_data.get('replies') or [])
+        top_obj = reply_data.get('top')
+        if isinstance(top_obj, dict):
+            top_replies = top_obj.get('upper') or top_obj.get('top') or top_obj.get('admin')
+            if isinstance(top_replies, dict):
+                top_replies = [top_replies]
+            if isinstance(top_replies, list):
+                replies = top_replies + replies
+        for tr in reply_data.get('top_replies') or []:
+            if isinstance(tr, dict) and tr not in replies:
+                replies.insert(0, tr)
+        return replies
+
     def match_comment_rule(self, comment_text):
         """匹配评论回复规则 - 改进版"""
         if not comment_text:
@@ -212,64 +240,86 @@ class CommentReplySystem:
                 self.add_log("无法获取用户UID", 'error')
                 return None
             
-            # 使用更稳定的API接口
-            url = 'https://api.bilibili.com/x/space/arc/search'
+            # Web 端 arc/search 无 WBI 时返回空；改用 arc/list
+            url = 'https://api.bilibili.com/x/space/arc/list'
             params = {
                 'mid': uid,
                 'pn': page,
-                'ps': page_size,
-                'order': 'pubdate',  # 按发布时间排序
-                'jsonp': 'jsonp'
+                'ps': min(int(page_size), 50),
+                'order': 'pubdate',
+                'tid': 0,
             }
             
             response = self.bili_api.session.get(url, params=params, timeout=10)
             response.raise_for_status()
             result = response.json()
             
-            if result.get('code') == 0:
-                return result
-            else:
+            if result.get('code') != 0:
                 self.add_log(f"获取视频列表失败: {result.get('message', '未知错误')}", 'error')
                 return None
+            archives = result.get('data', {}).get('archives') or []
+            vlist = []
+            for a in archives:
+                aid = a.get('aid')
+                if not aid:
+                    continue
+                vlist.append({
+                    'aid': aid,
+                    'bvid': a.get('bvid', ''),
+                    'title': a.get('title', '未知视频'),
+                })
+            return {
+                'code': 0,
+                'data': {'list': {'vlist': vlist}},
+            }
                 
         except Exception as e:
             self.add_log(f"获取视频列表异常: {e}", 'error')
             return None
     
-    def get_video_comments(self, oid, page=1, page_size=20):
-        """获取视频评论 - 改进版"""
+    def get_video_comments(self, oid, page=1, page_size=20, bvid=None):
+        """获取视频评论（与网页一致的 WBI 接口 /x/v2/reply/wbi/main）"""
         if not self.bili_api:
             return None
         
+        mode = (self.config.get('comment_fetch_mode') or 'wbi').strip().lower()
         try:
-            url = 'https://api.bilibili.com/x/v2/reply'
-            params = {
-                'type': 1,  # 1表示视频评论
-                'oid': oid,  # 视频的aid
-                'pn': page,
-                'ps': page_size,
-                'sort': 2  # 2表示按时间排序，0表示按热度
-            }
-            
-            response = self.bili_api.session.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            result = response.json()
-            
-            if result.get('code') == 0:
-                return result
-            else:
-                error_msg = result.get('message', '未知错误')
-                # 只在非正常错误时记录日志
-                if result.get('code') != 12002:  # 12002表示评论区已关闭
-                    self.add_log(f"获取评论失败 (oid={oid}): {error_msg}", 'warning')
-                return None
-                
+            if mode == 'browser' and bvid:
+                try:
+                    from comment_playwright import fetch_reply_json_via_browser
+                    br = fetch_reply_json_via_browser(
+                        bvid,
+                        self.bili_api.sessdata,
+                        self.bili_api.bili_jct,
+                    )
+                    if br and br.get('code') == 0:
+                        return bili_wbi.merge_reply_main_data(br.get('data') or {})
+                except Exception as e:
+                    self.add_log(f"浏览器拉取失败，改用 WBI: {e}", 'warning')
+                # 浏览器未成功则继续走 WBI
+            cache = getattr(self.bili_api, '_wbi_cache', None)
+            if cache is None:
+                self.bili_api._wbi_cache = {}
+                cache = self.bili_api._wbi_cache
+            main_mode = int(self.config.get('comment_main_sort_mode', 3) or 3)
+            main_pages = int(self.config.get('comment_main_pages_max', 15) or 15)
+            fg = float(self.config.get('comment_fetch_gap', 1.0) or 0)
+            return bili_wbi.fetch_main_comment_replies_paged(
+                self.bili_api.session,
+                oid,
+                min(int(page_size), 30),
+                bvid,
+                cache,
+                mode=main_mode,
+                max_pages=max(1, main_pages),
+                fetch_gap=fg,
+            )
         except Exception as e:
             self.add_log(f"获取视频评论异常: {e}", 'error')
             return None
     
-    def reply_to_comment(self, oid, root_rpid, message, reply_type='text', image_path=''):
-        """回复评论"""
+    def reply_to_comment(self, oid, root_rpid, message, reply_type='text', image_path='', parent_rpid=None):
+        """回复评论。楼中楼时 parent_rpid 为被回复的那条评论 rpid。"""
         if not self.bili_api:
             return False
         
@@ -282,12 +332,13 @@ class CommentReplySystem:
                 self.add_log(f"评论回复间隔控制，等待 {wait_time:.1f} 秒", 'info')
                 time.sleep(wait_time)
             
+            parent = parent_rpid if parent_rpid is not None else root_rpid
             url = 'https://api.bilibili.com/x/v2/reply/add'
             data = {
                 'type': 1,  # 视频评论
                 'oid': oid,
                 'root': root_rpid,
-                'parent': root_rpid,
+                'parent': parent,
                 'message': message,
                 'csrf': self.bili_api.bili_jct
             }
@@ -318,15 +369,16 @@ class CommentReplySystem:
             return
         
         try:
-            # 获取我的视频列表
-            max_videos = self.config.get('max_videos_to_check', 10)
-            videos_data = self.get_my_videos(page=1, page_size=max_videos)
-            
-            if not videos_data or videos_data.get('code') != 0:
-                self.add_log("获取视频列表失败", 'warning')
+            max_videos = int(self.config.get('max_videos_to_check', 50) or 50)
+            my_uid = self.bili_api.get_my_uid()
+            if not my_uid:
+                self.add_log("无法获取用户 UID，跳过本轮", 'error')
                 return
+            strategy = (self.config.get('video_list_strategy') or 'both_ends').strip().lower()
+            videos = comment_monitor_helpers.get_videos_for_monitor(
+                self.bili_api.session, int(my_uid), max_videos, strategy
+            )
             
-            videos = videos_data.get('data', {}).get('list', {}).get('vlist', [])
             if not videos:
                 self.add_log("没有找到视频", 'info')
                 return
@@ -335,22 +387,46 @@ class CommentReplySystem:
             processed_count = 0
             replied_count = 0
             
-            # 处理每个视频的评论
-            for video in videos:
+            monitor_sub = self.config.get('comment_monitor_sub_replies', True)
+            max_sub_pages = int(self.config.get('max_sub_pages_per_root', 15) or 15)
+            wbi_cache = getattr(self.bili_api, '_wbi_cache', None)
+            if wbi_cache is None:
+                self.bili_api._wbi_cache = {}
+                wbi_cache = self.bili_api._wbi_cache
+            
+            fetch_gap = float(self.config.get('comment_fetch_gap', 1.0) or 0)
+            for i, video in enumerate(videos):
                 if not self.monitoring:
                     break
+                if i > 0 and fetch_gap > 0:
+                    time.sleep(fetch_gap)
                 
                 video_id = video.get('aid')
                 video_title = video.get('title', '未知视频')
+                vb = video.get('bvid') or None
                 
                 # 获取视频评论
                 max_comments = self.config.get('max_comments_per_video', 20)
-                comments_data = self.get_video_comments(video_id, page=1, page_size=max_comments)
+                top_list = self.get_video_comments(
+                    video_id, page=1, page_size=max_comments, bvid=vb
+                )
                 
-                if not comments_data or comments_data.get('code') != 0:
+                if not top_list:
                     continue
                 
-                replies = comments_data.get('data', {}).get('replies', [])
+                replies = comment_monitor_helpers.expand_video_comments_for_monitor(
+                    self.bili_api.session,
+                    wbi_cache,
+                    video_id,
+                    video_title,
+                    vb,
+                    top_list,
+                    int(my_uid),
+                    monitor_sub,
+                    max_sub_pages,
+                    fetch_gap,
+                    sub_ps=20,
+                )
                 if not replies:
                     continue
                 
@@ -361,6 +437,8 @@ class CommentReplySystem:
                     
                     try:
                         comment_id = reply.get('rpid')
+                        reply_target = reply.get('reply_target_rpid') or comment_id
+                        thread_root = reply.get('thread_root_rpid') or comment_id
                         comment_text = reply.get('content', {}).get('message', '')
                         comment_time = reply.get('ctime', 0)
                         commenter = reply.get('member', {})
@@ -373,7 +451,7 @@ class CommentReplySystem:
                                 continue
                         
                         # 检查是否已处理过
-                        cache_key = f"{video_id}_{comment_id}"
+                        cache_key = f"{video_id}_{reply_target}"
                         if cache_key in self.comment_cache:
                             continue
                         
@@ -385,8 +463,7 @@ class CommentReplySystem:
                         processed_count += 1
                         
                         # 不要回复自己的评论
-                        my_uid = self.bili_api.get_my_uid()
-                        if commenter_uid == my_uid:
+                        if my_uid and commenter_uid == my_uid:
                             continue
                         
                         self.add_log(f"检测到评论: {commenter_name} 在《{video_title}》: {comment_text[:30]}...", 'info')
@@ -411,11 +488,12 @@ class CommentReplySystem:
                         # 发送回复
                         if reply_message:
                             success = self.reply_to_comment(
-                                video_id, 
-                                comment_id, 
-                                reply_message, 
+                                video_id,
+                                thread_root,
+                                reply_message,
                                 reply_type,
-                                reply_image
+                                reply_image,
+                                parent_rpid=reply_target,
                             )
                             
                             if success:
@@ -472,7 +550,7 @@ class CommentReplySystem:
     def monitor_comments(self):
         """评论监控主循环 - 改进版"""
         self.add_log("🚀 评论自动回复监控已启动", 'success')
-        self.add_log(f"检查间隔: {self.config.get('comment_check_interval', 60)} 秒", 'info')
+        self.add_log(f"检查间隔: {self.config.get('comment_check_interval', 5)} 秒", 'info')
         self.add_log(f"回复间隔: {self.config.get('comment_send_delay', 3.0)} 秒", 'info')
         
         error_count = 0
@@ -483,14 +561,13 @@ class CommentReplySystem:
                 self.process_comments()
                 error_count = 0  # 成功后重置错误计数
                 
-                # 等待下次检查
-                check_interval = self.config.get('comment_check_interval', 60)
+                # 等待下次检查（支持小数秒；0 表示不等待；分段 sleep 便于及时停止）
+                check_interval = float(self.config.get('comment_check_interval', 5))
                 self.add_log(f"等待 {check_interval} 秒后进行下一轮检查...", 'info')
-                
-                for _ in range(check_interval):
-                    if not self.monitoring:
-                        break
-                    time.sleep(1)
+                if check_interval > 0 and self.monitoring:
+                    end = time.monotonic() + check_interval
+                    while self.monitoring and time.monotonic() < end:
+                        time.sleep(min(1.0, end - time.monotonic()))
                     
             except Exception as e:
                 error_count += 1

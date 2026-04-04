@@ -740,12 +740,14 @@ button:disabled::before {
 
 .reply-settings-row {
     display: flex;
+    flex-direction: column;
     gap: 25px;
     align-items: flex-start;
 }
 
 .half-width {
-    flex: 1;
+    flex: none;
+    width: 100%;
     min-width: 0;
 }
 
@@ -1357,4 +1359,65 @@ footer a:hover {
 
 #comment-qrcode-loading > div:first-child {
     animation: rotate 2s linear infinite;
+}
+
+/* ==================== 全屏布局与视觉重排优化 ==================== */
+html, body {
+    width: 100%;
+    min-height: 100%;
+}
+
+body {
+    overflow-x: hidden;
+}
+
+.container {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: clamp(12px, 2vw, 26px) clamp(12px, 2.2vw, 32px);
+}
+
+header {
+    margin-bottom: 20px;
+    border-radius: 12px;
+}
+
+.main-content {
+    grid-template-columns: minmax(320px, 0.95fr) minmax(420px, 1.05fr);
+    gap: 18px;
+    align-items: start;
+}
+
+section {
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.reply-settings-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+}
+
+.rules-panel,
+.keyword-panel,
+.log-panel,
+.reply-settings-container {
+    grid-column: 1 / -1;
+}
+
+footer {
+    margin-top: 24px;
+    padding-top: 16px;
+}
+
+@media (max-width: 1024px) {
+    .main-content {
+        grid-template-columns: 1fr;
+    }
+
+    .reply-settings-row {
+        grid-template-columns: 1fr;
+    }
 }

@@ -11,9 +11,14 @@ from collections import defaultdict
 import base64
 import mimetypes
 from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, jsonify, send_from_directory
-
+import bili_wbi
+import comment_monitor_helpers
 app = Flask(__name__)
+
+
+def merge_bilibili_reply_main_block(reply_data):
+    """合并 /x/v2/reply/main 与 /x/v2/reply/wbi/main 返回的 data 中的主评论与置顶"""
+    return bili_wbi.merge_reply_main_data(reply_data or {})
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +48,9 @@ config = {
     'only_reply_new_messages': False,  # 是否仅回复新消息（程序启动后的消息）
     'max_replies_per_user': 3,  # 单用户最大回复次数
     'follow_check_interval': 1800,  # 检查关注者的间隔（秒），默认30分钟避免触发风控
+    'follow_scan_pages': 3,  # 关注检测扫描页数（每页最多50）
+    'follow_new_window_seconds': 90,  # 新关注检测时间窗口（秒）
+    'follow_backfill_on_first_run': False,  # 首次启动是否补发历史关注欢迎
     'message_check_interval': 0.05,  # 消息监测间隔（秒）
     'send_delay_interval': 1.0,  # 发送消息等待间隔（秒）
     'auto_restart_interval': 300,  # 自动重启间隔（秒）
@@ -53,7 +61,9 @@ config = {
         'sender_email': '',
         'sender_password': '',
         'receiver_email': ''
-    }
+    },
+    'multi_account_mode': False,  # 多账号并行模式开关
+    'accounts': []  # 多账号配置列表
 }
 
 # 私信回复系统变量
@@ -83,6 +93,7 @@ program_start_time = int(time.time())
 # 错误追踪系统
 error_tracker = {}  # 存储已发送邮件的错误 {error_hash: {'count': int, 'first_time': timestamp, 'last_time': timestamp, 'notified': bool}}
 error_tracker_lock = threading.Lock()  # 线程锁，确保错误追踪的线程安全
+last_error_email_notify_time = 0  # 错误提醒邮件全局限流时间戳（1小时内仅发送一次）
 
 # 配置文件路径 - 私信系统使用独立配置
 CONFIG_FILE = None  # 私信配置文件路径
@@ -706,7 +717,22 @@ class BilibiliAPI:
             result = response.json()
             
             if result.get('code') == 0:
-                return result.get('data', {})
+                data = result.get('data', {})
+                followers_list = data.get('list', [])
+                
+                # 记录API返回数据结构用于调试
+                if followers_list and page == 1:
+                    sample_follower = followers_list[0] if followers_list else {}
+                    has_mtime = 'mtime' in sample_follower
+                    add_log(f"API返回数据样本: {sample_follower}", 'debug')
+                    add_log(f"mtime字段存在: {has_mtime}", 'debug')
+                
+                # 检查是否超过1000个关注者的限制
+                total_count = data.get('total', 0)
+                if total_count > 1000:
+                    add_log(f"警告: 关注者总数({total_count})超过API限制(1000)，可能无法获取完整列表", 'warning')
+                
+                return data
             else:
                 add_log(f"获取关注者列表失败: {result.get('message', '未知错误')}", 'warning')
                 return None
@@ -715,24 +741,51 @@ class BilibiliAPI:
             add_log(f"获取关注者列表异常: {e}", 'error')
             return None
     
-    def get_recent_followers(self, limit=20):
+    def get_recent_followers(self, limit=20, max_pages=1):
         """获取最近的关注者（用于检测新关注）"""
         try:
-            followers_data = self.get_followers(page=1, page_size=limit)
-            if not followers_data:
+            # API单页上限通常为50
+            page_size = max(1, min(int(limit), 50))
+            pages = max(1, int(max_pages))
+
+            followers_list = []
+            for page in range(1, pages + 1):
+                followers_data = self.get_followers(page=page, page_size=page_size)
+                if not followers_data:
+                    break
+                page_list = followers_data.get('list', [])
+                if not page_list:
+                    break
+                followers_list.extend(page_list)
+                if len(page_list) < page_size:
+                    break
+
+            if not followers_list:
                 return []
-            
-            followers_list = followers_data.get('list', [])
+
             recent_followers = []
             
             for follower in followers_list:
-                recent_followers.append({
+                follower_info = {
                     'mid': follower.get('mid'),
                     'uname': follower.get('uname', ''),
                     'face': follower.get('face', ''),
                     'mtime': follower.get('mtime', 0),  # 关注时间
                     'attribute': follower.get('attribute', 0)  # 关注状态
-                })
+                }
+                
+                # 如果mtime字段缺失，使用当前时间作为占位符
+                if follower_info['mtime'] == 0:
+                    follower_info['mtime'] = int(time.time())
+                    follower_info['has_valid_mtime'] = False
+                else:
+                    follower_info['has_valid_mtime'] = True
+                
+                recent_followers.append(follower_info)
+            
+            # 记录获取到的关注者数量和数据质量
+            valid_mtime_count = sum(1 for f in recent_followers if f.get('has_valid_mtime', False))
+            add_log(f"获取到{len(recent_followers)}个关注者，其中{valid_mtime_count}个有有效mtime字段", 'debug')
             
             return recent_followers
             
@@ -826,12 +879,19 @@ def generate_error_hash(error_type, error_message, context=''):
 
 def track_and_notify_error(error_type, error_message, error_details='', context='', account_name='', receiver_email=None):
     """追踪错误并发送邮件通知（相同错误只发送一次）"""
-    global error_tracker
+    global error_tracker, last_error_email_notify_time
     
     # 生成错误哈希
     error_hash = generate_error_hash(error_type, error_message, context)
     
     current_time = int(time.time())
+    notify_interval = 3600  # 1小时
+    
+    # 全局邮件限流：1小时内仅发送一次错误提醒
+    with error_tracker_lock:
+        if current_time - last_error_email_notify_time < notify_interval:
+            logger.info(f"错误提醒邮件限流中（1小时内仅一次），跳过发送: {error_type} - {error_message}")
+            return False
     
     with error_tracker_lock:
         # 检查是否已经追踪过这个错误
@@ -878,17 +938,11 @@ def track_and_notify_error(error_type, error_message, error_details='', context=
         # 构造邮件内容
         account_text = f" [{account_name}]" if account_name else ""
         
-        # 根据错误类型设置不同的标题和颜色
-        if 'Warning' in error_type or 'warning' in error_type.lower():
-            subject = f"BiliGo{account_text} - 系统警告通知"
-            title_color = "#ff9800"
-            title_icon = "⚠️"
-            title_text = "BiliGo 系统警告通知"
-        else:
-            subject = f"BiliGo{account_text} - 系统错误通知"
-            title_color = "#d9534f"
-            title_icon = "❌"
-            title_text = "BiliGo 系统错误通知"
+        # 统一按错误通知发送（warning级别不再触发该函数）
+        subject = f"BiliGo{account_text} - 系统错误通知"
+        title_color = "#d9534f"
+        title_icon = "ERROR"
+        title_text = "BiliGo 系统错误通知"
         
         # 格式化错误详情
         error_details_html = error_details.replace('\n', '<br>').replace(' ', '&nbsp;')
@@ -943,6 +997,7 @@ def track_and_notify_error(error_type, error_message, error_details='', context=
             with error_tracker_lock:
                 if error_hash in error_tracker:
                     error_tracker[error_hash]['notified'] = True
+                last_error_email_notify_time = int(time.time())
             
             logger.info(f"错误通知邮件已发送至: {receiver_email}")
             add_log(f"错误通知邮件已发送: {error_type} - {error_message}", 'info')
@@ -1038,8 +1093,8 @@ def add_log(message, log_type='info', system='message', error_details='', contex
     system_prefix = "[私信]" if system == 'message' else "[评论]"
     logger.info(f"{system_prefix}[{log_type.upper()}] {message}")
     
-    # 如果是错误或警告级别，发送邮件通知
-    if log_type in ['error', 'warning']:
+    # 仅错误级别发送邮件通知（warning/info/debug 不触发）
+    if log_type == 'error':
         try:
             # 异步发送邮件，避免阻塞主线程
             threading.Thread(
@@ -1291,26 +1346,53 @@ def cleanup_cache():
     
     add_log(f"缓存清理完成: 清理消息 {cleaned_count} 条，当前缓存 {len(message_cache)} 条，活跃会话 {len(last_message_times)} 个", 'info')
 
-def check_followers_changes(api):
-    """检测关注者变化（新关注和取消关注）- 完全重构版"""
-    global followers_cache, last_follow_check, unfollowers_cache, follow_history
+def check_followers_changes(api, cache=None):
+    """检测关注者变化（新关注和取消关注）- 修复版"""
+    global followers_cache, welcome_sent_cache, last_follow_check, unfollowers_cache, follow_history
     
     try:
         current_time = int(time.time())
         
-        # 从配置中获取检查间隔，默认300秒（5分钟）避免触发风控
-        check_interval = config.get('follow_check_interval', 300)
-        if current_time - last_follow_check < check_interval:
+        # 从配置中获取检查间隔
+        check_interval = config.get('follow_check_interval', 1800)
+        follow_scan_pages = max(1, int(config.get('follow_scan_pages', 3)))
+        follow_new_window_seconds = max(30, int(config.get('follow_new_window_seconds', 90)))
+        follow_backfill_on_first_run = bool(config.get('follow_backfill_on_first_run', False))
+
+        # 使用账号级缓存，避免多账号之间互相污染
+        using_global_cache = cache is None
+        if using_global_cache:
+            cache = {
+                'followers_cache': followers_cache,
+                'welcome_sent_cache': welcome_sent_cache,
+                'last_follow_check': last_follow_check,
+                'unfollowers_cache': unfollowers_cache,
+                'follow_history': follow_history,
+                'follow_inited': False
+            }
+
+        local_followers_cache = cache.get('followers_cache', set())
+        local_welcome_sent_cache = cache.get('welcome_sent_cache', set())
+        local_last_follow_check = int(cache.get('last_follow_check', 0) or 0)
+        local_unfollowers_cache = cache.get('unfollowers_cache', set())
+        local_follow_history = cache.get('follow_history', {})
+        local_follow_inited = bool(cache.get('follow_inited', False))
+
+        if current_time - local_last_follow_check < check_interval:
             return {'new_followers': [], 'unfollowers': []}
-        
-        last_follow_check = current_time
+
+        local_last_follow_check = current_time
         
         # 如果关注相关功能都未启用，直接返回
         if not config.get('follow_reply_enabled', False) and not config.get('unfollow_reply_enabled', False):
             return {'new_followers': [], 'unfollowers': []}
         
-        # 获取最近的关注者（进一步优化数量，减少API负担，提高响应速度）
-        recent_followers = api.get_recent_followers(limit=15)
+        # 获取最近的关注者（增加数量以提高检测准确性）
+        # 如果粉丝数很多，需要获取更多数据来检测取消关注
+        fetch_limit = 50
+        if config.get('follow_reply_enabled', False) and config.get('unfollow_reply_enabled', False):
+            fetch_limit = 50
+        recent_followers = api.get_recent_followers(limit=fetch_limit, max_pages=follow_scan_pages)
         if not recent_followers:
             return {'new_followers': [], 'unfollowers': []}
         
@@ -1327,7 +1409,7 @@ def check_followers_changes(api):
                 if follower_mid:
                     current_followers.add(follower_mid)
             
-            # 2. 检测新关注者（支持重复关注）
+            # 2. 检测新关注者（改进逻辑，支持无mtime字段的情况）
             if config.get('follow_reply_enabled', False):
                 for follower in recent_followers:
                     follower_mid = follower.get('mid')
@@ -1335,62 +1417,113 @@ def check_followers_changes(api):
                         continue
                     
                     follow_time = follower.get('mtime', 0)
+                    has_valid_mtime = follower.get('has_valid_mtime', False)
                     
-                    # 检查是否是最近90秒内的新关注
-                    if current_time - follow_time <= 90:
-                        # 检查是否需要发送欢迎消息
-                        should_send_welcome = False
-                        
-                        # 检查是否是新关注者
-                        is_new_follower = follower_mid not in followers_cache
-                        # 检查是否是重复关注（之前取消过关注）
-                        is_re_follow = follower_mid in followers_cache and follow_time > follow_history.get(follower_mid, 0)
-                        
-                        if (is_new_follower or is_re_follow) and follower_mid not in welcome_sent_cache:
+                    # 检查是否需要发送欢迎消息
+                    should_send_welcome = False
+                    
+                    # 检查是否是新关注者
+                    is_new_follower = follower_mid not in local_followers_cache
+                    
+                    # 检查是否是重复关注（之前取消过关注）
+                    is_re_follow = follower_mid in local_followers_cache and follow_time > local_follow_history.get(follower_mid, 0)
+                    
+                    # 改进的新关注检测逻辑
+                    if has_valid_mtime:
+                        # 如果有有效的mtime字段，使用时间判断
+                        if current_time - follow_time <= follow_new_window_seconds:
+                            if (is_new_follower or is_re_follow) and follower_mid not in local_welcome_sent_cache:
+                                should_send_welcome = True
+                                log_type = "新关注者" if is_new_follower else "重复关注者"
+                                add_log(f"⚡ 检测到{log_type}: {follower.get('uname', 'Unknown')} (UID: {follower_mid})", 'success')
+                    else:
+                        # 如果没有有效的mtime字段，使用缓存比较方式
+                        if is_new_follower and follower_mid not in local_welcome_sent_cache:
                             should_send_welcome = True
-                            log_type = "新关注者" if is_new_follower else "重复关注者"
-                            add_log(f"⚡ 检测到{log_type}: {follower.get('uname', 'Unknown')} (UID: {follower_mid})", 'success')
-                        
-                        if should_send_welcome:
-                            new_followers.append(follower)
-                            # 更新关注历史
-                            follow_history[follower_mid] = follow_time
+                            add_log(f"⚡ 检测到新关注者(无mtime): {follower.get('uname', 'Unknown')} (UID: {follower_mid})", 'success')
+                    
+                    if should_send_welcome:
+                        new_followers.append(follower)
+                        # 更新关注历史
+                        local_follow_history[follower_mid] = follow_time
             
-            # 3. 检测取消关注者（优化版本，避免重复API调用）
+            # 3. 检测取消关注者（改进版本，支持大粉丝量场景）
             if config.get('unfollow_reply_enabled', False):
                 # 获取所有新关注者的mid集合
                 new_follower_mids = {f['mid'] for f in new_followers if f.get('mid')}
                 
                 # 找出之前在缓存中但现在不在当前关注者列表中的用户
-                lost_followers = followers_cache - current_followers
+                lost_followers = local_followers_cache - current_followers
                 for unfollower_mid in lost_followers:
                     # 确保不是新关注者（避免误判）
-                    if unfollower_mid not in new_follower_mids and unfollower_mid not in unfollowers_cache:
+                    if unfollower_mid not in new_follower_mids and unfollower_mid not in local_unfollowers_cache:
                         # 直接确认取消关注，不再重复调用API验证
                         # 因为我们已经从最新的关注者列表中获取了数据
                         unfollowers.append({'mid': unfollower_mid})
-                        unfollowers_cache.add(unfollower_mid)
+                        local_unfollowers_cache.add(unfollower_mid)
                         add_log(f"💔 检测到取消关注: UID {unfollower_mid}", 'warning')
                         # 从欢迎消息缓存中移除
-                        if unfollower_mid in welcome_sent_cache:
-                            welcome_sent_cache.remove(unfollower_mid)
+                        if unfollower_mid in local_welcome_sent_cache:
+                            local_welcome_sent_cache.remove(unfollower_mid)
             
-            # 4. 更新关注者缓存（在所有检测完成后）
-            followers_cache = current_followers.copy()
+            # 4. 更新关注者缓存（增量更新策略）
+            # 将当前获取的关注者添加到缓存中，而不是替换
+            # 这样可以保留老粉丝的信息，以便检测他们的取消关注
+            if not local_follow_inited:
+                # 首次运行：默认不补发历史欢迎，仅初始化缓存
+                if follow_backfill_on_first_run and config.get('follow_reply_enabled', False):
+                    for follower in recent_followers:
+                        follower_mid = follower.get('mid')
+                        if follower_mid and follower_mid not in local_welcome_sent_cache:
+                            new_followers.append(follower)
+                local_followers_cache = current_followers.copy()
+                local_follow_inited = True
+                add_log(f"初始化粉丝缓存: {len(local_followers_cache)}个关注者（扫描{follow_scan_pages}页）", 'info')
+            else:
+                # 增量更新：添加新关注者，保留已存在的
+                # 不删除任何关注者，只通过检测取消关注来更新
+                local_followers_cache = local_followers_cache.union(current_followers)
+                add_log(f"更新粉丝缓存: 当前缓存{len(local_followers_cache)}个关注者，本次获取{len(current_followers)}个", 'debug')
             
-            # 优化缓存管理，减少内存占用并提高性能
-            if len(followers_cache) > 200:
-                # 只保留最新的150个关注者，减少内存占用
-                followers_cache = set(list(followers_cache)[-150:])
             
-            if len(unfollowers_cache) > 300:
+            # 优化缓存管理，但保留更大的范围以便检测取消关注
+            max_cache_size = config.get('followers_cache_size', max(1000, follow_scan_pages * 50))
+            if len(local_followers_cache) > max_cache_size:
+                # 只保留最新的关注者，但保留更大的范围
+                # 注意：这里需要从current_followers优先保留，因为它们是最新获取的
+                # 然后从旧缓存中补充
+                priority_followers = current_followers.copy()
+                remaining_slots = max_cache_size - len(priority_followers)
+                if remaining_slots > 0:
+                    old_followers = local_followers_cache - current_followers
+                    priority_followers.update(set(list(old_followers)[:remaining_slots]))
+                local_followers_cache = priority_followers
+                add_log(f"粉丝缓存已优化: 保留{len(local_followers_cache)}个关注者", 'info')
+            
+            if len(local_unfollowers_cache) > 500:
                 # 减少取消关注缓存大小
-                unfollowers_cache = set(list(unfollowers_cache)[-200:])
+                local_unfollowers_cache = set(list(local_unfollowers_cache)[-300:])
             
-            if len(follow_history) > 500:
-                # 按时间排序，只保留最新的300条记录，减少内存占用
-                sorted_history = sorted(follow_history.items(), key=lambda x: x[1], reverse=True)
-                follow_history = dict(sorted_history[:300])
+            if len(local_follow_history) > 1000:
+                # 按时间排序，只保留最新的500条记录，减少内存占用
+                sorted_history = sorted(local_follow_history.items(), key=lambda x: x[1], reverse=True)
+                local_follow_history = dict(sorted_history[:500])
+
+            # 回写账号缓存
+            cache['followers_cache'] = local_followers_cache
+            cache['welcome_sent_cache'] = local_welcome_sent_cache
+            cache['last_follow_check'] = local_last_follow_check
+            cache['unfollowers_cache'] = local_unfollowers_cache
+            cache['follow_history'] = local_follow_history
+            cache['follow_inited'] = local_follow_inited
+
+            # 向后兼容：当外部未传入cache时，同步回全局变量
+            if using_global_cache:
+                followers_cache = local_followers_cache
+                welcome_sent_cache = local_welcome_sent_cache
+                last_follow_check = local_last_follow_check
+                unfollowers_cache = local_unfollowers_cache
+                follow_history = local_follow_history
             
             return {'new_followers': new_followers, 'unfollowers': unfollowers}
         
@@ -1727,7 +1860,8 @@ def monitor_single_account(account_name, sessdata, bili_jct, account_uid, accoun
                 'welcome_sent_cache': set(),
                 'last_follow_check': 0,
                 'unfollowers_cache': set(),
-                'follow_history': {}
+                'follow_history': {},
+                'follow_inited': False
             }
             
             # 执行监控循环（使用独立缓存）
@@ -2189,7 +2323,7 @@ def monitor_messages():
         
         add_log(f"🎯 多账号模式：将监控 {len(enabled_accounts)} 个账号", 'success', system='message')
         
-        # 为每个账号创建独立的监控线程
+        # 为每个账号创建独立的监控线程（独立缓存，互不干扰）
         monitor_threads = {}
         for account in enabled_accounts:
             account_name = account.get('name')
@@ -2211,6 +2345,11 @@ def monitor_messages():
             thread.start()
             monitor_threads[account_name] = thread
             add_log(f"✅ 账号 {account_name} 监控线程已启动", 'info', system='message')
+
+        if not monitor_threads:
+            add_log("多账号模式未启动任何有效线程，请检查账号配置", 'error', system='message')
+            monitoring = False
+            return
         
         # 等待所有线程结束
         while monitoring:
@@ -2882,19 +3021,36 @@ def handle_rules():
 
 @app.route('/api/start', methods=['POST'])
 def start_monitoring():
-    global monitoring, monitor_thread, program_start_time
+    global monitoring, monitor_thread, monitor_threads, program_start_time
     
-    # 检查配置
-    if not config.get('sessdata') or not config.get('bili_jct'):
-        return jsonify({'success': False, 'error': '请先配置登录信息'})
+    # 检查配置：多账号模式与单账号模式分别校验
+    if config.get('multi_account_mode', False):
+        enabled_accounts = [acc for acc in config.get('accounts', []) if acc.get('enabled', True)]
+        valid_accounts = [acc for acc in enabled_accounts if acc.get('sessdata') and acc.get('bili_jct')]
+        if not valid_accounts:
+            return jsonify({'success': False, 'error': '多账号模式下没有可用账号，请先添加并启用至少一个完整账号'})
+    else:
+        if not config.get('sessdata') or not config.get('bili_jct'):
+            return jsonify({'success': False, 'error': '请先配置登录信息'})
     
     # 强制重置状态，确保可以重新启动
+    monitoring = False
+
+    # 停止单账号主线程
     if monitor_thread and monitor_thread.is_alive():
         add_log("强制停止旧的监控线程", 'warning')
-        monitoring = False
         monitor_thread.join(timeout=3)
         if monitor_thread.is_alive():
             add_log("旧线程未能正常停止，但继续启动新线程", 'warning')
+
+    # 停止多账号线程
+    if monitor_threads:
+        for account_name, thread in list(monitor_threads.items()):
+            if thread and thread.is_alive():
+                thread.join(timeout=3)
+                if thread.is_alive():
+                    add_log(f"账号 {account_name} 旧线程未能正常停止", 'warning', system='message')
+        monitor_threads = {}
     
     # 重置所有状态
     monitoring = False  # 先设为False，避免竞态条件
@@ -2920,7 +3076,10 @@ def start_monitoring():
     monitor_thread.start()
     
     # 根据配置显示不同的启动消息
-    if config.get('only_reply_new_messages', False):
+    if config.get('multi_account_mode', False):
+        enabled_count = len([acc for acc in config.get('accounts', []) if acc.get('enabled', True) and acc.get('sessdata') and acc.get('bili_jct')])
+        add_log(f"开始监控私信（多账号并行模式，账号数: {enabled_count}）", 'success', system='message')
+    elif config.get('only_reply_new_messages', False):
         add_log("开始监控私信（仅回复新消息模式）", 'success', system='message')
     else:
         add_log("开始监控私信", 'success', system='message')
@@ -2929,7 +3088,7 @@ def start_monitoring():
 
 @app.route('/api/stop', methods=['POST'])
 def stop_monitoring():
-    global monitoring, monitor_thread
+    global monitoring, monitor_thread, monitor_threads
     
     # 强制停止，不管当前状态
     monitoring = False
@@ -2943,21 +3102,25 @@ def stop_monitoring():
     
     # 清理线程引用
     monitor_thread = None
+    monitor_threads = {}
     
     return jsonify({'success': True})
 
 @app.route('/api/status')
 def get_status():
     """获取系统状态 - 分离私信和评论监控状态"""
-    global monitoring, monitor_thread, comment_monitoring, comment_monitor_thread
+    global monitoring, monitor_thread, monitor_threads, comment_monitoring, comment_monitor_thread
     
-    # 检查私信监控实际状态，确保状态同步
-    actual_monitoring = monitoring and monitor_thread and monitor_thread.is_alive()
+    # 检查私信监控实际状态（兼容单账号与多账号并行）
+    active_single = bool(monitor_thread and monitor_thread.is_alive())
+    active_multi = any(thread and thread.is_alive() for thread in monitor_threads.values()) if monitor_threads else False
+    actual_monitoring = bool(monitoring and (active_single or active_multi))
     
     # 如果状态不一致，自动修正
-    if monitoring and (not monitor_thread or not monitor_thread.is_alive()):
+    if monitoring and not actual_monitoring:
         monitoring = False
         monitor_thread = None
+        monitor_threads = {}
         add_log("检测到私信监控状态不一致，已自动修正", 'warning', system='message')
     
     # 检查评论监控实际状态
@@ -2972,18 +3135,23 @@ def get_status():
     # 系统整体运行状态：只要有一个监控在运行就算运行中
     system_running = actual_monitoring or actual_comment_monitoring
     
+    is_multi_mode = bool(config.get('multi_account_mode', False))
+    enabled_accounts = [acc for acc in config.get('accounts', []) if acc.get('enabled', True)]
+    valid_enabled_accounts = [acc for acc in enabled_accounts if acc.get('sessdata') and acc.get('bili_jct')]
+    message_config_set = bool(len(valid_enabled_accounts) > 0) if is_multi_mode else bool(config.get('sessdata') and config.get('bili_jct'))
+
     return jsonify({
         'message_monitoring': actual_monitoring,  # 私信监控状态
         'comment_monitoring': actual_comment_monitoring,  # 评论监控状态
         'system_running': system_running,  # 整体运行状态
         'message_rules_count': len(rules),  # 私信规则数量
         'comment_rules_count': len(comment_rules),  # 评论规则数量
-        'message_config_set': bool(config.get('sessdata') and config.get('bili_jct')),  # 私信配置状态
+        'message_config_set': message_config_set,  # 私信配置状态
         'comment_config_set': bool(comment_config.get('sessdata') and comment_config.get('bili_jct')),  # 评论配置状态
         # 保持向后兼容
         'monitoring': actual_monitoring,
         'rules_count': len(rules),
-        'config_set': bool(config.get('sessdata') and config.get('bili_jct'))
+        'config_set': message_config_set
     })
     
     return jsonify({
@@ -3392,12 +3560,12 @@ def handle_follow_check_interval_config():
             # 验证间隔值的合理性
             try:
                 interval = int(interval)
-                if interval < 300:
-                    return jsonify({'success': False, 'error': '检查间隔不能少于300秒（5分钟），避免触发B站风控'})
+                if interval < 1:
+                    return jsonify({'success': False, 'error': '检查间隔不能少于1秒'})
                 elif interval > 3600:
                     return jsonify({'success': False, 'error': '检查间隔不能超过3600秒（1小时）'})
                 
-                old_value = config.get('follow_check_interval', 300)
+                old_value = config.get('follow_check_interval', 5)
                 config['follow_check_interval'] = interval
                 
                 # 记录配置变更和风控提示
@@ -3410,6 +3578,34 @@ def handle_follow_check_interval_config():
                 
             except (ValueError, TypeError):
                 return jsonify({'success': False, 'error': '检查间隔必须是有效的数字'})
+
+        # 更新扫描页数配置
+        if 'follow_scan_pages' in data:
+            try:
+                scan_pages = int(data['follow_scan_pages'])
+                if scan_pages < 1:
+                    return jsonify({'success': False, 'error': '扫描页数不能少于1页'})
+                elif scan_pages > 50:
+                    return jsonify({'success': False, 'error': '扫描页数不能超过50页'})
+                config['follow_scan_pages'] = scan_pages
+            except (ValueError, TypeError):
+                return jsonify({'success': False, 'error': '扫描页数必须是有效的数字'})
+
+        # 更新新关注检测窗口配置
+        if 'follow_new_window_seconds' in data:
+            try:
+                window_seconds = int(data['follow_new_window_seconds'])
+                if window_seconds < 30:
+                    return jsonify({'success': False, 'error': '新关注检测窗口不能少于30秒'})
+                elif window_seconds > 2592000:
+                    return jsonify({'success': False, 'error': '新关注检测窗口不能超过2592000秒（30天）'})
+                config['follow_new_window_seconds'] = window_seconds
+            except (ValueError, TypeError):
+                return jsonify({'success': False, 'error': '新关注检测窗口必须是有效的数字'})
+
+        # 更新首次补发配置
+        if 'follow_backfill_on_first_run' in data:
+            config['follow_backfill_on_first_run'] = bool(data['follow_backfill_on_first_run'])
         
         save_config()
         add_log("关注者检查间隔配置已更新", 'success')
@@ -3417,7 +3613,10 @@ def handle_follow_check_interval_config():
     else:
         # GET请求，返回当前配置
         return jsonify({
-            'follow_check_interval': config.get('follow_check_interval', 300)
+            'follow_check_interval': config.get('follow_check_interval', 1800),
+            'follow_scan_pages': config.get('follow_scan_pages', 3),
+            'follow_new_window_seconds': config.get('follow_new_window_seconds', 90),
+            'follow_backfill_on_first_run': config.get('follow_backfill_on_first_run', False)
         })
 
 @app.route('/api/timing-config', methods=['GET', 'POST'])
@@ -4036,9 +4235,16 @@ comment_config = {
     'default_comment_reply_message': '感谢您的评论！',
     'default_comment_reply_type': 'text',
     'default_comment_reply_image': '',
-    'comment_check_interval': 30,
-    'max_videos_to_check': 20,  # 检查的最大视频数量
+    'comment_check_interval': 5,
+    'comment_fetch_gap': 1.0,
+    'comment_fetch_mode': 'wbi',
+    'max_videos_to_check': 50,  # 检查的最大视频数量（多页拉取 arc/list，每页最多 50）
     'comments_per_video': 10,   # 每个视频获取的评论数量
+    'comment_monitor_sub_replies': True,  # 是否监控楼中楼里「回复我的」评论
+    'max_sub_pages_per_root': 15,  # 每个根评论下最多翻多少页楼中楼
+    'comment_main_sort_mode': 3,  # 主评论排序：2 热度 3 时间（新评论优先）
+    'comment_main_pages_max': 15,  # 每个稿件主评论最多翻页数
+    'video_list_strategy': 'both_ends',  # newest=只扫最新稿件；both_ends=超过上限时新旧各半，避免漏最旧稿
     'comment_send_delay': 2.0,
     'only_reply_new_comments': True
 }
@@ -4125,11 +4331,15 @@ class CommentAPI:
     def __init__(self, sessdata, bili_jct):
         self.sessdata = sessdata
         self.bili_jct = bili_jct
+        self._wbi_cache = {}
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ),
             'Cookie': f'SESSDATA={sessdata}; bili_jct={bili_jct}',
-            'Referer': 'https://www.bilibili.com/'
+            'Referer': 'https://www.bilibili.com/',
         })
     
     def get_my_uid(self):
@@ -4147,78 +4357,145 @@ class CommentAPI:
             return None
     
     def get_user_videos(self, uid, page=1, page_size=30):
-        """获取用户视频列表"""
+        """获取用户视频列表（使用 x/space/arc/list；旧版 arc/search 无 WBI 时已返回空列表）"""
         try:
-            url = 'https://api.bilibili.com/x/space/arc/search'
+            url = 'https://api.bilibili.com/x/space/arc/list'
             params = {
                 'mid': uid,
                 'pn': page,
-                'ps': page_size,
-                'order': 'pubdate'
+                'ps': min(int(page_size), 50),
+                'order': 'pubdate',
+                'tid': 0,
             }
             response = self.session.get(url, params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('code') == 0:
-                    return data.get('data', {}).get('list', {}).get('vlist', [])
-            return []
+            if response.status_code != 200:
+                add_comment_log(f"获取视频列表 HTTP {response.status_code}", 'warning')
+                return []
+            data = response.json()
+            if data.get('code') != 0:
+                add_comment_log(
+                    f"获取视频列表接口失败: code={data.get('code')} {data.get('message', '')}",
+                    'warning',
+                )
+                return []
+            archives = data.get('data', {}).get('archives') or []
+            out = []
+            for a in archives:
+                aid = a.get('aid')
+                if not aid:
+                    continue
+                out.append({
+                    'aid': aid,
+                    'bvid': a.get('bvid', ''),
+                    'title': a.get('title', '未知视频'),
+                })
+            return out
         except Exception as e:
             add_comment_log(f"获取视频列表失败: {e}", 'error')
             return []
+
+    def get_user_videos_up_to(self, uid, max_total: int):
+        """按配置拉取待监控稿件（全量或新旧各半，避免只扫最新稿）。"""
+        strategy = (comment_config.get('video_list_strategy') or 'both_ends').strip().lower()
+        return comment_monitor_helpers.get_videos_for_monitor(
+            self.session, int(uid), int(max_total), strategy
+        )
     
-    def get_video_comments(self, oid, page=1, page_size=20):
-        """获取视频评论"""
-        try:
-            url = 'https://api.bilibili.com/x/v2/reply'
-            params = {
-                'type': 1,
-                'oid': oid,
-                'pn': page,
-                'ps': page_size,
-                'sort': 2  # 按时间排序
-            }
-            response = self.session.get(url, params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('code') == 0:
-                    return data.get('data', {}).get('replies', [])
+    def get_video_comments(self, oid, page=1, page_size=20, bvid=None):
+        """获取视频主评论：优先 WBI 签名接口（与网页一致）；可选 Playwright 监听页面 XHR。"""
+        mode = (comment_config.get('comment_fetch_mode') or 'wbi').strip().lower()
+        data_json = None
+        if mode == 'browser' and bvid:
+            try:
+                from comment_playwright import fetch_reply_json_via_browser
+                data_json = fetch_reply_json_via_browser(
+                    bvid, self.sessdata, self.bili_jct
+                )
+                if data_json and data_json.get('code') != 0:
+                    data_json = None
+            except Exception as e:
+                add_comment_log(f"浏览器方式拉取评论失败，改用 WBI: {e}", 'warning')
+                data_json = None
+        if not data_json:
+            try:
+                main_mode = int(comment_config.get('comment_main_sort_mode', 3) or 3)
+                main_pages = int(comment_config.get('comment_main_pages_max', 15) or 15)
+                fg = float(comment_config.get('comment_fetch_gap', 1.0) or 0)
+                return bili_wbi.fetch_main_comment_replies_paged(
+                    self.session,
+                    oid,
+                    min(int(page_size), 30),
+                    bvid,
+                    self._wbi_cache,
+                    mode=main_mode,
+                    max_pages=max(1, main_pages),
+                    fetch_gap=fg,
+                )
+            except Exception as e:
+                add_comment_log(f"拉取评论失败 (oid={oid}): {e}", 'warning')
+                return []
+        if data_json.get('code') != 0:
+            msg = data_json.get('message', '')
+            if data_json.get('code') != 12002:
+                add_comment_log(
+                    f"获取评论接口失败 oid={oid}: code={data_json.get('code')} {msg}",
+                    'warning',
+                )
             return []
-        except Exception as e:
-            add_comment_log(f"获取评论失败: {e}", 'error')
-            return []
+        reply_data = data_json.get('data', {}) or {}
+        return merge_bilibili_reply_main_block(reply_data)
     
     def get_all_comments(self, uid, max_videos=20, comments_per_video=10):
-        """获取用户所有视频的评论（不分视频）"""
+        """获取用户稿件下可监控的评论（含楼中楼里回复我的子评论）。"""
         all_comments = []
         try:
-            # 获取用户最新视频
-            videos = self.get_user_videos(uid, page=1, page_size=max_videos)
+            my_uid = self.get_my_uid()
+            if not my_uid:
+                add_comment_log("无法获取 UID，跳过评论拉取", 'warning')
+                return []
+
+            videos = self.get_user_videos_up_to(uid, max_videos)
             add_comment_log(f"获取到 {len(videos)} 个视频，开始获取所有评论", 'info')
             
-            for video in videos:
+            fetch_gap = float(comment_config.get('comment_fetch_gap', 1.0) or 0)
+            monitor_sub = comment_config.get('comment_monitor_sub_replies', True)
+            max_sub_pages = int(comment_config.get('max_sub_pages_per_root', 15) or 15)
+
+            for i, video in enumerate(videos):
                 video_id = video.get('aid')
                 video_title = video.get('title', '未知视频')
-                
-                # 获取该视频的评论
-                comments = self.get_video_comments(video_id, page=1, page_size=comments_per_video)
-                
-                # 为每个评论添加视频信息
-                for comment in comments:
-                    comment['video_id'] = video_id
-                    comment['video_title'] = video_title
-                    all_comments.append(comment)
+                vb = video.get('bvid') or None
+                if i > 0 and fetch_gap > 0:
+                    time.sleep(fetch_gap)
+                top_list = self.get_video_comments(
+                    video_id, page=1, page_size=comments_per_video, bvid=vb
+                )
+                merged = comment_monitor_helpers.expand_video_comments_for_monitor(
+                    self.session,
+                    self._wbi_cache,
+                    video_id,
+                    video_title,
+                    vb,
+                    top_list,
+                    int(my_uid),
+                    monitor_sub,
+                    max_sub_pages,
+                    fetch_gap,
+                    sub_ps=20,
+                )
+                all_comments.extend(merged)
             
             # 按评论时间排序（最新的在前）
             all_comments.sort(key=lambda x: x.get('ctime', 0), reverse=True)
-            add_comment_log(f"总共获取到 {len(all_comments)} 条评论", 'info')
+            add_comment_log(f"总共获取到 {len(all_comments)} 条可监控评论", 'info')
             
             return all_comments
         except Exception as e:
             add_comment_log(f"获取所有评论失败: {e}", 'error')
             return []
     
-    def reply_comment(self, oid, root_rpid, message="", image_path=""):
-        """回复评论"""
+    def reply_comment(self, oid, root_rpid, message="", image_path="", parent_rpid=None):
+        """回复评论。楼中楼回复时 parent_rpid 为被回复的那条评论 rpid，与 root_rpid（根评论）不同。"""
         global comment_last_send_time
         
         current_time = time.time()
@@ -4231,12 +4508,13 @@ class CommentAPI:
         
         try:
             url = 'https://api.bilibili.com/x/v2/reply/add'
+            parent = parent_rpid if parent_rpid is not None else root_rpid
             
             data = {
                 'type': 1,
                 'oid': oid,
                 'root': root_rpid,
-                'parent': root_rpid,
+                'parent': parent,
                 'message': message,
                 'csrf': self.bili_jct
             }
@@ -4298,16 +4576,20 @@ def comment_monitor_worker():
             if not all_comments:
                 add_comment_log("没有找到评论，等待下次检查", 'info')
                 # 使用评论系统独立的检查间隔
-                time.sleep(comment_config.get('comment_check_interval', 30))
+                time.sleep(comment_config.get('comment_check_interval', 5))
                 continue
             
             for comment in all_comments:
                 if not comment_monitoring:
                     break
                 
-                comment_id = comment.get('rpid')
+                comment_id = comment.get('rpid') or comment.get('rpid_str')
+                reply_target = comment.get('reply_target_rpid') or comment_id
+                thread_root = comment.get('thread_root_rpid') or comment_id
                 comment_content = comment.get('content', {}).get('message', '')
                 comment_time = comment.get('ctime', 0)
+                if not comment_time:
+                    comment_time = int(time.time())
                 commenter_name = comment.get('member', {}).get('uname', '未知用户')
                 video_id = comment.get('video_id')
                 video_title = comment.get('video_title', '未知视频')
@@ -4321,7 +4603,7 @@ def comment_monitor_worker():
                         continue
                 
                 # 检查是否已回复过 - 使用评论系统独立的缓存
-                cache_key = f"{video_id}_{comment_id}"
+                cache_key = f"{video_id}_{reply_target}"
                 if cache_key in comment_cache:
                     add_comment_log(f"已回复过: {commenter_name}", 'info')
                     continue
@@ -4333,14 +4615,15 @@ def comment_monitor_worker():
                 matched_rule = None
                 
                 # 检查关键词规则 - 使用comment_rules而不是rules
+                content_lower = str(comment_content or '').lower()
                 for rule in comment_rules:
                     if not rule.get('enabled', True):
                         continue
                     
-                    keywords = rule.get('keyword', '').split(',')
+                    keywords = str(rule.get('keyword', '')).replace('，', ',').split(',')
                     for keyword in keywords:
                         keyword = keyword.strip()
-                        if keyword and keyword in comment_content:
+                        if keyword and keyword.lower() in content_lower:
                             reply_message = rule.get('reply', '')
                             reply_image = rule.get('reply_image', '')
                             reply_type = rule.get('reply_type', 'text')
@@ -4360,9 +4643,13 @@ def comment_monitor_worker():
                 # 发送回复
                 if reply_message or reply_image:
                     if reply_type == 'image' and reply_image:
-                        success = api.reply_comment(video_id, comment_id, reply_message, reply_image)
+                        success = api.reply_comment(
+                            video_id, thread_root, reply_message, reply_image, parent_rpid=reply_target
+                        )
                     else:
-                        success = api.reply_comment(video_id, comment_id, reply_message)
+                        success = api.reply_comment(
+                            video_id, thread_root, reply_message, parent_rpid=reply_target
+                        )
                     
                     if success:
                         comment_cache[cache_key] = True
@@ -4371,7 +4658,7 @@ def comment_monitor_worker():
                         add_comment_log(f"回复 {commenter_name} 在《{video_title}》的评论失败", 'error')
             
             # 等待下次检查 - 使用评论系统独立配置
-            check_interval = comment_config.get('comment_check_interval', 30)
+            check_interval = comment_config.get('comment_check_interval', 5)
             time.sleep(check_interval)
             
         except Exception as e:
@@ -4400,6 +4687,74 @@ def handle_comment_config():
     elif request.method == 'POST':
         try:
             data = request.get_json()
+            if data and 'comment_check_interval' in data:
+                try:
+                    v = float(data['comment_check_interval'])
+                except (TypeError, ValueError):
+                    return jsonify({'success': False, 'error': '评论检查间隔无效'})
+                if v < 0 or v != v or v == float('inf'):
+                    return jsonify({'success': False, 'error': '评论检查间隔须为大于等于 0 的有限数字'})
+                data['comment_check_interval'] = v
+            if data and 'comment_fetch_gap' in data:
+                try:
+                    g = float(data['comment_fetch_gap'])
+                except (TypeError, ValueError):
+                    return jsonify({'success': False, 'error': '评论拉取间隔无效'})
+                if g < 0 or g != g or g == float('inf'):
+                    return jsonify({'success': False, 'error': '评论拉取间隔须为大于等于 0 的有限数字'})
+                data['comment_fetch_gap'] = g
+            if data and 'comment_fetch_mode' in data:
+                m = str(data.get('comment_fetch_mode') or '').strip().lower()
+                if m not in ('wbi', 'browser'):
+                    return jsonify({'success': False, 'error': '评论拉取方式须为 wbi 或 browser'})
+                data['comment_fetch_mode'] = m
+            if data and 'max_videos_to_check' in data:
+                try:
+                    mv = int(data['max_videos_to_check'])
+                except (TypeError, ValueError):
+                    return jsonify({'success': False, 'error': '检查视频数量无效'})
+                if mv < 1 or mv > 500:
+                    return jsonify({'success': False, 'error': '检查视频数量须在 1～500 之间'})
+                data['max_videos_to_check'] = mv
+            if data and 'comments_per_video' in data:
+                try:
+                    cv = int(data['comments_per_video'])
+                except (TypeError, ValueError):
+                    return jsonify({'success': False, 'error': '每视频顶层评论数无效'})
+                if cv < 1 or cv > 30:
+                    return jsonify({'success': False, 'error': '每视频顶层评论数须在 1～30 之间'})
+                data['comments_per_video'] = cv
+            if data and 'max_sub_pages_per_root' in data:
+                try:
+                    sp = int(data['max_sub_pages_per_root'])
+                except (TypeError, ValueError):
+                    return jsonify({'success': False, 'error': '楼中楼翻页上限无效'})
+                if sp < 1 or sp > 100:
+                    return jsonify({'success': False, 'error': '楼中楼翻页上限须在 1～100 之间'})
+                data['max_sub_pages_per_root'] = sp
+            if data and 'comment_monitor_sub_replies' in data:
+                data['comment_monitor_sub_replies'] = bool(data.get('comment_monitor_sub_replies'))
+            if data and 'comment_main_sort_mode' in data:
+                try:
+                    sm = int(data['comment_main_sort_mode'])
+                except (TypeError, ValueError):
+                    return jsonify({'success': False, 'error': '主评论排序模式无效'})
+                if sm not in (2, 3):
+                    return jsonify({'success': False, 'error': '主评论排序须为 2（热度）或 3（时间）'})
+                data['comment_main_sort_mode'] = sm
+            if data and 'comment_main_pages_max' in data:
+                try:
+                    mp = int(data['comment_main_pages_max'])
+                except (TypeError, ValueError):
+                    return jsonify({'success': False, 'error': '主评论翻页数无效'})
+                if mp < 1 or mp > 50:
+                    return jsonify({'success': False, 'error': '主评论翻页数须在 1～50 之间'})
+                data['comment_main_pages_max'] = mp
+            if data and 'video_list_strategy' in data:
+                vs = str(data.get('video_list_strategy') or '').strip().lower()
+                if vs not in ('newest', 'both_ends'):
+                    return jsonify({'success': False, 'error': '稿件列表策略须为 newest 或 both_ends'})
+                data['video_list_strategy'] = vs
             comment_config.update(data)
             save_comment_config()
             add_comment_log("评论回复配置已更新", 'success')
@@ -4435,7 +4790,7 @@ def handle_comment_rules():
 @app.route('/api/comment-start', methods=['POST'])
 def start_comment_monitoring():
     """开始评论监控"""
-    global comment_monitoring, comment_monitor_thread
+    global comment_monitoring, comment_monitor_thread, comment_program_start_time
     
     if comment_monitoring:
         return jsonify({'success': False, 'error': '评论监控已在运行中'})
@@ -4444,6 +4799,7 @@ def start_comment_monitoring():
         return jsonify({'success': False, 'error': '请先配置登录信息'})
     
     try:
+        comment_program_start_time = int(time.time())
         comment_monitoring = True
         comment_monitor_thread = threading.Thread(target=comment_monitor_worker, daemon=True)
         comment_monitor_thread.start()
@@ -4829,12 +5185,21 @@ def reset_all_data():
         global config, rules, message_logs, message_cache, last_message_times
         global followers_cache, welcome_sent_cache, unfollowers_cache, follow_history
         global monitoring, monitor_thread
+        global comment_config, comment_rules, comment_logs, comment_cache
+        global comment_monitoring, comment_monitor_thread, comment_last_send_time, comment_program_start_time
         
         # 停止监控
         if monitoring:
             monitoring = False
             if monitor_thread and monitor_thread.is_alive():
                 monitor_thread.join(timeout=5)
+        
+        # 停止评论监控（/api/comment-start 使用的 app 内线程）
+        if comment_monitoring:
+            comment_monitoring = False
+            if comment_monitor_thread and comment_monitor_thread.is_alive():
+                comment_monitor_thread.join(timeout=5)
+        comment_monitor_thread = None
         
         # 重置全局配置为默认值
         config = {
@@ -4860,6 +5225,9 @@ def reset_all_data():
             'only_reply_new_messages': False,
             'max_replies_per_user': 3,
             'follow_check_interval': 1800,
+            'follow_scan_pages': 3,
+            'follow_new_window_seconds': 90,
+            'follow_backfill_on_first_run': False,
             'message_check_interval': 0.05,
             'send_delay_interval': 1.0,
             'auto_restart_interval': 300,
@@ -4871,6 +5239,8 @@ def reset_all_data():
                 'sender_password': '',
                 'receiver_email': ''
             },
+            'multi_account_mode': False,
+            'accounts': [],
             'sessdata': '',
             'bili_jct': ''
         }
@@ -4898,37 +5268,52 @@ def reset_all_data():
         if os.path.exists(USER_REPLY_STATS_FILE):
             os.remove(USER_REPLY_STATS_FILE)
         
-        # 清空评论系统数据
-        from comment_reply_system import comment_reply_system
+        # 清空评论系统数据（Web/ API 使用的 app 全局变量 + 磁盘 comment_config.json / comment_rules.json）
+        from comment_reply_system import CommentReplySystem, comment_reply_system
         
-        # 停止评论监控
         if comment_reply_system.is_monitoring():
             comment_reply_system.stop_monitoring()
         
-        # 重置评论系统配置
-        comment_reply_system.config = {
-            'comment_reply_enabled': False,
+        comment_config = {
+            'sessdata': '',
+            'bili_jct': '',
             'default_comment_reply_enabled': False,
             'default_comment_reply_message': '感谢您的评论！',
             'default_comment_reply_type': 'text',
             'default_comment_reply_image': '',
-            'comment_check_interval': 60,
-            'comment_send_delay': 3.0,
-            'only_reply_new_comments': True,
-            'max_videos_to_check': 10,
-            'max_comments_per_video': 20,
+            'comment_check_interval': 5,
+            'comment_fetch_gap': 1.0,
+            'comment_fetch_mode': 'wbi',
+            'max_videos_to_check': 50,
+            'comments_per_video': 10,
+            'comment_monitor_sub_replies': True,
+            'max_sub_pages_per_root': 15,
+            'comment_main_sort_mode': 3,
+            'comment_main_pages_max': 15,
+            'video_list_strategy': 'both_ends',
+            'comment_send_delay': 2.0,
+            'only_reply_new_comments': True
         }
+        comment_rules = []
+        comment_logs = []
+        comment_cache = {}
+        comment_last_send_time = 0
+        comment_program_start_time = int(time.time())
         
-        # 清空评论规则
+        init_comment_config_paths()
+        save_comment_config()
+        save_comment_rules()
+        
+        # 同步 comment_reply_system（含独立规则文件 comment_keywords.json）
+        comment_reply_system.config = dict(CommentReplySystem().config)
+        comment_reply_system.load_config()
         comment_reply_system.rules = []
-        
-        # 清空评论缓存和日志
+        comment_reply_system.save_rules()
         comment_reply_system.comment_cache = {}
         comment_reply_system.logs = []
-        
-        # 保存评论系统配置
-        comment_reply_system.save_config()
-        comment_reply_system.save_rules()
+        comment_reply_system.last_send_time = 0
+        comment_reply_system.last_comment_times.clear()
+        comment_reply_system.program_start_time = int(time.time())
         
         logger.info("所有数据已清除，恢复初始设置")
         add_log("所有数据已清除，系统已恢复初始设置", 'warning')
@@ -4960,14 +5345,15 @@ def poll_qrcode():
     try:
         data = request.get_json()
         qrcode_key = data.get('qrcode_key')
+        auto_save = data.get('auto_save', True)
         
         if not qrcode_key:
             return jsonify({'success': False, 'error': '缺少qrcode_key参数'})
         
         result = BilibiliAPI.poll_qrcode_status(qrcode_key)
         
-        # 如果登录成功，自动保存配置
-        if result.get('success') and result.get('status') == 'success':
+        # 如果登录成功，按需自动保存到当前单账号配置
+        if result.get('success') and result.get('status') == 'success' and auto_save:
             global config
             config['sessdata'] = result.get('sessdata')
             config['bili_jct'] = result.get('bili_jct')

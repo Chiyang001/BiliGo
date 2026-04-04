@@ -21,6 +21,9 @@
   "only_reply_new_messages": false,
   "max_replies_per_user": 3,
   "follow_check_interval": 1800,
+  "follow_scan_pages": 3,
+  "follow_new_window_seconds": 90,
+  "follow_backfill_on_first_run": false,
   "message_check_interval": 0.05,
   "send_delay_interval": 1.0,
   "auto_restart_interval": 300,
@@ -32,6 +35,8 @@
     "sender_password": "",
     "receiver_email": ""
   },
+  "multi_account_mode": false,
+  "accounts": [],
   "sessdata": "",
   "bili_jct": ""
 }

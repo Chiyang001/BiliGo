@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BiliGo 教程文档</title>
+    <link rel="stylesheet" href="docs_style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>BiliGo 说明文档</h1>
+                <div class="subtitle">覆盖私信与评论模式的功能、作用与配置方法</div>
+                <div class="hero-note">阅读建议：先看“快速开始”和“时间与风控配置”，再按模块细看。文档中高亮框用于提示重要结论与常见误区。</div>
+            </div>
+            <a class="btn" href="index.html">返回主界面</a>
+        </header>
+
+        <div class="layout">
+            <nav class="toc">
+                <h3>目录</h3>
+                <a href="#overview">1. 产品概览</a>
+                <a href="#quick-start">2. 快速开始</a>
+                <a href="#message-mode">3. 私信模式</a>
+                <a href="#comment-mode">4. 评论模式</a>
+                <a href="#rules">5. 规则系统</a>
+                <a href="#follow">6. 关注与取消关注回复</a>
+                <a href="#timing">7. 时间与风控配置</a>
+                <a href="#accounts">8. 账号与登录</a>
+                <a href="#email">9. 邮件提醒</a>
+                <a href="#import-export">10. 导入导出</a>
+                <a href="#logs">11. 日志与排错</a>
+                <a href="#faq">12. 常见问题</a>
+            </nav>
+
+            <main class="content">
+                <section id="overview">
+                    <h2>1. 产品概览</h2>
+                    <p>BiliGo 是一个针对 B 站的自动回复管理工具，支持两大工作模式：</p>
+                    <ul>
+                        <li><strong>私信模式</strong>：自动处理用户私信，支持关键词规则、默认回复、按关注状态分流回复。</li>
+                        <li><strong>评论模式</strong>：自动检测视频评论并按规则回复。</li>
+                    </ul>
+                    <p>系统通过轮询接口检测新消息或新评论，并按配置的频率与发送间隔执行回复，支持基础风控优化。</p>
+                    <h3>1.1 适用场景</h3>
+                    <ul>
+                        <li>UP 主需要在离线时自动处理常见咨询（合作、投稿、售后、资料索取等）。</li>
+                        <li>评论区互动量较大，需要先自动回应高频问题，再人工补充细节。</li>
+                        <li>希望降低“漏回消息/评论”的概率，并统一回复口径。</li>
+                    </ul>
+                    <h3>1.2 系统工作流</h3>
+                    <div class="mini-grid">
+                        <div class="mini-card"><strong>步骤 1：拉取</strong><br>按配置间隔拉取私信会话或评论列表。</div>
+                        <div class="mini-card"><strong>步骤 2：过滤</strong><br>过滤历史数据、已回复对象、不满足条件的数据。</div>
+                        <div class="mini-card"><strong>步骤 3：匹配</strong><br>按规则顺序匹配关键词，未命中时进入默认回复。</div>
+                        <div class="mini-card"><strong>步骤 4：发送</strong><br>按发送间隔执行回复并写入缓存/日志。</div>
+                    </div>
+                    <h3>1.3 流程动态示意</h3>
+                    <p>选择一个真实场景示例并播放，可看到每一步的输入、判断依据、结果与日志输出。</p>
+                    <div class="demo-box">
+                        <div class="demo-row">
+                            <label for="flow-case-select">演示场景</label>
+                            <select id="flow-case-select">
+                                <option value="cooperation">场景A：私信咨询合作报价（命中关键词规则）</option>
+                                <option value="default-reply">场景B：私信日常问候（走默认回复）</option>
+                                <option value="old-comment">场景C：历史评论（仅回复新评论时被过滤）</option>
+                            </select>
+                            <button type="button" class="btn" onclick="playFlowDemo()">播放流程</button>
+                        </div>
+                        <div class="flow-track">
+                            <div class="flow-step" data-step="0">1 检测</div>
+                            <div class="flow-step" data-step="1">2 过滤</div>
+                            <div class="flow-step" data-step="2">3 匹配</div>
+                            <div class="flow-step" data-step="3">4 发送</div>
+                        </div>
+                        <div id="flow-status" class="demo-result">状态：待播放</div>
+                        <div id="flow-detail" class="highlight">步骤说明：点击“播放流程”查看详细解释。</div>
+                        <div class="demo-log-title">模拟日志输出</div>
+                        <div id="flow-log" class="demo-log">[系统] 等待演示开始...</div>
+                    </div>
+                </section>
+
+                <section id="quick-start">
+                    <h2>2. 快速开始</h2>
+                    <div class="highlight success">先完成登录配置再启动监控。若未登录成功，后续规则设置不会生效。</div>
+                    <h3>2.1 第一次使用</h3>
+                    <ul>
+                        <li>进入主界面后，先在账号配置中填写 <code>SESSDATA</code> 和 <code>bili_jct</code>，或使用扫码登录。</li>
+                        <li>配置默认回复或添加关键词规则。</li>
+                        <li>在系统控制区点击“开始监控”。</li>
+                    </ul>
+                    <h3>2.2 基础建议</h3>
+                    <ul>
+                        <li>先用较保守的检查间隔和发送间隔进行试运行。</li>
+                        <li>优先确认日志中有正常“检测-匹配-发送”链路，再逐步提高频率。</li>
+                    </ul>
+                    <h3>2.3 推荐初始化模板</h3>
+                    <table>
+                        <tr><th>模块</th><th>建议初始值</th><th>原因</th></tr>
+                        <tr><td>消息监测间隔</td><td>0.05 - 0.2 秒</td><td>兼顾响应速度与资源占用</td></tr>
+                        <tr><td>发送间隔</td><td>1.0 - 2.0 秒</td><td>降低风控与限流概率</td></tr>
+                        <tr><td>评论检查间隔</td><td>默认 5 秒，可按需调至 30 - 60 秒</td><td>默认较快轮询；遇风控可拉长间隔</td></tr>
+                        <tr><td>单用户最大回复次数</td><td>3 - 5 次</td><td>避免循环触发</td></tr>
+                    </table>
+                    <h3>2.4 上线前检查清单</h3>
+                    <ul>
+                        <li>已保存登录信息，且可正常获取 UID。</li>
+                        <li>至少有一条启用规则，或默认回复已启用。</li>
+                        <li>日志页面可看到实时日志刷新。</li>
+                        <li>手动触发一次测试消息/评论，确认链路完整。</li>
+                    </ul>
+                </section>
+
+                <section id="message-mode">
+                    <h2>3. 私信模式</h2>
+                    <div class="tabs" data-tab-group="mode-steps">
+                        <button class="tab-btn active" data-target="mode-step-1">配置顺序</button>
+                        <button class="tab-btn" data-target="mode-step-2">触发逻辑</button>
+                        <button class="tab-btn" data-target="mode-step-3">排错入口</button>
+                    </div>
+                    <div id="mode-step-1" class="tab-panel active">
+                        <p>推荐顺序：登录配置 -> 默认回复/规则 -> 时间间隔 -> 开始监控 -> 查看日志。</p>
+                    </div>
+                    <div id="mode-step-2" class="tab-panel">
+                        <p>系统先检测是否命中关键词规则，命中即优先规则回复；未命中时才走默认回复。</p>
+                    </div>
+                    <div id="mode-step-3" class="tab-panel">
+                        <p>若不回复，优先看日志中是否出现“检测到消息”“规则命中”“发送成功/失败”三段链路。</p>
+                    </div>
+                    <h3>3.1 系统控制</h3>
+                    <ul>
+                        <li><strong>开始监控/停止监控</strong>：启动或停止私信自动回复线程。</li>
+                        <li><strong>仅回复新消息</strong>：只处理程序启动后的新私信，避免补回历史私信。</li>
+                        <li><strong>单用户最大回复次数</strong>：限制同一用户的回复次数，防止循环回复。</li>
+                    </ul>
+                    <h3>3.2 默认回复</h3>
+                    <ul>
+                        <li>当消息未命中任何关键词时触发。</li>
+                        <li>支持文本回复与图片回复。</li>
+                        <li>支持“区分已关注/未关注用户”两套内容。</li>
+                    </ul>
+                    <h3>3.3 仅回复新消息机制说明</h3>
+                    <ul>
+                        <li>启用后：只处理监控启动时间之后的新消息。</li>
+                        <li>关闭后：会处理未被缓存记录的历史会话消息。</li>
+                        <li>建议：首次部署先开启，稳定后再按业务需要决定是否关闭。</li>
+                    </ul>
+                    <h3>3.4 单用户最大回复次数说明</h3>
+                    <ul>
+                        <li>按用户维度统计已回复次数，达到上限后跳过。</li>
+                        <li>适用于防止“关键词互相触发”或“用户反复发送同类内容”导致的连续回复。</li>
+                        <li>若需重新统计，可在管理功能中清理数据后重启监控。</li>
+                    </ul>
+                    <div class="highlight warn">注意：如果规则回复内容包含会触发对方自动回复的关键词，双方可能形成回环。请避免使用互相触发的短词。</div>
+                </section>
+
+                <section id="comment-mode">
+                    <h2>4. 评论模式</h2>
+                    <div class="highlight warn">评论模式默认建议较长检测间隔。频率过快容易触发平台限制。</div>
+                    <h3>4.1 入口</h3>
+                    <ul>
+                        <li>主界面点击“切换到评论回复”进入评论页面。</li>
+                    </ul>
+                    <h3>4.2 监控配置</h3>
+                    <ul>
+                        <li><strong>评论检查间隔</strong>：检测新评论频率。</li>
+                        <li><strong>回复发送间隔</strong>：控制单次回复节奏，降低风控风险。</li>
+                        <li><strong>仅回复新评论</strong>：仅处理监控启动后出现的评论。</li>
+                    </ul>
+                    <h3>4.3 评论检测覆盖范围</h3>
+                    <ul>
+                        <li>系统会先拉取你的视频列表，再按配置读取每个视频最近评论。</li>
+                        <li>若你视频很多，请适当提高“每轮检查视频数/每视频评论数”以提升覆盖。</li>
+                        <li>覆盖越大，API 请求越多；建议分阶段调优，不要一次拉满。</li>
+                    </ul>
+                    <h3>4.4 评论回复注意事项</h3>
+                    <ul>
+                        <li>优先回复业务相关问题，避免对所有短评都回复。</li>
+                        <li>建议给“感谢类、提问类、合作类”分别建规则，减少误命中。</li>
+                        <li>如果评论区关闭或权限受限，日志会提示接口异常信息。</li>
+                    </ul>
+                </section>
+
+                <section id="rules">
+                    <h2>5. 规则系统</h2>
+                    <p>私信与评论都支持规则列表。每条规则包含：</p>
+                    <table>
+                        <tr><th>字段</th><th>作用</th><th>建议</th></tr>
+                        <tr><td>规则标题</td><td>用于管理和识别规则</td><td>使用有业务含义的名称</td></tr>
+                        <tr><td>关键词</td><td>触发回复的匹配条件</td><td>可用逗号分隔多个关键词</td></tr>
+                        <tr><td>回复类型</td><td>文本或图片</td><td>图片路径需可被程序访问</td></tr>
+                        <tr><td>启用状态</td><td>控制规则是否生效</td><td>临时停用优先于删除</td></tr>
+                    </table>
+                    <h3>匹配逻辑说明</h3>
+                    <ul>
+                        <li>按规则顺序检测，命中后执行对应回复。</li>
+                        <li>未命中任何规则时，若启用了默认回复则走默认回复。</li>
+                    </ul>
+                    <h3>5.1 规则设计建议（实战）</h3>
+                    <ul>
+                        <li>先写“精确意图”规则（如：合作、投稿、价格），再写泛化规则（如：你好、在吗）。</li>
+                        <li>同义词建议放在同一规则内，便于维护。</li>
+                        <li>避免将“谢谢”“好”等高频词单独放在最前，防止抢占匹配。</li>
+                    </ul>
+                    <h3>5.2 规则管理建议</h3>
+                    <ul>
+                        <li>临时活动期可复制一份规则并命名为“活动_日期”。</li>
+                        <li>不确定是否需要删除时，优先“禁用”而不是“删除”。</li>
+                        <li>每次批量改规则后，建议立即导出备份。</li>
+                    </ul>
+                    <h3>5.3 规则匹配交互示例</h3>
+                    <p>输入一条示例消息，点击“执行匹配”，观察系统会命中哪条规则。</p>
+                    <div class="demo-box">
+                        <div class="demo-row">
+                            <input id="demo-message-input" type="text" value="你好，想咨询合作报价" />
+                            <button type="button" class="btn" onclick="runRuleDemo()">执行匹配</button>
+                        </div>
+                        <div id="demo-rule-list" class="demo-rule-list">
+                            <div class="demo-rule-item" data-keywords="合作,商务,报价">规则A：合作咨询回复</div>
+                            <div class="demo-rule-item" data-keywords="投稿,简历,应聘">规则B：投稿/应聘回复</div>
+                            <div class="demo-rule-item" data-keywords="你好,在吗,有人吗">规则C：通用问候回复</div>
+                        </div>
+                        <div id="demo-rule-result" class="demo-result">结果：尚未执行</div>
+                    </div>
+                    <div class="mini-grid">
+                        <div class="mini-card"><strong>建议</strong><br>将高频问题关键词放在靠前位置，提高命中效率。</div>
+                        <div class="mini-card"><strong>注意</strong><br>关键词过短（如单字）可能误触发，建议使用词组。</div>
+                    </div>
+                </section>
+
+                <section id="follow">
+                    <h2>6. 关注与取消关注回复</h2>
+                    <ul>
+                        <li>在“关注回复设置”中可切换配置“关注后回复”和“取消关注回复”。</li>
+                        <li>关注检测支持扫描页数、检测窗口、首次补发等参数。</li>
+                        <li>配置建议：
+                            <ul>
+                                <li><code>follow_check_interval</code> 建议不低于 60 秒。</li>
+                                <li><code>follow_scan_pages</code> 建议 3-10 页按粉丝规模调整。</li>
+                                <li><code>follow_new_window_seconds</code> 根据业务场景调整。</li>
+                            </ul>
+                        </li>
+                    </ul>
+                    <h3>6.1 参数含义补充</h3>
+                    <ul>
+                        <li><code>follow_scan_pages</code>：每轮扫描关注列表的页数，页数越大覆盖越全。</li>
+                        <li><code>follow_new_window_seconds</code>：将关注时间在窗口内的用户视为“新关注”。</li>
+                        <li><code>follow_backfill_on_first_run</code>：首次启动时是否补发历史欢迎，慎用。</li>
+                    </ul>
+                    <div class="highlight danger">若你粉丝量较大，开启首次补发可能短时间触发大量发送，不建议直接在生产环境开启。</div>
+                </section>
+
+                <section id="timing">
+                    <h2>7. 时间与风控配置</h2>
+                    <div class="highlight danger">若账号出现限流/风控，请第一时间拉长发送间隔与检测间隔，并降低同时处理量。</div>
+                    <table>
+                        <tr><th>配置项</th><th>作用</th><th>建议区间</th></tr>
+                        <tr><td>消息监测间隔</td><td>私信拉取频率</td><td>0.05 - 1.0 秒按机器与网络调整</td></tr>
+                        <tr><td>发送等待间隔</td><td>两次发送最小间隔</td><td>1.0 秒及以上</td></tr>
+                        <tr><td>自动重启间隔</td><td>长时间无处理时自动恢复</td><td>300 秒左右</td></tr>
+                        <tr><td>评论检查间隔</td><td>评论拉取频率</td><td>默认 5 秒；稳定优先可调至 30 秒及以上</td></tr>
+                        <tr><td>评论发送间隔</td><td>评论回复节奏</td><td>2.0 秒及以上</td></tr>
+                    </table>
+                    <h3>7.1 调优思路</h3>
+                    <ul>
+                        <li>先确保“能稳定跑”，再逐步缩短间隔追求速度。</li>
+                        <li>每次只调整 1-2 个参数，观察 30-60 分钟再继续。</li>
+                        <li>遇到失败率上升，优先回退最近一次改动。</li>
+                    </ul>
+                    <h3>7.2 风控参数交互示例</h3>
+                    <p>调整参数后，系统会实时给出“频次估算、风险来源、建议动作、可能影响”四类结果，帮助你理解每个参数具体影响什么。</p>
+                    <div class="demo-box">
+                        <div class="demo-grid">
+                            <label>发送间隔（秒） <input id="demo-send-delay" type="range" min="0.5" max="5" step="0.1" value="2"></label>
+                            <label>检测间隔（秒） <input id="demo-check-interval" type="range" min="1" max="120" step="1" value="30"></label>
+                        </div>
+                        <div class="demo-grid">
+                            <label>模式场景
+                                <select id="demo-risk-mode">
+                                    <option value="message">私信模式</option>
+                                    <option value="comment">评论模式</option>
+                                </select>
+                            </label>
+                            <label>预计并发处理对象（个） <input id="demo-concurrency" type="range" min="1" max="50" step="1" value="8"></label>
+                        </div>
+                        <div class="risk-meter">
+                            <div id="risk-bar" class="risk-bar"></div>
+                        </div>
+                        <div id="risk-text" class="demo-result">风险评估：中低风险（推荐区间）</div>
+                        <div class="mini-grid">
+                            <div class="mini-card">
+                                <strong>频次估算</strong>
+                                <div id="risk-kpi-frequency" class="demo-result">每小时请求估算：--</div>
+                                <div id="risk-kpi-send" class="demo-result">每小时发送上限估算：--</div>
+                            </div>
+                            <div class="mini-card">
+                                <strong>风险来源</strong>
+                                <div id="risk-causes" class="demo-result">暂无</div>
+                            </div>
+                            <div class="mini-card">
+                                <strong>建议动作</strong>
+                                <div id="risk-actions" class="demo-result">暂无</div>
+                            </div>
+                            <div class="mini-card">
+                                <strong>可能影响</strong>
+                                <div id="risk-impact" class="demo-result">暂无</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="accounts">
+                    <h2>8. 账号与登录</h2>
+                    <h3>8.1 推荐登录方式</h3>
+                    <ul>
+                        <li>优先使用扫码登录，减少手工复制 Cookie 的错误率。</li>
+                        <li>若手工输入，请确保 <code>SESSDATA</code> 与 <code>bili_jct</code> 成对且有效。</li>
+                    </ul>
+                    <h3>8.2 登录失效表现</h3>
+                    <ul>
+                        <li>日志中出现用户信息获取失败、接口认证失败等错误。</li>
+                        <li>此时需重新扫码或更新 Cookie。</li>
+                    </ul>
+                    <h3>8.3 登录配置注意事项</h3>
+                    <ul>
+                        <li>Cookie 过期后会出现“监控在运行但无有效处理”的现象。</li>
+                        <li>更换账号后，建议重启监控并观察首轮日志。</li>
+                        <li>不要在公开渠道泄露 <code>SESSDATA</code> 与 <code>bili_jct</code>。</li>
+                    </ul>
+                </section>
+
+                <section id="email">
+                    <h2>9. 邮件提醒</h2>
+                    <p>系统支持错误通知邮件。你可以在主界面邮件配置中填写：</p>
+                    <ul>
+                        <li>发送邮箱（QQ 邮箱）</li>
+                        <li>SMTP 授权码（非 QQ 登录密码）</li>
+                        <li>接收邮箱</li>
+                    </ul>
+                    <p>建议先使用“测试邮件”确认配置可用，再启用正式提醒。</p>
+                    <div class="highlight">授权码不是邮箱登录密码。请在 QQ 邮箱安全设置中开启 SMTP 并生成授权码。</div>
+                    <h3>9.1 建议策略</h3>
+                    <ul>
+                        <li>仅对关键错误启用提醒，减少噪声。</li>
+                        <li>确认接收邮箱可正常收信后，再在长期监控中启用。</li>
+                        <li>定期更换授权码并更新配置，提升安全性。</li>
+                    </ul>
+                </section>
+
+                <section id="import-export">
+                    <h2>10. 导入导出</h2>
+                    <ul>
+                        <li><strong>导出配置</strong>：用于备份当前规则与参数。</li>
+                        <li><strong>导入配置</strong>：支持替换模式与追加模式。</li>
+                        <li><strong>从私信导入评论配置</strong>：可复用已有关键词规则，减少重复配置。</li>
+                    </ul>
+                    <h3>10.1 导入前建议</h3>
+                    <ul>
+                        <li>先导出当前配置作为回滚点。</li>
+                        <li>导入后先不开启监控，先检查规则数量与关键内容是否正确。</li>
+                        <li>确认无误后再启动监控，避免错误规则直接生效。</li>
+                    </ul>
+                </section>
+
+                <section id="logs">
+                    <h2>11. 日志与排错</h2>
+                    <ul>
+                        <li>日志页支持按系统类型、级别、关键字筛选。</li>
+                        <li>优先关注 <code>error</code> 日志，定位登录、接口、发送失败等问题。</li>
+                        <li>若出现连续失败，先检查登录状态和网络，再检查回复规则配置。</li>
+                    </ul>
+                    <h3>11.1 快速定位法</h3>
+                    <table>
+                        <tr><th>症状</th><th>优先检查</th><th>常见原因</th></tr>
+                        <tr><td>完全无回复</td><td>监控状态、登录状态</td><td>未启动/登录过期</td></tr>
+                        <tr><td>有检测无发送</td><td>规则与默认回复开关</td><td>未命中且默认关闭</td></tr>
+                        <tr><td>发送失败率高</td><td>间隔、网络、风控</td><td>频率过高/接口限制</td></tr>
+                    </table>
+                </section>
+
+                <section id="faq">
+                    <h2>12. 常见问题</h2>
+                    <details class="faq-item">
+                        <summary>Q1：为什么没有自动回复？</summary>
+                        <ul>
+                            <li>监控未启动。</li>
+                            <li>默认回复未开启且规则未命中。</li>
+                            <li>启用了“仅回复新消息/新评论”，当前内容被判定为历史数据。</li>
+                            <li>登录状态失效。</li>
+                        </ul>
+                    </details>
+                    <details class="faq-item">
+                        <summary>Q2：如何降低风控风险？</summary>
+                        <ul>
+                            <li>增大发送间隔与检查间隔。</li>
+                            <li>限制单用户回复次数。</li>
+                            <li>避免短时间高频批量回复。</li>
+                        </ul>
+                    </details>
+                    <details class="faq-item">
+                        <summary>Q3：规则命中不稳定怎么办？</summary>
+                        <ul>
+                            <li>检查关键词是否过短、是否有错别字。</li>
+                            <li>检查规则是否被禁用、排序是否合理。</li>
+                            <li>查看日志确认是否进入“规则匹配”环节。</li>
+                        </ul>
+                    </details>
+                    <details class="faq-item">
+                        <summary>Q4：为什么会重复回复同一用户？</summary>
+                        <ul>
+                            <li>检查单用户最大回复次数是否设置过高。</li>
+                            <li>检查是否频繁重启并清空了统计缓存。</li>
+                            <li>检查是否存在多条规则命中同类消息。</li>
+                        </ul>
+                    </details>
+                    <details class="faq-item">
+                        <summary>Q5：如何安全更新配置？</summary>
+                        <ul>
+                            <li>先导出备份，再调整配置。</li>
+                            <li>每次只改一类参数，观察日志后继续。</li>
+                            <li>出现异常立即回滚到上一次导出配置。</li>
+                        </ul>
+                    </details>
+                </section>
+            </main>
+        </div>
+    </div>
+    <script src="docs_script.js"></script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-Ver.2026--0101-blue.svg)
+![Version](https://img.shields.io/badge/version-Ver.20260401-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.7+-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 
@@ -59,7 +59,7 @@
 
 ### 🎯 高级特性
 
-#### 邮件提醒系统（Ver.2026-0101 新增）
+#### 邮件提醒系统（Ver.20260401 新增）
 - ✨ **错误自动通知** - 系统错误时自动发送详细邮件
 - ✨ **登录失效提醒** - 账号登录状态失效时立即通知
 - ✨ **QQ邮箱支持** - 内置QQ邮箱SMTP配置，开箱即用
@@ -436,7 +436,7 @@ pm2 logs biligo-account1
 
 ## 📅 更新日志
 
-### Ver.2026-0101 (2026-01-01)
+### Ver.20260401 (2026-04-01)
 
 **新增功能**:
 - ✨ 邮件提醒系统
@@ -470,7 +470,7 @@ pm2 logs biligo-account1
 - 区分已关注和未关注用户的默认回复
 - 用户回复次数持久化存储
 - 取消关注自动回复功能
-- 多账号支持（已在Ver.2026-0101中移除）
+- 多账号支持（已在Ver.20260401中移除）
 
 **优化改进**:
 - 优化私信检测速度
