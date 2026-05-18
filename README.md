@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-Ver.20260401-blue.svg)
+![Version](https://img.shields.io/badge/version-20260518%20(Emergency)-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.7+-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 
@@ -133,6 +133,8 @@ python app.py
 5. 找到并复制以下两个值：
    - `SESSDATA`
    - `bili_jct`
+
+> **20260518 (Emergency)+**：首次启动后会自动在 `config.json` 生成 `im_dev_id`（私信设备标识，每账号独立）。请勿手动改回旧版共用 ID，否则可能触发 HTTP 412 风控。
 
 ### 配置邮件提醒（可选）
 
@@ -343,14 +345,19 @@ pm2 logs biligo-account1
 ### 3. 触发了B站风控怎么办？
 
 **现象**: 
-- 发送消息失败，提示频率限制
+- 发送消息失败，提示频率限制或 HTTP 412
+- 日志显示「安全风控」或「网络错误」（旧版本误报）
 - 无法获取关注者列表
+- 多人同时出现相同发送失败（多为旧版共用设备 ID 导致）
 
 **解决方法**:
-1. 增加发送间隔（建议2秒以上）
-2. 增加关注检查间隔（建议30分钟以上）
-3. 暂停监控一段时间
-4. 减少回复频率
+1. **升级到 20260518 (Emergency) 或更高版本**（已修复共用 `dev_id`、补充 `csrf_token` 等问题）
+2. 在浏览器打开 [message.bilibili.com](https://message.bilibili.com) 手动发一条私信完成验证
+3. 重启程序，确认 `config.json` 中已生成独立的 `im_dev_id`
+4. 增加发送间隔（建议 2 秒以上）
+5. 增加关注检查间隔（建议 30 分钟以上）
+6. 暂停监控一段时间，关闭「默认回复」并开启「仅回复新消息」，避免启动时批量回复历史会话
+7. 减少回复频率
 
 **预防措施**:
 - 不要设置过短的检查间隔
@@ -435,6 +442,21 @@ pm2 logs biligo-account1
 ---
 
 ## 📅 更新日志
+
+### 20260518 (Emergency) (2026-05-18)
+
+**重要修复**:
+- 🐛 **修复私信发送 HTTP 412 大面积失败**
+  - 移除全项目共用的硬编码 `dev_id`，改为每账号独立 UUID（持久化至 `config.json` 的 `im_dev_id`）
+  - 补充官方要求的 `csrf_token` 参数
+  - 启动时预热私信页面，自动获取 `buvid` 等风控 Cookie
+  - 更新浏览器 UA 与 `Origin` 请求头
+- 🐛 **修复错误提示误导**
+  - HTTP 412 不再误报为「网络错误」，日志会明确提示安全风控及处理建议
+
+**优化改进**:
+- 🔧 启动日志与导出配置中标注 `app_version`
+- 🔧 图片上传接口同步补充 `csrf_token`
 
 ### Ver.20260401 (2026-04-01)
 

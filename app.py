@@ -7,12 +7,16 @@ import requests
 from datetime import datetime
 import logging
 import hashlib
+import uuid
 from collections import defaultdict
 import base64
 import mimetypes
 from werkzeug.utils import secure_filename
 import bili_wbi
 import comment_monitor_helpers
+APP_VERSION = '20260518 (Emergency)'
+APP_VERSION_DATE = '2026-05-18'
+
 app = Flask(__name__)
 
 
@@ -127,16 +131,51 @@ def init_comment_config_paths():
     if COMMENT_RULES_FILE is None:
         COMMENT_RULES_FILE = get_config_file_path('comment_rules.json')    # 评论规则
 
+# 旧版所有用户共用的 dev_id，已被 B 站风控拉黑时会导致全员 HTTP 412
+LEGACY_IM_DEV_ID = 'B1994F2C-C5C9-4C0E-8F4C-F8E5F7E8F9E0'
+
+def get_im_dev_id_from_config():
+    """为当前账号生成并持久化独立的私信 dev_id"""
+    global config
+    stored = (config.get('im_dev_id') or '').strip()
+    if not stored or stored.upper() == LEGACY_IM_DEV_ID:
+        stored = str(uuid.uuid4()).upper()
+        config['im_dev_id'] = stored
+        save_config()
+        logger.info(f"已生成新的私信 dev_id: {stored[:8]}...")
+    return stored
+
 class BilibiliAPI:
-    def __init__(self, sessdata, bili_jct):
+    WEB_UA = (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    )
+
+    def __init__(self, sessdata, bili_jct, dev_id=None):
         self.sessdata = sessdata
         self.bili_jct = bili_jct
+        self.dev_id = dev_id or get_im_dev_id_from_config()
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Cookie': f'SESSDATA={sessdata}; bili_jct={bili_jct}',
-            'Referer': 'https://message.bilibili.com/'
+            'User-Agent': self.WEB_UA,
+            'Referer': 'https://message.bilibili.com/',
+            'Origin': 'https://message.bilibili.com',
         })
+        self.session.cookies.set('SESSDATA', sessdata, domain='.bilibili.com', path='/')
+        self.session.cookies.set('bili_jct', bili_jct, domain='.bilibili.com', path='/')
+        self._warmup_im_session()
+
+    def _warmup_im_session(self):
+        """访问私信相关页面，获取 buvid 等风控 Cookie"""
+        for url in (
+            'https://www.bilibili.com/',
+            'https://message.bilibili.com/',
+            'https://api.vc.bilibili.com/session_svr/v1/session_svr/single_unread',
+        ):
+            try:
+                self.session.get(url, timeout=5)
+            except Exception:
+                pass
     
     @staticmethod
     def get_qrcode_login_url():
@@ -381,6 +420,7 @@ class BilibiliAPI:
             time.sleep(wait_time)
         
         url = 'https://api.vc.bilibili.com/web_im/v1/web_im/send_msg'
+        csrf = self.bili_jct or ''
         data = {
             'msg[sender_uid]': self.get_my_uid(),
             'msg[receiver_id]': receiver_id,
@@ -389,22 +429,42 @@ class BilibiliAPI:
             'msg[msg_status]': 0,
             'msg[content]': json.dumps({"content": content}) if msg_type == 1 else content,
             'msg[timestamp]': int(time.time()),
-            'msg[new_face_version]': 0,
-            'msg[dev_id]': 'B1994F2C-C5C9-4C0E-8F4C-F8E5F7E8F9E0',
+            'msg[new_face_version]': 1,
+            'msg[dev_id]': self.dev_id,
             'build': 0,
             'mobi_app': 'web',
-            'csrf': self.bili_jct
+            'csrf': csrf,
+            'csrf_token': csrf,
         }
         
         try:
-            response = self.session.post(url, data=data, timeout=3.0)
-            response.raise_for_status()
-            result = response.json()
-            
-            # 更新最后发送时间
+            response = self.session.post(url, data=data, timeout=10.0)
             last_send_time = time.time()
+
+            if response.status_code == 412:
+                msg = (
+                    '触发哔哩哔哩安全风控(HTTP 412)。'
+                    '请在浏览器打开 https://message.bilibili.com 手动发一条私信完成验证后重试；'
+                    '若多人同时出现，多为接口参数/设备标识问题，请更新到最新版程序。'
+                )
+                logger.error(f"发送消息失败: HTTP 412 Precondition Failed (dev_id={self.dev_id[:8]}...)")
+                add_log(msg, 'error', context='发送私信消息')
+                return {'code': -9412, 'message': msg}
+
+            try:
+                result = response.json()
+            except ValueError:
+                result = {
+                    'code': response.status_code,
+                    'message': (response.text or '')[:200] or f'HTTP {response.status_code}',
+                }
+
+            if response.status_code != 200 and not isinstance(result.get('code'), int):
+                result = {
+                    'code': response.status_code,
+                    'message': result.get('message') or f'HTTP {response.status_code}',
+                }
             
-            # 简单的结果处理
             if result.get('code') == -412:
                 add_log(f"触发频率限制，但保持发送间隔继续运行", 'warning',
                        error_details=f"错误码: -412\n接收者ID: {receiver_id}\n消息类型: {msg_type}",
@@ -420,10 +480,10 @@ class BilibiliAPI:
             
             return result
             
-        except Exception as e:
+        except requests.RequestException as e:
             logger.error(f"发送消息失败: {e}")
-            last_send_time = time.time()  # 即使失败也更新时间，避免卡住
-            return None
+            last_send_time = time.time()
+            return {'code': -1, 'message': str(e)}
     
     def upload_image(self, image_path):
         """模拟浏览器上传图片到B站"""
@@ -530,7 +590,8 @@ class BilibiliAPI:
                     'data': {
                         'biz': 'im',
                         'category': 'daily',
-                        'csrf': self.bili_jct
+                        'csrf': self.bili_jct,
+                        'csrf_token': self.bili_jct,
                     },
                     'headers': {
                         'Origin': 'https://message.bilibili.com',
@@ -543,7 +604,8 @@ class BilibiliAPI:
                     'data': {
                         'biz': 'new_dyn',
                         'category': 'daily',
-                        'csrf': self.bili_jct
+                        'csrf': self.bili_jct,
+                        'csrf_token': self.bili_jct,
                     },
                     'headers': {
                         'Origin': 'https://t.bilibili.com',
@@ -2690,8 +2752,11 @@ def monitor_messages():
                                             add_log(f"⚠️ 用户 {result['talker_id']} 发送验证失败，消息可能未送达", 'warning')
                                             error_count += 1
                                         
-                                    elif reply_result and reply_result.get('code') == -412:
-                                        add_log(f"🚫 用户 {result['talker_id']} 触发频率限制: {reply_result.get('message', '')}", 'warning')
+                                    elif reply_result and reply_result.get('code') in (-412, -9412):
+                                        add_log(
+                                            f"🚫 用户 {result['talker_id']} 发送受限: {reply_result.get('message', '')}",
+                                            'warning' if reply_result.get('code') == -412 else 'error',
+                                        )
                                         error_count += 1
                                         
                                     elif reply_result and reply_result.get('code') == -101:
@@ -4142,6 +4207,7 @@ def export_config():
         # 准备配置数据
         config_data = {
             'version': '1.0',
+            'app_version': APP_VERSION,
             'export_time': datetime.now().isoformat(),
             'app_name': 'BiliGo',
             'config': config.copy(),
@@ -4189,6 +4255,7 @@ def export_keywords():
         # 准备配置数据（统一格式：包含config和keywords）
         config_data = {
             'version': '1.0',
+            'app_version': APP_VERSION,
             'export_time': datetime.now().isoformat(),
             'app_name': 'BiliGo',
             'config': config.copy(),
@@ -4903,6 +4970,7 @@ def export_comment_config():
         # 准备导出数据
         export_data = {
             'version': '1.0',
+            'app_version': APP_VERSION,
             'export_time': datetime.now().isoformat(),
             'app_name': 'BiliGo - 评论回复系统',
             'config': comment_config.copy(),
@@ -5380,7 +5448,7 @@ if __name__ == '__main__':
     load_comment_rules()
     
     # 添加启动日志到私信系统
-    add_log("BiliGo - B站私信自动回复系统启动中...", 'info', system='message')
+    add_log(f"BiliGo {APP_VERSION} - B站私信自动回复系统启动中...", 'info', system='message')
     add_log("系统初始化完成", 'success', system='message')
     add_log("Web服务器启动在端口 4999", 'info', system='message')
     add_log("请在浏览器中访问: http://localhost:4999", 'info', system='message')
@@ -5392,7 +5460,7 @@ if __name__ == '__main__':
     add_log("评论监控功能就绪", 'success', system='comment')
     add_log("评论日志系统已就绪", 'success', system='comment')
     
-    print("BiliGo - B站私信自动回复系统启动中...")
+    print(f"BiliGo {APP_VERSION} - B站私信自动回复系统启动中...")
     print("请在浏览器中访问: http://localhost:4999")
     print("评论回复系统: http://localhost:4999/comment")
     
