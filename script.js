@@ -15,7 +15,6 @@ document.addEventListener('DOMContentLoaded', function() {
     loadFollowCheckIntervalConfig();
     loadTimingConfig();
     loadAccounts();  // 加载多账号列表
-    initMultiAccountMode();  // 初始化多账号模式
     loadEmailConfig();  // 加载邮件配置
 });
 
@@ -2205,10 +2204,11 @@ function loadAccounts() {
             if (data.success) {
                 updateAccountsList(data.accounts);
                 
-                // 更新多账号模式开关
+                // 更新多账号模式开关与界面显示（不触发服务端保存）
                 const multiModeCheckbox = document.getElementById('multi-account-mode');
                 if (multiModeCheckbox) {
                     multiModeCheckbox.checked = data.multi_account_mode || false;
+                    applyAccountModeUI(data.multi_account_mode || false);
                 }
             }
         })
@@ -2259,11 +2259,12 @@ function updateAccountsList(accounts) {
     accountsList.innerHTML = html;
 }
 
-// 切换账号模式显示
-function toggleAccountMode() {
-    const multiMode = document.getElementById('multi-account-mode').checked;
+// 仅切换界面显示，不保存到服务端
+function applyAccountModeUI(multiMode) {
     const singleConfig = document.getElementById('single-account-config');
     const multiConfig = document.getElementById('multi-account-config');
+    
+    if (!singleConfig || !multiConfig) return;
     
     if (multiMode) {
         singleConfig.style.display = 'none';
@@ -2272,21 +2273,16 @@ function toggleAccountMode() {
         singleConfig.style.display = 'block';
         multiConfig.style.display = 'none';
     }
-    
-    // 保存模式切换
+}
+
+// 切换账号模式显示并保存
+function toggleAccountMode() {
+    const multiMode = document.getElementById('multi-account-mode').checked;
+    applyAccountModeUI(multiMode);
     toggleMultiAccountMode(multiMode);
 }
 
-// 初始化多账号模式
-function initMultiAccountMode() {
-    const multiModeCheckbox = document.getElementById('multi-account-mode');
-    if (multiModeCheckbox) {
-        // 初始化显示状态
-        toggleAccountMode();
-    }
-}
-
-// 切换多账号模式
+// 切换多账号模式（保存到服务端）
 function toggleMultiAccountMode(enabled) {
     fetch('/api/accounts', {
         method: 'POST',

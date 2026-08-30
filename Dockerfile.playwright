@@ -1,0 +1,5 @@
+# Optional image with Playwright Chromium for comment_fetch_mode=browser
+FROM biligo:latest
+
+RUN pip install --no-cache-dir playwright \
+    && playwright install --with-deps chromium

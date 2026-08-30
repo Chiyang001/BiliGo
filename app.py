@@ -14,8 +14,9 @@ import mimetypes
 from werkzeug.utils import secure_filename
 import bili_wbi
 import comment_monitor_helpers
-APP_VERSION = '20260518 (Emergency)'
-APP_VERSION_DATE = '2026-05-18'
+from app_paths import ensure_data_files, get_app_root, get_static_root
+APP_VERSION = '20260830'
+APP_VERSION_DATE = '2026-08-30'
 
 app = Flask(__name__)
 
@@ -97,6 +98,7 @@ program_start_time = int(time.time())
 # 错误追踪系统
 error_tracker = {}  # 存储已发送邮件的错误 {error_hash: {'count': int, 'first_time': timestamp, 'last_time': timestamp, 'notified': bool}}
 error_tracker_lock = threading.Lock()  # 线程锁，确保错误追踪的线程安全
+user_reply_stats_lock = threading.Lock()  # 用户回复统计文件读写锁
 last_error_email_notify_time = 0  # 错误提醒邮件全局限流时间戳（1小时内仅发送一次）
 
 # 配置文件路径 - 私信系统使用独立配置
@@ -135,7 +137,7 @@ def init_comment_config_paths():
 LEGACY_IM_DEV_ID = 'B1994F2C-C5C9-4C0E-8F4C-F8E5F7E8F9E0'
 
 def get_im_dev_id_from_config():
-    """为当前账号生成并持久化独立的私信 dev_id"""
+    """为单账号模式生成并持久化独立的私信 dev_id"""
     global config
     stored = (config.get('im_dev_id') or '').strip()
     if not stored or stored.upper() == LEGACY_IM_DEV_ID:
@@ -145,16 +147,64 @@ def get_im_dev_id_from_config():
         logger.info(f"已生成新的私信 dev_id: {stored[:8]}...")
     return stored
 
+
+def get_im_dev_id_for_account(account_name=None):
+    """为指定多账号条目获取或生成独立的 dev_id"""
+    global config
+    if account_name:
+        accounts = config.get('accounts', [])
+        for acc in accounts:
+            if acc.get('name') == account_name:
+                stored = (acc.get('im_dev_id') or '').strip()
+                if not stored or stored.upper() == LEGACY_IM_DEV_ID:
+                    stored = str(uuid.uuid4()).upper()
+                    acc['im_dev_id'] = stored
+                    save_config()
+                    logger.info(f"已为账号 {account_name} 生成 dev_id: {stored[:8]}...")
+                return stored
+    return get_im_dev_id_from_config()
+
+
+def resolve_message_api_credentials():
+    """解析私信 API 凭证，兼容单账号与多账号模式。返回 (sessdata, bili_jct, dev_id, account_name, error)"""
+    if config.get('multi_account_mode', False):
+        enabled_accounts = [
+            acc for acc in config.get('accounts', [])
+            if acc.get('enabled', True) and acc.get('sessdata') and acc.get('bili_jct')
+        ]
+        if not enabled_accounts:
+            return None, None, None, None, '多账号模式下没有可用账号，请先添加并启用至少一个完整账号'
+        acc = enabled_accounts[0]
+        account_name = acc.get('name')
+        dev_id = get_im_dev_id_for_account(account_name)
+        return acc['sessdata'], acc['bili_jct'], dev_id, account_name, None
+
+    sessdata = config.get('sessdata')
+    bili_jct = config.get('bili_jct')
+    if not sessdata or not bili_jct:
+        return None, None, None, None, '请先配置登录信息'
+    return sessdata, bili_jct, get_im_dev_id_from_config(), None, None
+
+
+def get_reply_stats_key(talker_id, account_uid=None):
+    """生成回复统计键；多账号模式下按账号 UID 隔离"""
+    if config.get('multi_account_mode', False) and account_uid:
+        return f"{account_uid}_{talker_id}"
+    return str(talker_id)
+
+
 class BilibiliAPI:
     WEB_UA = (
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
         '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
     )
 
-    def __init__(self, sessdata, bili_jct, dev_id=None):
+    def __init__(self, sessdata, bili_jct, dev_id=None, account_name=''):
         self.sessdata = sessdata
         self.bili_jct = bili_jct
         self.dev_id = dev_id or get_im_dev_id_from_config()
+        self.account_name = account_name or ''
+        self.last_send_time = 0
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': self.WEB_UA,
@@ -407,16 +457,14 @@ class BilibiliAPI:
             return None
     
     def send_msg(self, receiver_id, msg_type=1, content=""):
-        """发送私信（可配置间隔版）"""
-        global last_send_time
-        
+        """发送私信（可配置间隔版，每 API 实例独立间隔）"""
         current_time = time.time()
         
-        # 使用配置中的发送间隔
+        # 使用配置中的发送间隔（按账号实例隔离）
         send_interval = config.get('send_delay_interval', 1.0)
-        if current_time - last_send_time < send_interval:
-            wait_time = send_interval - (current_time - last_send_time)
-            add_log(f"发送间隔控制，等待 {wait_time:.1f} 秒", 'info')
+        if current_time - self.last_send_time < send_interval:
+            wait_time = send_interval - (current_time - self.last_send_time)
+            add_log(f"发送间隔控制，等待 {wait_time:.1f} 秒", 'info', account_name=self.account_name)
             time.sleep(wait_time)
         
         url = 'https://api.vc.bilibili.com/web_im/v1/web_im/send_msg'
@@ -439,7 +487,7 @@ class BilibiliAPI:
         
         try:
             response = self.session.post(url, data=data, timeout=10.0)
-            last_send_time = time.time()
+            self.last_send_time = time.time()
 
             if response.status_code == 412:
                 msg = (
@@ -448,7 +496,7 @@ class BilibiliAPI:
                     '若多人同时出现，多为接口参数/设备标识问题，请更新到最新版程序。'
                 )
                 logger.error(f"发送消息失败: HTTP 412 Precondition Failed (dev_id={self.dev_id[:8]}...)")
-                add_log(msg, 'error', context='发送私信消息')
+                add_log(msg, 'error', context='发送私信消息', account_name=self.account_name)
                 return {'code': -9412, 'message': msg}
 
             try:
@@ -468,21 +516,22 @@ class BilibiliAPI:
             if result.get('code') == -412:
                 add_log(f"触发频率限制，但保持发送间隔继续运行", 'warning',
                        error_details=f"错误码: -412\n接收者ID: {receiver_id}\n消息类型: {msg_type}",
-                       context='发送私信消息')
+                       context='发送私信消息', account_name=self.account_name)
             elif result.get('code') == -101:
-                add_log("登录状态失效，请重新配置登录信息", 'error',
+                account_hint = f"[{self.account_name}] " if self.account_name else ''
+                add_log(f"{account_hint}登录状态失效，请重新配置登录信息", 'error',
                        error_details=f"错误码: -101\n接收者ID: {receiver_id}\nSESSDATA可能已过期",
-                       context='发送私信消息')
+                       context='发送私信消息', account_name=self.account_name)
             elif result.get('code') != 0:
                 add_log(f"发送失败: {result.get('message', '未知错误')}", 'warning',
                        error_details=f"错误码: {result.get('code')}\n错误消息: {result.get('message', '未知错误')}\n接收者ID: {receiver_id}\n消息类型: {msg_type}\nCSRF Token: {'已设置' if self.bili_jct else '未设置'}",
-                       context='发送私信消息')
+                       context='发送私信消息', account_name=self.account_name)
             
             return result
             
         except requests.RequestException as e:
             logger.error(f"发送消息失败: {e}")
-            last_send_time = time.time()
+            self.last_send_time = time.time()
             return {'code': -1, 'message': str(e)}
     
     def upload_image(self, image_path):
@@ -1115,20 +1164,26 @@ def save_user_reply_stats(stats):
     except Exception as e:
         logger.error(f"保存用户回复统计失败: {e}")
 
-def get_user_reply_count(user_id, stats):
-    """获取用户的回复次数"""
-    user_id_str = str(user_id)
-    return stats.get(user_id_str, {}).get('count', 0)
+def get_user_reply_count(user_id, stats=None, account_uid=None):
+    """获取用户的回复次数（线程安全）"""
+    user_id_str = get_reply_stats_key(user_id, account_uid)
+    with user_reply_stats_lock:
+        if stats is None:
+            stats = load_user_reply_stats()
+        return stats.get(user_id_str, {}).get('count', 0)
 
-def increment_user_reply_count(user_id, stats):
-    """增加用户的回复次数"""
-    user_id_str = str(user_id)
-    if user_id_str not in stats:
-        stats[user_id_str] = {'count': 0, 'last_reply_time': 0}
-    stats[user_id_str]['count'] += 1
-    stats[user_id_str]['last_reply_time'] = int(time.time())
-    save_user_reply_stats(stats)
-    return stats[user_id_str]['count']
+
+def increment_user_reply_count(user_id, stats=None, account_uid=None):
+    """增加用户的回复次数（线程安全）"""
+    user_id_str = get_reply_stats_key(user_id, account_uid)
+    with user_reply_stats_lock:
+        stats = load_user_reply_stats()
+        if user_id_str not in stats:
+            stats[user_id_str] = {'count': 0, 'last_reply_time': 0}
+        stats[user_id_str]['count'] += 1
+        stats[user_id_str]['last_reply_time'] = int(time.time())
+        save_user_reply_stats(stats)
+        return stats[user_id_str]['count']
 
 def add_log(message, log_type='info', system='message', error_details='', context='', account_name=''):
     """添加日志 - 支持区分私信和评论系统，并在错误时发送邮件通知"""
@@ -1445,8 +1500,11 @@ def check_followers_changes(api, cache=None):
 
         local_last_follow_check = current_time
         
-        # 如果关注相关功能都未启用，直接返回
+        # 如果关注相关功能都未启用，直接返回（仍更新检查时间）
         if not config.get('follow_reply_enabled', False) and not config.get('unfollow_reply_enabled', False):
+            cache['last_follow_check'] = local_last_follow_check
+            if using_global_cache:
+                last_follow_check = local_last_follow_check
             return {'new_followers': [], 'unfollowers': []}
         
         # 获取最近的关注者（增加数量以提高检测准确性）
@@ -1708,17 +1766,20 @@ def process_single_session(api, my_uid, session):
             return []
         
         # 从JSON文件读取用户回复统计
-        user_reply_stats = load_user_reply_stats()
         max_replies = config.get('max_replies_per_user', 3)
-        current_replies = get_user_reply_count(talker_id, user_reply_stats)
+        current_replies = get_user_reply_count(talker_id, account_uid=my_uid)
         
         # 只在首次达到限制时记录日志
         if current_replies >= max_replies:
-            user_id_str = str(talker_id)
-            if user_reply_stats.get(user_id_str, {}).get('logged', False) == False:
-                add_log(f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，后续消息将不再回复", 'info', system='message')
-                user_reply_stats[user_id_str]['logged'] = True
-                save_user_reply_stats(user_reply_stats)
+            user_id_str = get_reply_stats_key(talker_id, my_uid)
+            with user_reply_stats_lock:
+                user_reply_stats = load_user_reply_stats()
+                if user_reply_stats.get(user_id_str, {}).get('logged', False) == False:
+                    add_log(f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，后续消息将不再回复", 'info', system='message')
+                    if user_id_str not in user_reply_stats:
+                        user_reply_stats[user_id_str] = {'count': current_replies, 'last_reply_time': 0}
+                    user_reply_stats[user_id_str]['logged'] = True
+                    save_user_reply_stats(user_reply_stats)
             return []
         
         # 获取最新的一条消息
@@ -1879,10 +1940,11 @@ def monitor_single_account(account_name, sessdata, bili_jct, account_uid, accoun
     max_retries = 3
     retry_count = 0
     login_failed_notified = False  # 标记是否已发送登录失效通知
+    dev_id = get_im_dev_id_for_account(account_name)
     
     while monitoring and retry_count < max_retries:
         try:
-            api = BilibiliAPI(sessdata, bili_jct)
+            api = BilibiliAPI(sessdata, bili_jct, dev_id=dev_id, account_name=account_name)
             my_uid = api.get_my_uid()
             
             if not my_uid:
@@ -1927,7 +1989,7 @@ def monitor_single_account(account_name, sessdata, bili_jct, account_uid, accoun
             }
             
             # 执行监控循环（使用独立缓存）
-            monitor_loop_core(api, my_uid, account_name, local_cache)
+            monitor_loop_core(api, my_uid, account_name, local_cache, account_uid=my_uid or account_uid)
             
         except Exception as e:
             import traceback
@@ -1944,21 +2006,124 @@ def monitor_single_account(account_name, sessdata, bili_jct, account_uid, accoun
     
     add_log(f"[{account_name}] 监控已停止", 'warning', system='message', account_name=account_name)
 
-def monitor_loop_core(api, my_uid, account_prefix, cache):
+    add_log(f"[{account_name}] 监控已停止", 'warning', system='message', account_name=account_name)
+
+
+def _recreate_bilibili_api(api):
+    """重建 API 连接，保留 dev_id 与账号名"""
+    return BilibiliAPI(api.sessdata, api.bili_jct, dev_id=api.dev_id, account_name=api.account_name)
+
+
+def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
+    """发送私信回复并更新统计。返回 (success, stop_account)"""
+    reply_result = None
+    reply_content = result['rule']['reply']
+    reply_type = result['rule'].get('reply_type', 'text')
+
+    if reply_type == 'image':
+        image_path = result['rule'].get('reply_image', '')
+        if image_path and os.path.exists(image_path):
+            reply_result = api.send_image_msg(result['talker_id'], image_path)
+            if not reply_result:
+                fallback_message = config.get('default_reply_message', '您好，感谢您的消息！')
+                add_log(
+                    f"[{account_prefix}] 图片发送失败，发送备用文字回复给用户 {result['talker_id']}",
+                    'warning', system='message', account_name=account_prefix
+                )
+                reply_result = api.send_msg(result['talker_id'], fallback_message)
+            reply_content = f"[图片] {os.path.basename(image_path)}"
+        else:
+            add_log(f"[{account_prefix}] 图片文件不存在，跳过回复用户 {result['talker_id']}", 'warning',
+                    system='message', account_name=account_prefix)
+            return False, False
+    else:
+        reply_result = api.send_msg(result['talker_id'], content=result['rule']['reply'])
+
+    if reply_result and reply_result.get('code') == 0:
+        verification_wait = config.get('message_check_interval', 0.05) * 0.5
+        time.sleep(max(0.01, verification_wait))
+        try:
+            verification_success = api.verify_message_sent(result['talker_id'], reply_content)
+        except Exception as e:
+            add_log(f"[{account_prefix}] 验证消息发送状态异常: {e}", 'warning',
+                    system='message', account_name=account_prefix)
+            verification_success = True
+
+        if verification_success:
+            current_count = increment_user_reply_count(result['talker_id'], account_uid=account_uid)
+            max_count = config.get('max_replies_per_user', 3)
+            add_log(
+                f"[{account_prefix}] ✅ 已成功回复用户 {result['talker_id']} "
+                f"(规则: {result['rule'].get('title', '未知')}) 内容: {reply_content[:20]}... "
+                f"(第{current_count}/{max_count}次)",
+                'success', system='message', account_name=account_prefix
+            )
+            return True, False
+
+        add_log(f"[{account_prefix}] ⚠️ 用户 {result['talker_id']} 发送验证失败，消息可能未送达", 'warning',
+                system='message', account_name=account_prefix)
+        return False, False
+
+    if reply_result and reply_result.get('code') in (-412, -9412):
+        add_log(
+            f"[{account_prefix}] 🚫 用户 {result['talker_id']} 发送受限: {reply_result.get('message', '')}",
+            'warning' if reply_result.get('code') == -412 else 'error',
+            system='message', account_name=account_prefix
+        )
+        return False, False
+
+    if reply_result and reply_result.get('code') == -101:
+        add_log(f"[{account_prefix}] 🔐 登录状态失效，请重新配置登录信息", 'error',
+                system='message', account_name=account_prefix)
+        return False, True
+
+    error_msg = reply_result.get('message', '未知错误') if reply_result else '网络错误'
+    error_code = reply_result.get('code', 'N/A') if reply_result else 'N/A'
+    add_log(f"[{account_prefix}] ❌ 回复用户 {result['talker_id']} 失败 [错误码:{error_code}]: {error_msg}",
+            'warning', system='message', account_name=account_prefix)
+    return False, False
+
+
+def _process_follower_changes(api, cache, account_prefix):
+    """检测并处理关注/取关变化，返回本轮回复数"""
+    reply_count = 0
+    if not config.get('follow_reply_enabled', False) and not config.get('unfollow_reply_enabled', False):
+        return reply_count
+
+    try:
+        followers_changes = check_followers_changes(api, cache)
+        for follower in followers_changes.get('new_followers', []):
+            if not monitoring:
+                break
+            try:
+                if send_follow_welcome_message(api, follower):
+                    cache['welcome_sent_cache'].add(follower['mid'])
+                reply_count += 1
+            except Exception as e:
+                add_log(f"[{account_prefix}] 处理新关注者异常: {e}", 'error',
+                        system='message', account_name=account_prefix)
+
+        for unfollower in followers_changes.get('unfollowers', []):
+            if not monitoring:
+                break
+            try:
+                send_unfollow_goodbye_message(api, unfollower)
+                reply_count += 1
+            except Exception as e:
+                add_log(f"[{account_prefix}] 处理取消关注者异常: {e}", 'error',
+                        system='message', account_name=account_prefix)
+    except Exception as e:
+        add_log(f"[{account_prefix}] 实时检测关注者变化异常: {e}", 'warning',
+                system='message', account_name=account_prefix)
+
+    return reply_count
+
+
+def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
     """监控循环核心逻辑（可用于单账号或多账号）"""
-    # 从缓存中提取变量
     message_cache = cache['message_cache']
     last_message_times = cache['last_message_times']
-    last_send_time = cache['last_send_time']
-    followers_cache = cache['followers_cache']
-    welcome_sent_cache = cache['welcome_sent_cache']
-    last_follow_check = cache['last_follow_check']
-    unfollowers_cache = cache['unfollowers_cache']
-    follow_history = cache['follow_history']
-    
-    # 加载用户回复统计（从JSON文件）
-    user_reply_stats = load_user_reply_stats()
-    
+
     last_cleanup = int(time.time())
     last_api_reset = int(time.time())
     last_reply_time = int(time.time())
@@ -1966,31 +2131,31 @@ def monitor_loop_core(api, my_uid, account_prefix, cache):
     processed_count = 0
     error_count = 0
     consecutive_errors = 0
-    
+
     while monitoring:
         try:
             loop_start = time.time()
             current_time = int(time.time())
-            
-            # 心跳检测
+
             if current_time - last_heartbeat >= 60:
-                add_log(f"[{account_prefix}] 💓 系统运行正常: 处理{processed_count}条消息, 错误{error_count}次", 'info', system='message')
+                add_log(
+                    f"[{account_prefix}] 💓 系统运行正常: 处理{processed_count}条消息, 错误{error_count}次",
+                    'info', system='message', account_name=account_prefix
+                )
                 last_heartbeat = current_time
-                
-                # 健康检查
                 if processed_count > 0 and error_count > processed_count * 0.5:
-                    add_log(f"[{account_prefix}] ⚠️ 错误率过高，重新初始化API", 'warning', system='message')
+                    add_log(f"[{account_prefix}] ⚠️ 错误率过高，重新初始化API", 'warning',
+                            system='message', account_name=account_prefix)
                     try:
-                        api = BilibiliAPI(api.sessdata, api.bili_jct)
+                        api = _recreate_bilibili_api(api)
                         error_count = 0
                         consecutive_errors = 0
                     except Exception as e:
-                        add_log(f"[{account_prefix}] API重新初始化失败: {e}", 'error', system='message')
-            
-            # 定期清理缓存
+                        add_log(f"[{account_prefix}] API重新初始化失败: {e}", 'error',
+                                system='message', account_name=account_prefix)
+
             if current_time - last_cleanup > 300:
                 try:
-                    # 清理过期消息缓存
                     old_cache_size = len(message_cache)
                     cleaned_cache = {}
                     for msg_id in list(message_cache.keys()):
@@ -2000,180 +2165,183 @@ def monitor_loop_core(api, my_uid, account_prefix, cache):
                                 msg_time = int(parts[1])
                                 if current_time - msg_time < 900:
                                     cleaned_cache[msg_id] = message_cache[msg_id]
-                        except:
+                        except Exception:
                             pass
                     message_cache.clear()
                     message_cache.update(cleaned_cache)
-                    
                     import gc
                     gc.collect()
-                    
-                    # 同时清理错误追踪器
                     cleanup_error_tracker()
-                    
-                    add_log(f"[{account_prefix}] 缓存清理: {old_cache_size} -> {len(message_cache)}", 'info', system='message', account_name=account_prefix)
+                    precompile_rules()
+                    add_log(
+                        f"[{account_prefix}] 缓存清理: {old_cache_size} -> {len(message_cache)}",
+                        'info', system='message', account_name=account_prefix
+                    )
                     last_cleanup = current_time
                 except Exception as e:
-                    import traceback
-                    error_details = traceback.format_exc()
-                    add_log(f"[{account_prefix}] 缓存清理异常: {e}", 'warning', system='message',
-                           error_details=error_details,
-                           context='缓存清理',
-                           account_name=account_prefix)
-            
-            # 获取会话列表
+                    add_log(f"[{account_prefix}] 缓存清理异常: {e}", 'warning',
+                            system='message', account_name=account_prefix)
+
+            if current_time - last_api_reset > 1800:
+                try:
+                    add_log(f"[{account_prefix}] 重新初始化API连接", 'info',
+                            system='message', account_name=account_prefix)
+                    new_api = _recreate_bilibili_api(api)
+                    test_uid = new_api.get_my_uid()
+                    if test_uid:
+                        api = new_api
+                        last_api_reset = current_time
+                        add_log(f"[{account_prefix}] API重新初始化成功", 'success',
+                                system='message', account_name=account_prefix)
+                except Exception as e:
+                    add_log(f"[{account_prefix}] API重新初始化异常: {e}", 'warning',
+                            system='message', account_name=account_prefix)
+
             sessions_data = None
             for attempt in range(3):
                 try:
                     sessions_data = api.get_sessions()
                     if sessions_data:
                         break
-                except Exception as e:
+                except Exception:
                     if attempt < 2:
                         time.sleep(0.3)
-            
+
             if not sessions_data or sessions_data.get('code') != 0:
                 consecutive_errors += 1
                 if consecutive_errors > 5:
-                    add_log(f"[{account_prefix}] 连续获取会话失败，重新初始化API", 'warning', system='message')
+                    add_log(f"[{account_prefix}] 连续获取会话失败，重新初始化API", 'warning',
+                            system='message', account_name=account_prefix)
                     try:
-                        api = BilibiliAPI(api.sessdata, api.bili_jct)
+                        api = _recreate_bilibili_api(api)
                         consecutive_errors = 0
                     except Exception as e:
-                        add_log(f"[{account_prefix}] API重新初始化失败: {e}", 'error', system='message')
+                        add_log(f"[{account_prefix}] API重新初始化失败: {e}", 'error',
+                                system='message', account_name=account_prefix)
                 time.sleep(2)
                 continue
-            
+
             consecutive_errors = 0
-            
-            # 验证数据结构
+            reply_count = _process_follower_changes(api, cache, account_prefix)
+
             data = sessions_data.get('data')
             if not data or not isinstance(data, dict):
                 time.sleep(1)
+                elapsed = time.time() - loop_start
+                check_interval = config.get('message_check_interval', 0.05)
+                time.sleep(max(0.01, check_interval - elapsed))
                 continue
-            
-            # 处理会话
-            sessions = data.get('session_list', [])
-            if not sessions:
-                time.sleep(0.2)
-                continue
-            
-            # 过滤无效会话
+
+            sessions = data.get('session_list', []) or []
             sessions = [s for s in sessions if s and isinstance(s, dict)]
-            if not sessions:
-                time.sleep(0.2)
-                continue
-            
-            # 安全排序
-            try:
-                sessions.sort(key=lambda x: x.get('last_msg', {}).get('timestamp', 0) if x.get('last_msg') else 0, reverse=True)
-            except Exception as sort_error:
-                pass
-            
-            # 筛选需要检查的会话
-            new_message_sessions = []
-            active_sessions = []
-            
-            for session in sessions:
-                if not session or not isinstance(session, dict):
-                    continue
-                
-                talker_id = session.get('talker_id')
-                if not talker_id:
-                    continue
-                
-                last_msg = session.get('last_msg')
-                if last_msg and isinstance(last_msg, dict):
-                    last_msg_time = last_msg.get('timestamp', 0)
-                else:
-                    last_msg_time = 0
-                
-                recorded_time = last_message_times.get(talker_id, 0)
-                
-                if last_msg_time > recorded_time:
-                    new_message_sessions.append(session)
-                elif last_msg_time > 0 and current_time - last_msg_time < 300:
-                    active_sessions.append(session)
-            
-            check_sessions = new_message_sessions + active_sessions
-            
-            if new_message_sessions:
-                add_log(f"[{account_prefix}] 📬 检测到 {len(new_message_sessions)} 个新消息会话", 'info', system='message')
-            
-            if not check_sessions:
-                time.sleep(0.2)
-                continue
-            
-            # 处理会话
-            reply_count = 0
-            for session in check_sessions:
-                if not monitoring:
-                    break
-                
+
+            if sessions:
                 try:
-                    session_talker_id = session.get('talker_id', 'unknown')
-                    results = process_single_session_with_cache(api, my_uid, session, message_cache, last_message_times, user_reply_stats)
-                    
-                    if not results:
+                    sessions.sort(
+                        key=lambda x: x.get('last_msg', {}).get('timestamp', 0) if x.get('last_msg') else 0,
+                        reverse=True
+                    )
+                except Exception:
+                    pass
+
+                new_message_sessions = []
+                active_sessions = []
+                for session in sessions:
+                    talker_id = session.get('talker_id')
+                    if not talker_id:
                         continue
-                    
-                    for result in results:
-                        try:
-                            reply_result = None
-                            reply_content = result['rule']['reply']
-                            reply_type = result['rule'].get('reply_type', 'text')
-                            
-                            if reply_type == 'image':
-                                image_path = result['rule'].get('reply_image', '')
-                                if image_path and os.path.exists(image_path):
-                                    reply_result = api.send_image_msg(result['talker_id'], image_path)
-                                    if not reply_result:
-                                        fallback_message = config.get('default_reply_message', '您好，感谢您的消息！')
-                                        reply_result = api.send_msg(result['talker_id'], fallback_message)
-                                    reply_content = f"[图片] {os.path.basename(image_path)}"
-                                else:
-                                    continue
-                            else:
-                                reply_result = api.send_msg(result['talker_id'], content=result['rule']['reply'])
-                            
-                            if reply_result and reply_result.get('code') == 0:
-                                # 使用JSON文件统计增加回复次数
-                                current_count = increment_user_reply_count(result['talker_id'], user_reply_stats)
-                                max_count = config.get('max_replies_per_user', 3)
-                                add_log(f"[{account_prefix}] ✅ 已回复用户 {result['talker_id']} (第{current_count}/{max_count}次)", 'success', system='message')
+                    last_msg = session.get('last_msg')
+                    if last_msg and isinstance(last_msg, dict):
+                        last_msg_time = last_msg.get('timestamp', 0)
+                    else:
+                        last_msg_time = 0
+                    recorded_time = last_message_times.get(talker_id, 0)
+                    if last_msg_time > recorded_time:
+                        new_message_sessions.append(session)
+                    elif last_msg_time > 0 and current_time - last_msg_time < 300:
+                        active_sessions.append(session)
+
+                check_sessions = new_message_sessions + active_sessions
+                if new_message_sessions:
+                    add_log(
+                        f"[{account_prefix}] 📬 检测到 {len(new_message_sessions)} 个新消息会话",
+                        'info', system='message', account_name=account_prefix
+                    )
+
+                for session in check_sessions:
+                    if not monitoring:
+                        break
+                    try:
+                        session_talker_id = session.get('talker_id', 'unknown')
+                        results = process_single_session_with_cache(
+                            api, my_uid, session, message_cache, last_message_times, account_uid=account_uid
+                        )
+                        if not results:
+                            continue
+                        for result in results:
+                            success, stop_account = _dispatch_message_reply(
+                                api, result, account_prefix, account_uid=account_uid
+                            )
+                            if success:
                                 reply_count += 1
                                 processed_count += 1
                                 last_reply_time = current_time
-                            elif reply_result and reply_result.get('code') == -101:
-                                add_log(f"[{account_prefix}] 🔐 登录状态失效", 'error', system='message')
-                                return  # 退出监控
+                            elif stop_account:
+                                return
                             else:
                                 error_count += 1
-                        except Exception as e:
-                            error_count += 1
-                
-                except Exception as e:
-                    import traceback
-                    error_detail = traceback.format_exc()
-                    add_log(f"[{account_prefix}] 处理会话 {session_talker_id} 异常: {e}", 'error', system='message',
-                           error_details=error_detail,
-                           context=f'处理会话 {session_talker_id}',
-                           account_name=account_prefix)
-                    logger.error(f"会话处理详细错误:\n{error_detail}")
-                    error_count += 1
-                    continue
-            
-            # 更新缓存（不再需要user_reply_counts）
+                    except Exception as e:
+                        import traceback
+                        error_detail = traceback.format_exc()
+                        add_log(
+                            f"[{account_prefix}] 处理会话 {session_talker_id} 异常: {e}", 'error',
+                            system='message', error_details=error_detail,
+                            context=f'处理会话 {session_talker_id}', account_name=account_prefix
+                        )
+                        error_count += 1
+
             cache['message_cache'] = message_cache
             cache['last_message_times'] = last_message_times
-            cache['last_send_time'] = last_send_time
-            
-            # 循环间隔
+
+            if processed_count > 0 and processed_count % 10 == 0:
+                try:
+                    add_log(f"[{account_prefix}] 🔄 已处理{processed_count}条消息，执行缓存清理", 'info',
+                            system='message', account_name=account_prefix)
+                except Exception:
+                    pass
+
+            if reply_count > 0:
+                add_log(
+                    f"[{account_prefix}] 📊 本轮回复了 {reply_count} 条消息，总计处理 {processed_count} 条",
+                    'info', system='message', account_name=account_prefix
+                )
+
+            restart_interval = config.get('auto_restart_interval', 300)
+            time_since_last_reply = current_time - last_reply_time
+            if time_since_last_reply >= restart_interval and consecutive_errors > 3:
+                add_log(
+                    f"[{account_prefix}] 🔄 已连续 {time_since_last_reply} 秒无回复且有 {consecutive_errors} 个连续错误，执行重置",
+                    'warning', system='message', account_name=account_prefix
+                )
+                try:
+                    message_cache.clear()
+                    last_message_times.clear()
+                    import gc
+                    gc.collect()
+                    api = _recreate_bilibili_api(api)
+                    consecutive_errors = 0
+                    last_reply_time = current_time
+                    last_api_reset = current_time
+                except Exception as e:
+                    add_log(f"[{account_prefix}] 系统重置失败: {e}", 'error',
+                            system='message', account_name=account_prefix)
+                    if consecutive_errors > 15:
+                        return
+
             elapsed = time.time() - loop_start
             check_interval = config.get('message_check_interval', 0.05)
-            sleep_time = max(0.01, check_interval - elapsed)
-            time.sleep(sleep_time)
-            
+            time.sleep(max(0.01, check_interval - elapsed))
+
         except KeyboardInterrupt:
             add_log(f"[{account_prefix}] 收到停止信号", 'warning', system='message', account_name=account_prefix)
             return
@@ -2181,32 +2349,29 @@ def monitor_loop_core(api, my_uid, account_prefix, cache):
             import traceback
             error_detail = traceback.format_exc()
             add_log(f"[{account_prefix}] 监控循环异常: {e}", 'error', system='message',
-                   error_details=error_detail,
-                   context='监控循环主逻辑',
-                   account_name=account_prefix)
-            logger.error(f"详细错误信息:\n{error_detail}")
+                    error_details=error_detail, context='监控循环主逻辑', account_name=account_prefix)
             error_count += 1
             consecutive_errors += 1
-            
             if consecutive_errors > 5:
-                add_log(f"[{account_prefix}] 连续错误过多，执行系统重置", 'warning', system='message')
                 try:
                     message_cache.clear()
                     last_message_times.clear()
                     import gc
                     gc.collect()
-                    api = BilibiliAPI(api.sessdata, api.bili_jct)
+                    api = _recreate_bilibili_api(api)
                     consecutive_errors = 0
                     last_reply_time = current_time
                 except Exception as init_e:
-                    add_log(f"[{account_prefix}] 系统重置失败: {init_e}", 'error', system='message')
+                    add_log(f"[{account_prefix}] 系统重置失败: {init_e}", 'error',
+                            system='message', account_name=account_prefix)
                     if consecutive_errors > 15:
                         return
                 time.sleep(2)
             else:
                 time.sleep(1)
 
-def process_single_session_with_cache(api, my_uid, session, message_cache, last_message_times, user_reply_stats):
+
+def process_single_session_with_cache(api, my_uid, session, message_cache, last_message_times, account_uid=None):
     """处理单个会话（使用传入的缓存和统计）"""
     try:
         if not session or not isinstance(session, dict):
@@ -2216,17 +2381,24 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
         if not talker_id:
             return []
         
-        # 从JSON统计文件读取用户回复次数
+        # 从JSON文件读取用户回复次数
         max_replies = config.get('max_replies_per_user', 3)
-        current_replies = get_user_reply_count(talker_id, user_reply_stats)
+        current_replies = get_user_reply_count(talker_id, account_uid=account_uid)
         
         # 只在首次达到限制时记录日志，避免重复输出
         if current_replies >= max_replies:
-            user_id_str = str(talker_id)
-            if user_reply_stats.get(user_id_str, {}).get('logged', False) == False:
-                add_log(f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，后续消息将不再回复", 'info', system='message')
-                user_reply_stats[user_id_str]['logged'] = True
-                save_user_reply_stats(user_reply_stats)
+            user_id_str = get_reply_stats_key(talker_id, account_uid)
+            with user_reply_stats_lock:
+                user_reply_stats = load_user_reply_stats()
+                if user_reply_stats.get(user_id_str, {}).get('logged', False) == False:
+                    add_log(
+                        f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，后续消息将不再回复",
+                        'info', system='message'
+                    )
+                    if user_id_str not in user_reply_stats:
+                        user_reply_stats[user_id_str] = {'count': current_replies, 'last_reply_time': 0}
+                    user_reply_stats[user_id_str]['logged'] = True
+                    save_user_reply_stats(user_reply_stats)
             return []
         
         # 获取最新消息
@@ -2740,9 +2912,7 @@ def monitor_messages():
                                             verification_success = True  # 假设发送成功，避免卡住
                                         
                                         if verification_success:
-                                            # 成功发送后，使用JSON文件统计增加回复次数
-                                            user_reply_stats = load_user_reply_stats()
-                                            current_count = increment_user_reply_count(result['talker_id'], user_reply_stats)
+                                            current_count = increment_user_reply_count(result['talker_id'], account_uid=my_uid)
                                             max_count = config.get('max_replies_per_user', 3)
                                             
                                             add_log(f"✅ 已成功回复用户 {result['talker_id']} (规则: {result['rule']['title']}) 内容: {reply_content[:20]}... (第{current_count}/{max_count}次)", 'success')
@@ -2969,51 +3139,26 @@ def monitor_messages():
     # 确保监控状态正确设置
     monitoring = False
 
-# 获取应用根目录
-def get_app_root():
-    """获取应用根目录，确保跨平台兼容"""
-    if hasattr(get_app_root, '_cached_root'):
-        return get_app_root._cached_root
-    
-    # 尝试多种方式获取应用根目录
-    possible_roots = [
-        os.getcwd(),  # 当前工作目录
-        os.path.dirname(os.path.abspath(__file__)),  # 脚本所在目录
-        os.path.dirname(os.path.realpath(__file__))  # 脚本真实路径目录
-    ]
-    
-    for root in possible_roots:
-        index_path = os.path.join(root, 'index.html')
-        if os.path.exists(index_path) and os.path.isfile(index_path):
-            get_app_root._cached_root = root
-            logger.info(f"应用根目录: {root}")
-            return root
-    
-    # 如果都找不到，使用当前工作目录
-    get_app_root._cached_root = os.getcwd()
-    logger.warning(f"未找到index.html，使用默认目录: {get_app_root._cached_root}")
-    return get_app_root._cached_root
-
 # 路由定义
 @app.route('/')
 def index():
     """主页路由"""
     try:
-        app_root = get_app_root()
-        index_path = os.path.join(app_root, 'index.html')
+        static_root = get_static_root()
+        index_path = os.path.join(static_root, 'index.html')
         
-        logger.info(f"尝试访问主页，根目录: {app_root}")
+        logger.info(f"尝试访问主页，静态目录: {static_root}")
         logger.info(f"index.html路径: {index_path}")
         logger.info(f"文件是否存在: {os.path.exists(index_path)}")
         
         if os.path.exists(index_path) and os.path.isfile(index_path):
-            return send_from_directory(app_root, 'index.html')
+            return send_from_directory(static_root, 'index.html')
         else:
-            error_msg = f"index.html not found in {app_root}"
+            error_msg = f"index.html not found in {static_root}"
             logger.error(error_msg)
             # 列出目录内容用于调试
             try:
-                files = os.listdir(app_root)
+                files = os.listdir(static_root)
                 logger.info(f"目录内容: {files}")
                 return f"{error_msg}<br>目录内容: {', '.join(files)}", 404
             except Exception as list_e:
@@ -3033,10 +3178,10 @@ def static_files(filename):
             logger.warning(f"拒绝访问不安全路径: {filename}")
             return "Access denied", 403
         
-        app_root = get_app_root()
+        static_root = get_static_root()
         # 规范化文件名，兼容Linux和Windows
         safe_filename = os.path.normpath(filename)
-        file_path = os.path.join(app_root, safe_filename)
+        file_path = os.path.join(static_root, safe_filename)
         
         logger.debug(f"请求文件: {filename}, 完整路径: {file_path}")
         
@@ -3051,7 +3196,7 @@ def static_files(filename):
             return f"Not a file: {filename}", 404
         
         # 发送文件
-        return send_from_directory(app_root, safe_filename)
+        return send_from_directory(static_root, safe_filename)
         
     except Exception as e:
         logger.error(f"静态文件服务错误 {filename}: {e}")
@@ -3164,6 +3309,13 @@ def stop_monitoring():
         monitor_thread.join(timeout=3)
         if monitor_thread.is_alive():
             add_log("监控线程未能在3秒内停止，但状态已重置", 'warning', system='message')
+
+    if monitor_threads:
+        for account_name, thread in list(monitor_threads.items()):
+            if thread and thread.is_alive():
+                thread.join(timeout=3)
+                if thread.is_alive():
+                    add_log(f"账号 {account_name} 监控线程未能在3秒内停止", 'warning', system='message')
     
     # 清理线程引用
     monitor_thread = None
@@ -3217,20 +3369,6 @@ def get_status():
         'monitoring': actual_monitoring,
         'rules_count': len(rules),
         'config_set': message_config_set
-    })
-    
-    return jsonify({
-        'message_monitoring': actual_monitoring,  # 私信监控状态
-        'comment_monitoring': actual_comment_monitoring,  # 评论监控状态
-        'system_running': system_running,  # 整体运行状态
-        'message_rules_count': len(rules),  # 私信规则数量
-        'comment_rules_count': len(comment_rules),  # 评论规则数量
-        'message_config_set': bool(config.get('sessdata') and config.get('bili_jct')),  # 私信配置状态
-        'comment_config_set': bool(comment_config.get('sessdata') and comment_config.get('bili_jct')),  # 评论配置状态
-        # 保持向后兼容
-        'monitoring': actual_monitoring,
-        'rules_count': len(rules),
-        'config_set': bool(config.get('sessdata') and config.get('bili_jct'))
     })
 
 @app.route('/api/logs', methods=['GET', 'DELETE'])
@@ -3524,10 +3662,11 @@ def handle_unfollow_reply_config():
 def test_follow_detection():
     """测试关注者检测功能"""
     try:
-        if not config.get('sessdata') or not config.get('bili_jct'):
-            return jsonify({'success': False, 'error': '请先配置登录信息'})
-        
-        api = BilibiliAPI(config['sessdata'], config['bili_jct'])
+        sessdata, bili_jct, dev_id, account_name, error = resolve_message_api_credentials()
+        if error:
+            return jsonify({'success': False, 'error': error})
+
+        api = BilibiliAPI(sessdata, bili_jct, dev_id=dev_id, account_name=account_name or '')
         
         # 测试获取关注者列表
         recent_followers = api.get_recent_followers(limit=10)
@@ -3541,10 +3680,11 @@ def test_follow_detection():
                     'mtime': follower.get('mtime', 0)
                 })
             
-            add_log(f"测试获取关注者成功，共 {len(recent_followers)} 个最近关注者", 'success')
+            account_hint = f"（账号: {account_name}）" if account_name else ''
+            add_log(f"测试获取关注者成功{account_hint}，共 {len(recent_followers)} 个最近关注者", 'success')
             return jsonify({
                 'success': True,
-                'message': f'成功获取到 {len(recent_followers)} 个最近关注者',
+                'message': f'成功获取到 {len(recent_followers)} 个最近关注者' + (f'（{account_name}）' if account_name else ''),
                 'followers': followers_info
             })
         else:
@@ -3817,6 +3957,7 @@ def handle_accounts():
                     'uid': uid,
                     'email': email,
                     'enabled': True,
+                    'im_dev_id': str(uuid.uuid4()).upper(),
                     'created_at': datetime.now().isoformat()
                 }
                 accounts.append(new_account)
@@ -4737,12 +4878,12 @@ def comment_monitor_worker():
 @app.route('/comment')
 def comment_page():
     """评论回复页面"""
-    return send_from_directory('.', 'comment_reply.html')
+    return send_from_directory(get_static_root(), 'comment_reply.html')
 
 @app.route('/logs.html')
 def logs_page():
     """系统日志页面"""
-    return send_from_directory('.', 'logs.html')
+    return send_from_directory(get_static_root(), 'logs.html')
 
 @app.route('/api/comment-config', methods=['GET', 'POST'])
 def handle_comment_config():
@@ -4914,8 +5055,20 @@ def import_from_message_config():
         load_rules()
         
         # 导入基本配置
-        comment_config['sessdata'] = config.get('sessdata', '')
-        comment_config['bili_jct'] = config.get('bili_jct', '')
+        if config.get('multi_account_mode', False):
+            enabled_accounts = [
+                acc for acc in config.get('accounts', [])
+                if acc.get('enabled', True) and acc.get('sessdata') and acc.get('bili_jct')
+            ]
+            if enabled_accounts:
+                acc = enabled_accounts[0]
+                comment_config['sessdata'] = acc.get('sessdata', '')
+                comment_config['bili_jct'] = acc.get('bili_jct', '')
+            else:
+                return jsonify({'success': False, 'error': '多账号模式下没有可用账号，无法导入登录信息'})
+        else:
+            comment_config['sessdata'] = config.get('sessdata', '')
+            comment_config['bili_jct'] = config.get('bili_jct', '')
         comment_config['default_comment_reply_enabled'] = config.get('default_reply_enabled', False)
         comment_config['default_comment_reply_message'] = config.get('default_reply_message', '感谢您的评论！')
         comment_config['default_comment_reply_type'] = config.get('default_reply_type', 'text')
@@ -5434,34 +5587,40 @@ def poll_qrcode():
         logger.error(error_msg)
         return jsonify({'success': False, 'error': error_msg})
 
-# 确保在系统启动时添加一些初始日志，方便测试
-if __name__ == '__main__':
-    # 首先确保日志数组已初始化
-    if 'message_logs' not in globals():
+def run_server():
+    """启动 Flask Web 服务（供 launcher.py 与直接运行 app.py 共用）"""
+    global message_logs, comment_logs
+    if 'message_logs' not in globals() or message_logs is None:
         message_logs = []
-    if 'comment_logs' not in globals():
+    if 'comment_logs' not in globals() or comment_logs is None:
         comment_logs = []
-        
-    # 首先加载配置和规则
+
+    os.makedirs(get_app_root(), exist_ok=True)
+    ensure_data_files()
+
     load_rules()
     load_comment_config()
     load_comment_rules()
-    
-    # 添加启动日志到私信系统
+
+    port = int(os.environ.get('PORT', 4999))
+
     add_log(f"BiliGo {APP_VERSION} - B站私信自动回复系统启动中...", 'info', system='message')
     add_log("系统初始化完成", 'success', system='message')
-    add_log("Web服务器启动在端口 4999", 'info', system='message')
-    add_log("请在浏览器中访问: http://localhost:4999", 'info', system='message')
-    add_log("评论回复系统: http://localhost:4999/comment", 'info', system='message')
+    add_log(f"Web服务器启动在端口 {port}", 'info', system='message')
+    add_log(f"请在浏览器中访问: http://localhost:{port}", 'info', system='message')
+    add_log(f"评论回复系统: http://localhost:{port}/comment", 'info', system='message')
     add_log("日志系统已就绪", 'success', system='message')
-    
-    # 添加启动日志到评论系统
+
     add_log("评论回复系统已初始化", 'info', system='comment')
     add_log("评论监控功能就绪", 'success', system='comment')
     add_log("评论日志系统已就绪", 'success', system='comment')
-    
+
     print(f"BiliGo {APP_VERSION} - B站私信自动回复系统启动中...")
-    print("请在浏览器中访问: http://localhost:4999")
-    print("评论回复系统: http://localhost:4999/comment")
-    
-    app.run(host='0.0.0.0', port=4999, debug=False)
+    print(f"请在浏览器中访问: http://localhost:{port}")
+    print(f"评论回复系统: http://localhost:{port}/comment")
+
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+
+if __name__ == '__main__':
+    run_server()

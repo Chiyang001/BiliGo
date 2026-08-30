@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-20260518%20(Emergency)-blue.svg)
+![Version](https://img.shields.io/badge/version-20260830-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.7+-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
 
@@ -19,6 +19,7 @@
 - [功能特性](#功能特性)
 - [系统要求](#系统要求)
 - [快速开始](#快速开始)
+- [Docker 一键部署](#docker-一键部署)
 - [详细配置](#详细配置)
 - [使用教程](#使用教程)
 - [多账号管理](#多账号管理)
@@ -120,6 +121,72 @@ python app.py
 - **评论回复系统**: http://localhost:4999/comment
 - **系统日志页面**: http://localhost:4999/logs.html
 
+### Docker 一键部署
+
+无需安装 Python，适合服务器长期运行或多账号隔离部署。
+
+**前置要求**：已安装 [Docker Desktop](https://docs.docker.com/get-docker/)（Windows/macOS）或 Docker Engine（Linux）。
+
+#### 方式一：一键脚本
+
+**Windows** — 双击或在项目目录运行：
+
+```bat
+docker-deploy.bat
+```
+
+**Linux / macOS**：
+
+```bash
+chmod +x docker-deploy.sh
+./docker-deploy.sh
+```
+
+#### 方式二：Docker Compose
+
+```bash
+docker compose up -d --build
+```
+
+#### 方式三：手动构建镜像
+
+```bash
+docker build -t biligo:latest .
+docker run -d \
+  --name biligo \
+  -p 4999:4999 \
+  -v biligo-data:/data \
+  --restart unless-stopped \
+  biligo:latest
+```
+
+#### 数据持久化
+
+容器内配置、规则、导出文件保存在 `/data` 目录（对应 Docker 卷 `biligo-data`）。首次启动会自动从镜像内复制默认配置模板。
+
+如需将数据存到本地目录：
+
+```bash
+docker run -d -p 4999:4999 -v ./biligo-data:/data biligo:latest
+```
+
+#### 常用命令
+
+```bash
+docker compose logs -f      # 查看运行日志
+docker compose restart      # 重启服务
+docker compose down         # 停止并移除容器
+docker compose pull && docker compose up -d --build  # 更新并重建
+```
+
+#### 可选：评论浏览器模式（Playwright）
+
+默认镜像不含 Chromium。若 `comment_fetch_mode` 设为 `browser`，需自行构建带 Playwright 的镜像：
+
+```bash
+docker build -t biligo:browser -f Dockerfile.playwright .
+```
+
 ---
 
 ## 📝 详细配置
@@ -134,7 +201,7 @@ python app.py
    - `SESSDATA`
    - `bili_jct`
 
-> **20260518 (Emergency)+**：首次启动后会自动在 `config.json` 生成 `im_dev_id`（私信设备标识，每账号独立）。请勿手动改回旧版共用 ID，否则可能触发 HTTP 412 风控。
+> **20260830+**：首次启动后会自动在 `config.json` 生成 `im_dev_id`（私信设备标识，每账号独立）。请勿手动改回旧版共用 ID，否则可能触发 HTTP 412 风控。
 
 ### 配置邮件提醒（可选）
 
@@ -250,13 +317,19 @@ python app.py
 
 ```bash
 # 账号1 - 端口4999
-docker run -d -p 4999:4999 -v /path/to/config1:/app/config biligo
+docker run -d -p 4999:4999 -v biligo-data-1:/data --name biligo-1 biligo:latest
 
 # 账号2 - 端口5000
-docker run -d -p 5000:4999 -v /path/to/config2:/app/config biligo
+docker run -d -p 5000:4999 -v biligo-data-2:/data --name biligo-2 biligo:latest
 
 # 账号3 - 端口5001
-docker run -d -p 5001:4999 -v /path/to/config3:/app/config biligo
+docker run -d -p 5001:4999 -v biligo-data-3:/data --name biligo-3 biligo:latest
+```
+
+或使用本地目录挂载：
+
+```bash
+docker run -d -p 4999:4999 -v /path/to/account1-data:/data biligo:latest
 ```
 
 **优点**：
@@ -351,7 +424,7 @@ pm2 logs biligo-account1
 - 多人同时出现相同发送失败（多为旧版共用设备 ID 导致）
 
 **解决方法**:
-1. **升级到 20260518 (Emergency) 或更高版本**（已修复共用 `dev_id`、补充 `csrf_token` 等问题）
+1. **升级到 20260830 或更高版本**（已修复共用 `dev_id`、补充 `csrf_token` 等问题）
 2. 在浏览器打开 [message.bilibili.com](https://message.bilibili.com) 手动发一条私信完成验证
 3. 重启程序，确认 `config.json` 中已生成独立的 `im_dev_id`
 4. 增加发送间隔（建议 2 秒以上）
@@ -442,6 +515,22 @@ pm2 logs biligo-account1
 ---
 
 ## 📅 更新日志
+
+### 20260830 (2026-08-30)
+
+**重要修复**:
+- 🐛 **修复多账号并行模式下的关注回复与登录校验问题**
+  - 多账号监控循环接入关注/取关检测与自动回复
+  - 测试关注者检测、评论配置导入适配多账号凭证
+  - 修复页面加载时多账号模式被误重置的前端竞态
+- 🐛 **多账号隔离与稳定性**
+  - 每账号独立 `im_dev_id` 与发送间隔，避免并行风控冲突
+  - 回复次数统计按账号 UID 隔离，并加文件锁防止并发写入
+
+**优化改进**:
+- 🔧 多账号监控补齐发送验证、API 重连、自动重置等能力
+- 🔧 登录失效日志与邮件通知携带账号名
+- 🐳 新增 Docker 一键部署（Dockerfile、docker-compose、部署脚本）
 
 ### 20260518 (Emergency) (2026-05-18)
 

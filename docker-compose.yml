@@ -1,0 +1,17 @@
+services:
+  biligo:
+    build: .
+    image: biligo:latest
+    container_name: biligo
+    restart: unless-stopped
+    ports:
+      - "4999:4999"
+    volumes:
+      - biligo-data:/data
+    environment:
+      BILIGO_DATA_DIR: /data
+      PORT: "4999"
+      TZ: Asia/Shanghai
+
+volumes:
+  biligo-data:

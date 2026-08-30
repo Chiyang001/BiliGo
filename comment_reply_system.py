@@ -1,5 +1,5 @@
 """
-BiliGo 评论自动回复系统模块 (20260518 Emergency)
+BiliGo 评论自动回复系统模块 (20260830)
 独立的评论回复功能，与私信回复系统并行运行
 """
 
@@ -15,6 +15,7 @@ from collections import defaultdict
 
 import bili_wbi
 import comment_monitor_helpers
+from app_paths import get_app_root
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -64,24 +65,7 @@ class CommentReplySystem:
     
     def get_app_root(self):
         """获取应用根目录"""
-        if hasattr(self, '_app_root'):
-            return self._app_root
-        
-        # 尝试多种方式获取应用根目录
-        possible_roots = [
-            os.path.dirname(os.path.abspath(__file__)),
-            os.getcwd(),
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        ]
-        
-        for root in possible_roots:
-            if os.path.exists(os.path.join(root, 'app.py')):
-                self._app_root = root
-                return root
-        
-        # 如果都找不到，使用当前目录
-        self._app_root = os.getcwd()
-        return self._app_root
+        return get_app_root()
     
     def init_config_paths(self):
         """初始化配置文件路径"""
