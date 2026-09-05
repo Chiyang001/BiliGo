@@ -5263,6 +5263,7 @@ def save_comment_config():
     except Exception as e:
         logger.error(f"保存评论回复配置失败: {e}")
         add_log(f"保存评论回复配置失败: {e}", 'error', system='comment')
+        raise
 
 def load_comment_rules():
     """加载评论回复规则"""
@@ -5288,6 +5289,7 @@ def save_comment_rules():
             json.dump(comment_rules, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error(f"保存评论回复规则失败: {e}")
+        raise
 
 def add_comment_log(message, log_type='info'):
     """添加评论回复日志"""

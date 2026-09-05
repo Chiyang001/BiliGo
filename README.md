@@ -258,6 +258,7 @@ BiliGo/
 python scripts/smoke_test_regressions.py
 python scripts/smoke_test_platform_login_guards.py
 python scripts/smoke_test_xianyu.py
+python scripts/smoke_test_comment_ui.py
 ```
 
 提交代码前，请确认没有加入本地配置、浏览器资料、数据库、日志或打包产物。

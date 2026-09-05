@@ -7,6 +7,25 @@ let currentCommentPage = 1;
 const commentRulesPerPage = 10;
 let editingCommentRuleId = null;
 
+function escapeCommentHtml(value) {
+    const node = document.createElement('span');
+    node.textContent = String(value ?? '');
+    return node.innerHTML;
+}
+
+async function requireCommentApiSuccess(response, fallbackMessage) {
+    let data = null;
+    try {
+        data = await response.json();
+    } catch {
+        throw new Error(fallbackMessage);
+    }
+    if (!response.ok || !data.success) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
+
 // 页面加载时初始化
 document.addEventListener('DOMContentLoaded', function() {
     loadCommentPlatformEmailConfig();
@@ -112,16 +131,12 @@ function showToast(message, type = 'info') {
     
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    
-    let icon = '';
-    if (type === 'success') icon = '';
-    if (type === 'error') icon = '';
-    if (type === 'warning') icon = '';
-    
-    toast.innerHTML = `
-        <span class="toast-icon">${icon}</span>
-        <div class="toast-message">${message}</div>
-    `;
+    const icon = document.createElement('span');
+    icon.className = 'toast-icon';
+    const text = document.createElement('div');
+    text.className = 'toast-message';
+    text.textContent = String(message ?? '');
+    toast.append(icon, text);
     
     toastContainer.appendChild(toast);
     
@@ -281,7 +296,7 @@ function saveCommentLoginConfig() {
 }
 
 // 保存默认评论回复设置
-function saveDefaultCommentReply() {
+async function saveDefaultCommentReply() {
     const enabled = document.getElementById('default-comment-reply-enabled').checked;
     const message = document.getElementById('default-comment-reply-message').value.trim();
     if (!message) {
@@ -293,31 +308,24 @@ function saveDefaultCommentReply() {
         default_comment_reply_message: message
     };
     
-    fetch('/api/comment-config', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(configData)
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showToast('默认评论回复设置已保存', 'success');
-            addCommentLog('默认评论回复设置已更新', 'success');
-        } else {
-            showToast('保存默认评论回复设置失败', 'error');
-            addCommentLog('保存默认评论回复设置失败', 'error');
-        }
-    })
-    .catch(error => {
-        showToast('保存默认评论回复设置失败: ' + error, 'error');
-        addCommentLog('保存默认评论回复设置失败: ' + error, 'error');
-    });
+    try {
+        const response = await fetch('/api/comment-config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(configData)
+        });
+        await requireCommentApiSuccess(response, '保存默认评论回复设置失败');
+        showToast('默认评论回复设置已保存', 'success');
+        addCommentLog('默认评论回复设置已更新', 'success');
+    } catch (error) {
+        const message = '保存默认评论回复设置失败: ' + error.message;
+        showToast(message, 'error');
+        addCommentLog(message, 'error');
+    }
 }
 
 // 添加评论回复规则
-function addCommentRule() {
+async function addCommentRule() {
     const name = document.getElementById('comment-rule-title').value.trim();
     const keywords = document.getElementById('comment-keywords').value.trim();
     const reply = document.getElementById('comment-reply').value.trim();
@@ -340,46 +348,53 @@ function addCommentRule() {
         created_at: new Date().toISOString()
     };
     
-    commentRules.push(rule);
-    saveCommentRules();
-    updateCommentRulesDisplay();
-    
-    // 清空输入框
-    document.getElementById('comment-rule-title').value = '';
-    document.getElementById('comment-keywords').value = '';
-    document.getElementById('comment-reply').value = '';
-    
-    showToast(`评论回复规则"${name}"添加成功`, 'success');
-    addCommentLog(`添加评论回复规则成功: ${name}`, 'success');
+    const nextRules = [...commentRules, rule];
+    try {
+        await saveCommentRules(nextRules);
+        commentRules = nextRules;
+        updateCommentRulesDisplay();
+
+        document.getElementById('comment-rule-title').value = '';
+        document.getElementById('comment-keywords').value = '';
+        document.getElementById('comment-reply').value = '';
+
+        showToast(`评论回复规则"${name}"添加成功`, 'success');
+        addCommentLog(`添加评论回复规则成功: ${name}`, 'success');
+    } catch (error) {
+        const message = '添加评论回复规则失败: ' + error.message;
+        showToast(message, 'error');
+        addCommentLog(message, 'error');
+    }
 }
 
 // 删除评论回复规则
-function deleteCommentRule(id) {
+async function deleteCommentRule(id) {
     const rule = commentRules.find(r => r.id === id);
     if (!rule) return;
     
     const ruleName = rule.name;
-    commentRules = commentRules.filter(rule => rule.id !== id);
-    saveCommentRules();
-    updateCommentRulesDisplay();
-    
-    showToast(`评论回复规则"${ruleName}"已删除`, 'success');
-    addCommentLog('删除评论回复规则成功', 'success');
+    const nextRules = commentRules.filter(item => item.id !== id);
+    try {
+        await saveCommentRules(nextRules);
+        commentRules = nextRules;
+        updateCommentRulesDisplay();
+        showToast(`评论回复规则"${ruleName}"已删除`, 'success');
+        addCommentLog('删除评论回复规则成功', 'success');
+    } catch (error) {
+        const message = '删除评论回复规则失败: ' + error.message;
+        showToast(message, 'error');
+        addCommentLog(message, 'error');
+    }
 }
 
 // 保存评论回复规则
-function saveCommentRules() {
-    fetch('/api/comment-rules', {
+async function saveCommentRules(rulesToSave = commentRules) {
+    const response = await fetch('/api/comment-rules', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({rules: commentRules})
-    })
-    .catch(error => {
-        console.error('同步评论回复规则到服务器失败:', error);
-        showToast('同步评论回复规则到服务器失败', 'error');
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({rules: rulesToSave})
     });
+    return requireCommentApiSuccess(response, '同步评论回复规则到服务器失败');
 }
 
 // 加载评论回复规则
@@ -428,18 +443,20 @@ function updateCommentRulesDisplay() {
     container.innerHTML = currentRules.map(rule => {
         const enabledStatus = rule.enabled ? '<span style="color: #2ed573;"></span>' : '<span style="color: #ff4757;"></span>';
         
-        const replyText = rule.reply && rule.reply.length > 100 ? rule.reply.substring(0, 100) + '...' : (rule.reply || '');
-        const replyContent = `<span style="color: #28a745;"></span> 文字回复: ${replyText}`;
+        const fullReply = String(rule.reply || '');
+        const replyText = fullReply.length > 100 ? fullReply.substring(0, 100) + '...' : fullReply;
+        const replyContent = `<span style="color: #28a745;"></span> 文字回复: ${escapeCommentHtml(replyText)}`;
+        const ruleId = Number.isSafeInteger(Number(rule.id)) ? Number(rule.id) : 0;
         
         return `
         <div class="rule-item">
-            <div class="rule-title">${enabledStatus} ${rule.name || '未命名规则'}</div>
-            <div class="rule-keywords">关键词: ${rule.keyword || ''}</div>
-            <div class="rule-reply" title="${rule.reply || ''}">${replyContent}</div>
+            <div class="rule-title">${enabledStatus} ${escapeCommentHtml(rule.name || '未命名规则')}</div>
+            <div class="rule-keywords">关键词: ${escapeCommentHtml(rule.keyword || '')}</div>
+            <div class="rule-reply" title="${escapeCommentHtml(fullReply)}">${replyContent}</div>
             <div class="rule-actions">
-                <button class="edit-btn" onclick="editCommentRule(${rule.id})"> 编辑</button>
-                <button class="delete-btn" onclick="deleteCommentRule(${rule.id})"> 删除</button>
-                <button class="toggle-btn" onclick="toggleCommentRule(${rule.id})">
+                <button class="edit-btn" onclick="editCommentRule(${ruleId})"> 编辑</button>
+                <button class="delete-btn" onclick="deleteCommentRule(${ruleId})"> 删除</button>
+                <button class="toggle-btn" onclick="toggleCommentRule(${ruleId})">
                     ${rule.enabled ? '' : ''} 
                     ${rule.enabled ? '禁用' : '启用'}
                 </button>
@@ -624,7 +641,7 @@ function editCommentRule(id) {
 }
 
 // 保存编辑的评论回复规则
-function saveEditCommentRule() {
+async function saveEditCommentRule() {
     const name = document.getElementById('edit-comment-rule-title').value.trim();
     const keywords = document.getElementById('edit-comment-keywords').value.trim();
     const reply = document.getElementById('edit-comment-reply').value.trim();
@@ -640,33 +657,48 @@ function saveEditCommentRule() {
     
     const ruleIndex = commentRules.findIndex(r => r.id === editingCommentRuleId);
     if (ruleIndex !== -1) {
-        commentRules[ruleIndex] = {
+        const nextRules = [...commentRules];
+        nextRules[ruleIndex] = {
             ...commentRules[ruleIndex],
             name: name,
             keyword: keywords,
             reply: reply
         };
-        
-        saveCommentRules();
-        updateCommentRulesDisplay();
-        closeCommentEditModal();
-        
-        showToast(`评论回复规则"${name}"已更新`, 'success');
-        addCommentLog(`评论回复规则编辑成功: ${name}`, 'success');
+
+        try {
+            await saveCommentRules(nextRules);
+            commentRules = nextRules;
+            updateCommentRulesDisplay();
+            closeCommentEditModal();
+            showToast(`评论回复规则"${name}"已更新`, 'success');
+            addCommentLog(`评论回复规则编辑成功: ${name}`, 'success');
+        } catch (error) {
+            const message = '编辑评论回复规则失败: ' + error.message;
+            showToast(message, 'error');
+            addCommentLog(message, 'error');
+        }
     }
 }
 
 // 切换评论回复规则启用状态
-function toggleCommentRule(id) {
+async function toggleCommentRule(id) {
     const ruleIndex = commentRules.findIndex(r => r.id === id);
     if (ruleIndex !== -1) {
-        commentRules[ruleIndex].enabled = !commentRules[ruleIndex].enabled;
-        saveCommentRules();
-        updateCommentRulesDisplay();
-        
-        const status = commentRules[ruleIndex].enabled ? '启用' : '禁用';
-        showToast(`评论回复规则"${commentRules[ruleIndex].name}"已${status}`, 'info');
-        addCommentLog(`评论回复规则${status}成功: ${commentRules[ruleIndex].name}`, 'info');
+        const nextRules = commentRules.map((rule, index) =>
+            index === ruleIndex ? {...rule, enabled: !rule.enabled} : rule
+        );
+        try {
+            await saveCommentRules(nextRules);
+            commentRules = nextRules;
+            updateCommentRulesDisplay();
+            const status = commentRules[ruleIndex].enabled ? '启用' : '禁用';
+            showToast(`评论回复规则"${commentRules[ruleIndex].name}"已${status}`, 'info');
+            addCommentLog(`评论回复规则${status}成功: ${commentRules[ruleIndex].name}`, 'info');
+        } catch (error) {
+            const message = '更新评论回复规则状态失败: ' + error.message;
+            showToast(message, 'error');
+            addCommentLog(message, 'error');
+        }
     }
 }
 
