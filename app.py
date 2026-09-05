@@ -25,7 +25,7 @@ from ai_reply_service import (
     normalize_platforms, platform_enabled, record_conversation_exchange,
 )
 APP_VERSION = 'V3 Ultra'
-APP_VERSION_DATE = '开发中'
+APP_VERSION_DATE = '2026-09-05'
 
 app = Flask(__name__)
 

@@ -13,6 +13,7 @@ dist/
 *_browser_profile/
 *_media/
 ai_knowledge/
+.biligo-data/
 
 # Local runtime state. Credential-free templates live in docker/defaults/.
 *_user_reply_stats.json
