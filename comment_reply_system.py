@@ -1,5 +1,5 @@
 """
-BiliGo 评论自动回复系统模块 (20260830)
+BiliGo 评论自动回复系统模块 (V3 Ultra)
 独立的评论回复功能，与私信回复系统并行运行
 """
 
@@ -16,6 +16,7 @@ from collections import defaultdict
 import bili_wbi
 import comment_monitor_helpers
 from app_paths import get_app_root
+from dashboard_metrics import record_dashboard_event
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -26,8 +27,6 @@ class CommentReplySystem:
             'comment_reply_enabled': False,
             'default_comment_reply_enabled': False,
             'default_comment_reply_message': '感谢您的评论！',
-            'default_comment_reply_type': 'text',
-            'default_comment_reply_image': '',
             'comment_check_interval': 5,  # 评论检查间隔（秒），默认5秒
             'comment_send_delay': 3.0,  # 评论回复发送间隔（秒），默认3秒避免风控
             'only_reply_new_comments': True,  # 仅回复新评论
@@ -81,6 +80,8 @@ class CommentReplySystem:
             if os.path.exists(self.config_file):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     saved_config = json.load(f)
+                    saved_config.pop('default_comment_reply_type', None)
+                    saved_config.pop('default_comment_reply_image', None)
                     self.config.update(saved_config)
                 logger.info("评论回复配置加载成功")
             else:
@@ -93,6 +94,8 @@ class CommentReplySystem:
         self.init_config_paths()
         try:
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
+            self.config.pop('default_comment_reply_type', None)
+            self.config.pop('default_comment_reply_image', None)
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
             logger.info("评论回复配置保存成功")
@@ -107,7 +110,17 @@ class CommentReplySystem:
         try:
             if os.path.exists(self.rules_file):
                 with open(self.rules_file, 'r', encoding='utf-8') as f:
-                    self.rules = json.load(f)
+                    loaded_rules = json.load(f)
+                    self.rules = []
+                    for rule in loaded_rules:
+                        if not isinstance(rule, dict):
+                            continue
+                        normalized = dict(rule)
+                        was_image = normalized.pop('reply_type', 'text') == 'image'
+                        normalized.pop('reply_image', None)
+                        if was_image and not str(normalized.get('reply') or '').strip():
+                            normalized['enabled'] = False
+                        self.rules.append(normalized)
                 logger.info(f"评论回复规则加载成功，共 {len(self.rules)} 条规则")
             else:
                 self.rules = []
@@ -121,6 +134,9 @@ class CommentReplySystem:
         self.init_config_paths()
         try:
             os.makedirs(os.path.dirname(self.rules_file), exist_ok=True)
+            for rule in self.rules:
+                rule.pop('reply_type', None)
+                rule.pop('reply_image', None)
             with open(self.rules_file, 'w', encoding='utf-8') as f:
                 json.dump(self.rules, f, ensure_ascii=False, indent=2)
             logger.info(f"评论回复规则保存成功，共 {len(self.rules)} 条规则")
@@ -302,7 +318,7 @@ class CommentReplySystem:
             self.add_log(f"获取视频评论异常: {e}", 'error')
             return None
     
-    def reply_to_comment(self, oid, root_rpid, message, reply_type='text', image_path='', parent_rpid=None):
+    def reply_to_comment(self, oid, root_rpid, message, parent_rpid=None):
         """回复评论。楼中楼时 parent_rpid 为被回复的那条评论 rpid。"""
         if not self.bili_api:
             return False
@@ -449,24 +465,23 @@ class CommentReplySystem:
                         # 不要回复自己的评论
                         if my_uid and commenter_uid == my_uid:
                             continue
+
+                        record_dashboard_event(
+                            'bili_comment', 'inbound', cache_key,
+                            contact_id=str(commenter_uid),
+                        )
                         
                         self.add_log(f"检测到评论: {commenter_name} 在《{video_title}》: {comment_text[:30]}...", 'info')
                         
                         # 匹配回复规则
                         matched_rule = self.match_comment_rule(comment_text)
                         reply_message = None
-                        reply_type = 'text'
-                        reply_image = ''
                         
                         if matched_rule:
                             reply_message = matched_rule.get('reply', '')
-                            reply_type = matched_rule.get('reply_type', 'text')
-                            reply_image = matched_rule.get('reply_image', '')
                             self.add_log(f"匹配到规则: {matched_rule.get('name', '未命名规则')}", 'success')
                         elif self.config.get('default_comment_reply_enabled', False):
                             reply_message = self.config.get('default_comment_reply_message', '感谢您的评论！')
-                            reply_type = self.config.get('default_comment_reply_type', 'text')
-                            reply_image = self.config.get('default_comment_reply_image', '')
                             self.add_log("使用默认评论回复", 'info')
                         
                         # 发送回复
@@ -475,15 +490,23 @@ class CommentReplySystem:
                                 video_id,
                                 thread_root,
                                 reply_message,
-                                reply_type,
-                                reply_image,
                                 parent_rpid=reply_target,
                             )
                             
                             if success:
                                 replied_count += 1
+                                record_dashboard_event(
+                                    'bili_comment', 'reply_success', cache_key,
+                                    contact_id=str(commenter_uid),
+                                    reply_mode='rule' if matched_rule else 'default',
+                                )
                                 self.add_log(f"✅ 成功回复 {commenter_name}", 'success')
                             else:
+                                record_dashboard_event(
+                                    'bili_comment', 'reply_failure', cache_key,
+                                    contact_id=str(commenter_uid),
+                                    reply_mode='rule' if matched_rule else 'default',
+                                )
                                 self.add_log(f"❌ 回复 {commenter_name} 失败", 'error')
                         
                         # 短暂休息避免频率过高
@@ -615,8 +638,6 @@ class CommentReplySystem:
             if message_config.get('default_reply_enabled'):
                 self.config['default_comment_reply_enabled'] = True
                 self.config['default_comment_reply_message'] = message_config.get('default_reply_message', '感谢您的评论！')
-                self.config['default_comment_reply_type'] = message_config.get('default_reply_type', 'text')
-                self.config['default_comment_reply_image'] = message_config.get('default_reply_image', '')
             
             # 导入规则
             imported_rules = []
@@ -626,8 +647,6 @@ class CommentReplySystem:
                     'name': f"[导入] {rule.get('name', '未命名规则')}",
                     'keyword': rule.get('keyword', ''),
                     'reply': rule.get('reply', ''),
-                    'reply_type': rule.get('reply_type', 'text'),
-                    'reply_image': rule.get('reply_image', ''),
                     'enabled': rule.get('enabled', True),
                     'created_at': datetime.now().isoformat()
                 }

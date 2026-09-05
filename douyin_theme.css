@@ -1,0 +1,291 @@
+/* 抖音模块主题 — 以墨黑和电光青为主，与小红书红色主题区分 */
+:root {
+    --primary-color: #087f8a;
+    --primary-hover: #066b74;
+    --primary-dark: #055861;
+    --douyin-cyan: #25f4ee;
+    --gradient-primary: linear-gradient(135deg, #087f8a 0%, #0a919b 100%);
+    --gradient-light: linear-gradient(135deg, #ffffff 0%, #f1fafb 100%);
+}
+
+body {
+    background-image:
+        radial-gradient(circle at 18% 82%, rgba(37, 244, 238, 0.07) 0%, transparent 48%),
+        radial-gradient(circle at 82% 16%, rgba(8, 127, 138, 0.06) 0%, transparent 46%);
+}
+
+header {
+    border-bottom-color: var(--primary-color);
+}
+
+.btn-switch:hover {
+    box-shadow: 0 4px 12px rgba(8, 127, 138, 0.22);
+}
+
+.logo h1 {
+    color: var(--primary-color);
+    text-shadow: 0 0 20px rgba(37, 244, 238, 0.16);
+}
+
+.btn-primary {
+    box-shadow: 0 3px 10px rgba(8, 127, 138, 0.24);
+}
+
+.btn-primary:hover {
+    background: linear-gradient(135deg, #066f78 0%, #087f8a 100%);
+    box-shadow: 0 5px 16px rgba(8, 127, 138, 0.3);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(8, 127, 138, 0.12);
+}
+
+.version-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 11px;
+    border-radius: 6px;
+    color: var(--badge-gold-text);
+    background: var(--badge-gold-bg);
+    border: 1px solid var(--badge-gold-border);
+    box-shadow: var(--badge-gold-shadow);
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.platform-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary-color);
+    background: rgba(37, 244, 238, 0.08);
+    border: 1px solid rgba(8, 127, 138, 0.22);
+}
+
+.account-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    margin-bottom: 16px;
+}
+
+.account-card.logged-in {
+    border-color: rgba(8, 127, 138, 0.32);
+    background: linear-gradient(135deg, #fff 0%, #f2fbfb 100%);
+}
+
+.account-profile {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px dashed var(--border-color);
+}
+
+.account-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--gradient-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 22px;
+    font-weight: 700;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.account-avatar--default {
+    background: #fff;
+    border: 1px solid #e8e8e8;
+}
+
+.account-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.account-avatar--default img {
+    object-fit: contain;
+    padding: 10px;
+    box-sizing: border-box;
+}
+
+.account-meta h3 {
+    font-size: 16px;
+    margin-bottom: 4px;
+    color: var(--text-color);
+}
+
+.account-meta p {
+    font-size: 13px;
+    color: var(--text-light);
+    word-break: break-all;
+}
+
+.account-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    font-size: 14px;
+}
+
+.account-row .label {
+    color: var(--text-light);
+}
+
+.account-row .value.ok {
+    color: var(--success-color);
+    font-weight: 600;
+}
+
+.account-row .value.warn {
+    color: var(--warning-color);
+    font-weight: 600;
+}
+
+.account-row .value.mono {
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+}
+
+.info-banner.douyin-banner {
+    border-color: rgba(8, 127, 138, 0.26);
+    background: linear-gradient(135deg, #ffffff 0%, #effafa 100%);
+}
+
+.info-banner.douyin-banner .info-banner-content strong {
+    color: #066b74;
+}
+
+.log-viewer {
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 12px;
+    font-size: 13px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.log-viewer .log-entry {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border-color);
+    line-height: 1.5;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.log-viewer .log-time {
+    color: var(--text-light);
+    margin-right: 4px;
+}
+
+.log-viewer .log-message {
+    word-break: break-all;
+}
+
+.log-viewer .log-entry:last-child {
+    border-bottom: none;
+}
+
+.log-viewer .log-entry.success { color: var(--success-color); }
+.log-viewer .log-entry.error { color: var(--danger-color); }
+.log-viewer .log-entry.warning { color: var(--warning-color); }
+
+.status-indicator.running .status-icon,
+.status-indicator.logged-in .status-icon {
+    color: var(--success-color);
+    filter: drop-shadow(0 0 6px var(--success-color));
+}
+
+.status-indicator.monitoring .status-icon {
+    color: var(--primary-color);
+    filter: drop-shadow(0 0 6px var(--primary-color));
+}
+
+.reply-settings-container {
+    grid-column: 1 / -1;
+}
+
+.reply-settings-container .reply-settings-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+    align-items: start;
+}
+
+.reply-settings-container .default-reply-panel,
+.reply-settings-container .keyword-panel.half-width {
+    grid-column: auto !important;
+    width: auto;
+    min-width: 0;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+}
+
+@media (max-width: 768px) {
+    .reply-settings-container .reply-settings-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.reply-settings-container .keyword-panel.half-width .rule-form {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+.keyword-panel .rule-form {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+    border: 1px dashed var(--border-color);
+}
+
+.douyin-rule-edit input,
+.douyin-rule-edit textarea {
+    width: 100%;
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--card-bg);
+    color: var(--text-color);
+    font-size: 14px;
+}
+
+.douyin-rule-edit textarea {
+    min-height: 72px;
+    resize: vertical;
+}
+
+.douyin-rule-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+}

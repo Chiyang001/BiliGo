@@ -15,10 +15,28 @@ from werkzeug.utils import secure_filename
 import bili_wbi
 import comment_monitor_helpers
 from app_paths import ensure_data_files, get_app_root, get_static_root
-APP_VERSION = '20260830'
-APP_VERSION_DATE = '2026-08-30'
+from dashboard_metrics import dashboard_metrics, record_dashboard_event
+from ai_handoff_store import ai_handoff_store
+from ai_conversation_store import ai_conversation_store
+from ai_reply_service import (
+    build_conversation_context,
+    generate_reply as generate_shared_ai_reply, generate_reply_decision as generate_shared_ai_decision,
+    normalize_handoff_settings, normalize_knowledge_config, normalize_model_settings,
+    normalize_platforms, platform_enabled, record_conversation_exchange,
+)
+APP_VERSION = 'V3 Ultra'
+APP_VERSION_DATE = '开发中'
 
 app = Flask(__name__)
+
+from douyin_reply_system import register_douyin_routes
+register_douyin_routes(app)
+from xiaohongshu_reply_system import register_xiaohongshu_routes
+register_xiaohongshu_routes(app)
+from weibo_reply_system import register_weibo_routes
+register_weibo_routes(app)
+from xianyu_reply_system import register_xianyu_routes
+register_xianyu_routes(app)
 
 
 def merge_bilibili_reply_main_block(reply_data):
@@ -52,6 +70,7 @@ config = {
     'unfollow_reply_image': '',  # 取消关注回复图片路径
     'only_reply_new_messages': False,  # 是否仅回复新消息（程序启动后的消息）
     'max_replies_per_user': 3,  # 单用户最大回复次数
+    'unlimited_replies_per_user': False,  # 不限制单用户回复次数
     'follow_check_interval': 1800,  # 检查关注者的间隔（秒），默认30分钟避免触发风控
     'follow_scan_pages': 3,  # 关注检测扫描页数（每页最多50）
     'follow_new_window_seconds': 90,  # 新关注检测时间窗口（秒）
@@ -68,7 +87,15 @@ config = {
         'receiver_email': ''
     },
     'multi_account_mode': False,  # 多账号并行模式开关
-    'accounts': []  # 多账号配置列表
+    'accounts': [],  # 多账号配置列表
+    'ai_provider': {
+        'enabled': False,
+        'format': 'openai',
+        'base_url': 'https://api.openai.com/v1',
+        'model': 'gpt-4o-mini',
+        'api_key': '', 'model_settings': normalize_model_settings({}),
+        'human_handoff': normalize_handoff_settings({}),
+    }
 }
 
 # 私信回复系统变量
@@ -492,7 +519,7 @@ class BilibiliAPI:
             if response.status_code == 412:
                 msg = (
                     '触发哔哩哔哩安全风控(HTTP 412)。'
-                    '请在浏览器打开 https://message.bilibili.com 手动发一条私信完成验证后重试；'
+                    '请在浏览器打开 https://message.bilibili.com，手动发一条私信完成验证后重试。'
                     '若多人同时出现，多为接口参数/设备标识问题，请更新到最新版程序。'
                 )
                 logger.error(f"发送消息失败: HTTP 412 Precondition Failed (dev_id={self.dev_id[:8]}...)")
@@ -904,14 +931,16 @@ class BilibiliAPI:
             add_log(f"获取最近关注者异常: {e}", 'error')
             return []
 
-def send_email_notification(subject, body, receiver_email=None):
+def send_email_notification(subject, body, receiver_email=None, platform='bili_message', email_config_override=None):
     """发送邮件通知"""
     try:
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
         
-        email_config = config.get('email_notification', {})
+        email_config = email_config_override or config.get('email_notifications', {}).get(platform)
+        if email_config is None:
+            email_config = config.get('email_notification', {})
         if not email_config.get('enabled', False):
             return False
         
@@ -955,6 +984,27 @@ def send_email_notification(subject, body, receiver_email=None):
         
     except Exception as e:
         logger.error(f"发送邮件通知失败: {e}")
+        return False
+
+def send_platform_error_notification(platform, message, receiver_email=None):
+    """Send an error alert for a non-Bilibili platform using shared SMTP settings."""
+    try:
+        platform_names = {'bili_comment': 'B站评论', 'douyin': '抖音', 'xiaohongshu': '小红书', 'weibo': '微博'}
+        name = platform_names.get(platform, platform)
+        settings = config.setdefault('email_notifications', {}).get(platform, {})
+        if not settings.get('enabled', False):
+            return False
+        target = receiver_email or settings.get('receiver_email', '')
+        if not target:
+            return False
+        subject = f'BiliGo - {name}私信异常提醒'
+        body = f'''<html><body style="font-family:Arial,sans-serif;line-height:1.6;color:#333">
+        <h2 style="color:#d9534f">{name}私信异常</h2>
+        <p>{message}</p><p>发生时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        <p style="color:#666;font-size:12px">这是一封自动发送的邮件，请及时检查运行日志。</p></body></html>'''
+        return send_email_notification(subject, body, target, platform=platform, email_config_override=settings)
+    except Exception as exc:
+        logger.error(f'{platform}邮件提醒失败: {exc}')
         return False
 
 def check_login_status(api):
@@ -1185,6 +1235,23 @@ def increment_user_reply_count(user_id, stats=None, account_uid=None):
         save_user_reply_stats(stats)
         return stats[user_id_str]['count']
 
+
+def get_user_reply_limit():
+    """返回单用户回复上限；None 表示不限制。"""
+    if config.get('unlimited_replies_per_user') is True:
+        return None
+    try:
+        return max(1, int(config.get('max_replies_per_user') or 3))
+    except (TypeError, ValueError):
+        return 3
+
+
+def format_user_reply_limit_text(limit=None):
+    """格式化回复次数上限显示文本。"""
+    if limit is None:
+        limit = get_user_reply_limit()
+    return '不限' if limit is None else str(limit)
+
 def add_log(message, log_type='info', system='message', error_details='', context='', account_name=''):
     """添加日志 - 支持区分私信和评论系统，并在错误时发送邮件通知"""
     timestamp = datetime.now().isoformat()
@@ -1211,7 +1278,12 @@ def add_log(message, log_type='info', system='message', error_details='', contex
     logger.info(f"{system_prefix}[{log_type.upper()}] {message}")
     
     # 仅错误级别发送邮件通知（warning/info/debug 不触发）
-    if log_type == 'error':
+    if log_type == 'error' and system == 'comment':
+        try:
+            threading.Thread(target=send_platform_error_notification, args=('bili_comment', message), daemon=True).start()
+        except Exception as e:
+            logger.error(f"启动评论邮件提醒线程失败: {e}")
+    elif log_type == 'error':
         try:
             # 异步发送邮件，避免阻塞主线程
             threading.Thread(
@@ -1766,11 +1838,11 @@ def process_single_session(api, my_uid, session):
             return []
         
         # 从JSON文件读取用户回复统计
-        max_replies = config.get('max_replies_per_user', 3)
+        max_replies = get_user_reply_limit()
         current_replies = get_user_reply_count(talker_id, account_uid=my_uid)
         
         # 只在首次达到限制时记录日志
-        if current_replies >= max_replies:
+        if max_replies is not None and current_replies >= max_replies:
             user_id_str = get_reply_stats_key(talker_id, my_uid)
             with user_reply_stats_lock:
                 user_reply_stats = load_user_reply_stats()
@@ -1830,7 +1902,34 @@ def process_single_session(api, my_uid, session):
         
         # 更新缓存
         message_cache[msg_id] = True
+        record_dashboard_event(
+            'bili_message', 'inbound', msg_id,
+            contact_id=str(talker_id),
+        )
         
+        # AI 模式与传统关键词/默认回复互斥，启用后直接生成回复。
+        if platform_enabled('bili_message', config.get('ai_provider') or {}):
+            history = build_conversation_context(
+                'bili_message', str(talker_id), config.get('ai_provider') or {},
+            )
+            ai_context = '请用简洁、友好的中文回复这条用户私信。'
+            if history:
+                ai_context += '\n\n' + history
+            decision = generate_ai_decision(message_text, ai_context, 'bili_message')
+            if decision.get('needs_human'):
+                queue_ai_handoff(
+                    'bili_message', msg_id, f'用户 {talker_id}', str(talker_id), message_text,
+                    decision.get('reason') or 'AI 无法确认可靠回复',
+                    {'talker_id': talker_id, 'account_name': getattr(api, 'account_name', '')},
+                )
+                return []
+            ai_reply = decision.get('reply')
+            if ai_reply:
+                return [{'talker_id': talker_id, 'rule': {'title': 'AI 自动回复', 'reply': ai_reply, 'reply_type': 'text'}, 'message': message_text, 'timestamp': msg_timestamp}]
+            add_log(f"AI 回复生成失败，已跳过用户{talker_id}的消息", 'error', system='message')
+            record_dashboard_event('bili_message', 'reply_failure', msg_id, contact_id=str(talker_id), reply_mode='ai')
+            return []
+
         # 极速关键词匹配
         matched_rule = check_keywords_fast(message_text)
         
@@ -1899,7 +1998,6 @@ def process_single_session(api, my_uid, session):
                 else:
                     # 不区分用户类型，使用统一的默认回复
                     default_type = config.get('default_reply_type', 'text')
-                    
                     if default_type == 'text' and config.get('default_reply_message'):
                         add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认文字回复", 'info', system='message')
                         return [{
@@ -2014,6 +2112,33 @@ def _recreate_bilibili_api(api):
     return BilibiliAPI(api.sessdata, api.bili_jct, dev_id=api.dev_id, account_name=api.account_name)
 
 
+def _record_bili_reply_metric(result, event_type):
+    title = str((result.get('rule') or {}).get('title') or '')
+    mode = 'ai' if 'AI' in title else ('default' if '默认' in title else 'rule')
+    event_key = generate_message_id(
+        result.get('talker_id'), result.get('timestamp', 0), result.get('message', '')
+    )
+    record_dashboard_event(
+        'bili_message', event_type, event_key,
+        contact_id=str(result.get('talker_id') or ''), reply_mode=mode,
+    )
+
+
+def _record_bili_ai_context(result, assistant_message):
+    """Commit context only after an AI private-message reply is confirmed sent."""
+    title = str((result.get('rule') or {}).get('title') or '')
+    if 'AI' not in title:
+        return
+    event_key = generate_message_id(
+        result.get('talker_id'), result.get('timestamp', 0), result.get('message', '')
+    )
+    record_conversation_exchange(
+        'bili_message', str(result.get('talker_id') or ''),
+        str(result.get('message') or ''), str(assistant_message or ''), event_key,
+        config.get('ai_provider') or {},
+    )
+
+
 def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
     """发送私信回复并更新统计。返回 (success, stop_account)"""
     reply_result = None
@@ -2035,6 +2160,7 @@ def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
         else:
             add_log(f"[{account_prefix}] 图片文件不存在，跳过回复用户 {result['talker_id']}", 'warning',
                     system='message', account_name=account_prefix)
+            _record_bili_reply_metric(result, 'reply_failure')
             return False, False
     else:
         reply_result = api.send_msg(result['talker_id'], content=result['rule']['reply'])
@@ -2051,17 +2177,20 @@ def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
 
         if verification_success:
             current_count = increment_user_reply_count(result['talker_id'], account_uid=account_uid)
-            max_count = config.get('max_replies_per_user', 3)
+            limit_text = format_user_reply_limit_text()
             add_log(
                 f"[{account_prefix}] ✅ 已成功回复用户 {result['talker_id']} "
                 f"(规则: {result['rule'].get('title', '未知')}) 内容: {reply_content[:20]}... "
-                f"(第{current_count}/{max_count}次)",
+                f"(第{current_count}/{limit_text}次)",
                 'success', system='message', account_name=account_prefix
             )
+            _record_bili_reply_metric(result, 'reply_success')
+            _record_bili_ai_context(result, result['rule'].get('reply', ''))
             return True, False
 
         add_log(f"[{account_prefix}] ⚠️ 用户 {result['talker_id']} 发送验证失败，消息可能未送达", 'warning',
                 system='message', account_name=account_prefix)
+        _record_bili_reply_metric(result, 'reply_failure')
         return False, False
 
     if reply_result and reply_result.get('code') in (-412, -9412):
@@ -2070,17 +2199,20 @@ def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
             'warning' if reply_result.get('code') == -412 else 'error',
             system='message', account_name=account_prefix
         )
+        _record_bili_reply_metric(result, 'reply_failure')
         return False, False
 
     if reply_result and reply_result.get('code') == -101:
         add_log(f"[{account_prefix}] 🔐 登录状态失效，请重新配置登录信息", 'error',
                 system='message', account_name=account_prefix)
+        _record_bili_reply_metric(result, 'reply_failure')
         return False, True
 
     error_msg = reply_result.get('message', '未知错误') if reply_result else '网络错误'
     error_code = reply_result.get('code', 'N/A') if reply_result else 'N/A'
     add_log(f"[{account_prefix}] ❌ 回复用户 {result['talker_id']} 失败 [错误码:{error_code}]: {error_msg}",
             'warning', system='message', account_name=account_prefix)
+    _record_bili_reply_metric(result, 'reply_failure')
     return False, False
 
 
@@ -2382,11 +2514,11 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
             return []
         
         # 从JSON文件读取用户回复次数
-        max_replies = config.get('max_replies_per_user', 3)
+        max_replies = get_user_reply_limit()
         current_replies = get_user_reply_count(talker_id, account_uid=account_uid)
         
         # 只在首次达到限制时记录日志，避免重复输出
-        if current_replies >= max_replies:
+        if max_replies is not None and current_replies >= max_replies:
             user_id_str = get_reply_stats_key(talker_id, account_uid)
             with user_reply_stats_lock:
                 user_reply_stats = load_user_reply_stats()
@@ -2445,6 +2577,39 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
         
         # 更新缓存
         message_cache[msg_id] = True
+        record_dashboard_event(
+            'bili_message', 'inbound', msg_id,
+            contact_id=str(talker_id),
+        )
+
+        if platform_enabled('bili_message', config.get('ai_provider') or {}):
+            history = build_conversation_context(
+                'bili_message', str(talker_id), config.get('ai_provider') or {},
+            )
+            ai_context = '请用简洁、友好的中文回复这条用户私信。'
+            if history:
+                ai_context += '\n\n' + history
+            decision = generate_ai_decision(message_text, ai_context, 'bili_message')
+            if decision.get('needs_human'):
+                queue_ai_handoff(
+                    'bili_message', msg_id, f'用户 {talker_id}', str(talker_id), message_text,
+                    decision.get('reason') or 'AI 无法确认可靠回复',
+                    {'talker_id': talker_id, 'account_name': getattr(api, 'account_name', '')},
+                )
+                return []
+            ai_reply = decision.get('reply')
+            if ai_reply:
+                return [{
+                    'talker_id': talker_id,
+                    'rule': {'title': 'AI 自动回复', 'reply': ai_reply, 'reply_type': 'text'},
+                    'message': message_text,
+                    'timestamp': msg_timestamp,
+                }]
+            record_dashboard_event(
+                'bili_message', 'reply_failure', msg_id,
+                contact_id=str(talker_id), reply_mode='ai',
+            )
+            return []
         
         # 关键词匹配
         matched_rule = check_keywords_fast(message_text)
@@ -2896,6 +3061,7 @@ def monitor_messages():
                                             reply_content = f"[图片] {os.path.basename(image_path)}"
                                         else:
                                             add_log(f"图片文件不存在，跳过回复用户 {result['talker_id']}", 'warning')
+                                            _record_bili_reply_metric(result, 'reply_failure')
                                             continue
                                     else:
                                         # 发送文字回复
@@ -2913,13 +3079,16 @@ def monitor_messages():
                                         
                                         if verification_success:
                                             current_count = increment_user_reply_count(result['talker_id'], account_uid=my_uid)
-                                            max_count = config.get('max_replies_per_user', 3)
+                                            limit_text = format_user_reply_limit_text()
                                             
-                                            add_log(f"✅ 已成功回复用户 {result['talker_id']} (规则: {result['rule']['title']}) 内容: {reply_content[:20]}... (第{current_count}/{max_count}次)", 'success')
+                                            add_log(f"✅ 已成功回复用户 {result['talker_id']} (规则: {result['rule']['title']}) 内容: {reply_content[:20]}... (第{current_count}/{limit_text}次)", 'success')
+                                            _record_bili_reply_metric(result, 'reply_success')
+                                            _record_bili_ai_context(result, result['rule'].get('reply', ''))
                                             reply_count += 1
                                             processed_count += 1
                                         else:
                                             add_log(f"⚠️ 用户 {result['talker_id']} 发送验证失败，消息可能未送达", 'warning')
+                                            _record_bili_reply_metric(result, 'reply_failure')
                                             error_count += 1
                                         
                                     elif reply_result and reply_result.get('code') in (-412, -9412):
@@ -2927,10 +3096,12 @@ def monitor_messages():
                                             f"🚫 用户 {result['talker_id']} 发送受限: {reply_result.get('message', '')}",
                                             'warning' if reply_result.get('code') == -412 else 'error',
                                         )
+                                        _record_bili_reply_metric(result, 'reply_failure')
                                         error_count += 1
                                         
                                     elif reply_result and reply_result.get('code') == -101:
                                         add_log("🔐 登录状态失效，请重新配置登录信息", 'error')
+                                        _record_bili_reply_metric(result, 'reply_failure')
                                         monitoring = False
                                         break
                                         
@@ -2941,10 +3112,12 @@ def monitor_messages():
                                         add_log(f"❌ 回复用户 {result['talker_id']} 失败 [错误码:{error_code}]: {error_msg}", 'warning',
                                                error_details=error_details,
                                                context='回复用户消息')
+                                        _record_bili_reply_metric(result, 'reply_failure')
                                         error_count += 1
                                         
                                 except Exception as e:
                                     add_log(f"💥 发送回复异常: {e}", 'error')
+                                    _record_bili_reply_metric(result, 'reply_failure')
                                     error_count += 1
                         
                         except Exception as e:
@@ -3169,6 +3342,78 @@ def index():
         logger.error(f"访问主页失败: {e}")
         return f"Error loading index.html: {str(e)}", 500
 
+@app.route('/ai-reply')
+def ai_reply_page():
+    """所有平台共用的 AI 回复设置面板。"""
+    return send_from_directory(get_static_root(), 'ai_reply.html')
+
+@app.route('/dashboard')
+def dashboard_page():
+    """五个平台共用的运行数据仪表盘。"""
+    return send_from_directory(get_static_root(), 'dashboard.html')
+
+def _dashboard_platform_statuses():
+    """Collect live status without allowing one platform failure to break the dashboard."""
+    statuses = {}
+    names = {'bili_message': 'B站私信', 'bili_comment': 'B站评论', 'douyin': '抖音私信', 'xiaohongshu': '小红书私信', 'weibo': '微博私信'}
+
+    def assign(platform, monitoring_value, configured, rules_count, account_count=0, starting=False, expired=False):
+        if expired:
+            state, label, message = 'session_expired', '登录已失效', f'{names[platform]}登录状态已失效，请重新登录'
+        elif not configured:
+            state, label, message = 'not_configured', '尚未配置', f'{names[platform]}尚未完成账号或凭据配置'
+        elif starting:
+            state, label, message = 'starting', '正在启动', ''
+        elif monitoring_value:
+            state, label, message = 'running', '运行中', ''
+        else:
+            state, label, message = 'stopped', '已停止', ''
+        statuses[platform] = {
+            'state': state, 'state_label': label, 'message': message,
+            'rules_count': rules_count, 'account_count': account_count,
+        }
+
+    try:
+        is_multi = bool(config.get('multi_account_mode'))
+        accounts = [item for item in config.get('accounts', []) if item.get('enabled', True)] if is_multi else []
+        configured = any(item.get('sessdata') and item.get('bili_jct') for item in accounts) if is_multi else bool(config.get('sessdata') and config.get('bili_jct'))
+        assign('bili_message', monitoring, configured, len(rules), len(accounts) if is_multi else int(configured))
+    except Exception as exc:
+        statuses['bili_message'] = {'state': 'unknown', 'state_label': '状态未知', 'message': str(exc), 'rules_count': 0, 'account_count': 0}
+
+    try:
+        configured = bool(comment_config.get('sessdata') and comment_config.get('bili_jct'))
+        assign('bili_comment', comment_monitoring, configured, len(comment_rules), int(configured))
+    except Exception as exc:
+        statuses['bili_comment'] = {'state': 'unknown', 'state_label': '状态未知', 'message': str(exc), 'rules_count': 0, 'account_count': 0}
+
+    for key in ('douyin', 'xiaohongshu', 'weibo', 'xianyu'):
+        try:
+            if key == 'douyin':
+                from douyin_reply_system import douyin_system as system
+            elif key == 'xiaohongshu':
+                from xiaohongshu_reply_system import xiaohongshu_system as system
+            elif key == 'weibo':
+                from weibo_reply_system import weibo_system as system
+            else:
+                from xianyu_reply_system import xianyu_system as system
+            live = system.get_status()
+            assign(
+                key, bool(live.get('monitoring')), bool(live.get('logged_in')),
+                int(live.get('rules_count') or 0), int(bool(live.get('logged_in'))),
+                bool(live.get('monitor_starting')), bool(live.get('session_expired')),
+            )
+        except Exception as exc:
+            statuses[key] = {'state': 'unknown', 'state_label': '状态未知', 'message': str(exc), 'rules_count': 0, 'account_count': 0}
+    return statuses
+
+@app.route('/api/dashboard')
+def dashboard_api():
+    range_key = request.args.get('range', '30d')
+    load_config()
+    load_comment_config()
+    return jsonify(dashboard_metrics.snapshot(range_key, _dashboard_platform_statuses()))
+
 @app.route('/<path:filename>')
 def static_files(filename):
     """静态文件服务路由"""
@@ -3208,6 +3453,13 @@ def handle_config():
     
     if request.method == 'POST':
         data = request.get_json()
+        traditional_keys = {
+            'default_reply_enabled', 'default_reply_message', 'default_reply_type', 'default_reply_image',
+            'separate_reply_by_follow', 'followed_reply_message', 'followed_reply_type', 'followed_reply_image',
+            'unfollowed_reply_message', 'unfollowed_reply_type', 'unfollowed_reply_image',
+        }
+        if platform_enabled('bili_message', config.get('ai_provider') or {}) and traditional_keys.intersection(data or {}):
+            return jsonify({'success': False, 'error': '已启用AI模式，无法修改默认回复设置'}), 409
         config.update(data)
         save_config()
         add_log("私信系统配置已更新", 'success', system='message')
@@ -3215,11 +3467,481 @@ def handle_config():
     else:
         return jsonify(config)
 
+# AI provider configuration is intentionally kept separate from platform
+# credentials so it can be shared by all supported channels.
+@app.route('/api/ai-config', methods=['GET', 'POST'])
+def handle_ai_config():
+    global config
+    current = config.get('ai_provider') or {
+        'enabled': False,
+        'format': 'openai',
+        'base_url': 'https://api.openai.com/v1',
+        'model': 'gpt-4o-mini',
+        'api_key': '',
+        'platforms': normalize_platforms({}), 'model_settings': normalize_model_settings({}),
+        'human_handoff': normalize_handoff_settings({}),
+    }
+    if request.method == 'GET':
+        response = dict(current)
+        response['platforms'] = normalize_platforms(response.get('platforms'))
+        response['model_settings'] = normalize_model_settings(response.get('model_settings'))
+        response['human_handoff'] = normalize_handoff_settings(response.get('human_handoff'))
+        if response.get('api_key'):
+            response['api_key_configured'] = True
+            response['api_key'] = ''
+        else:
+            response['api_key_configured'] = False
+        return jsonify(response)
+
+    data = request.get_json(silent=True) or {}
+    fmt = str(data.get('format', current.get('format', 'openai'))).lower()
+    if fmt not in {'openai', 'anthropic', 'custom'}:
+        return jsonify({'success': False, 'error': '不支持的接口协议格式'}), 400
+    base_url = str(data.get('base_url', current.get('base_url', ''))).strip().rstrip('/')
+    model = str(data.get('model', current.get('model', ''))).strip()
+    api_key = str(data.get('api_key', '')).strip() or current.get('api_key', '')
+    incoming_model_settings = data.get('model_settings')
+    if isinstance(incoming_model_settings, dict):
+        merged_model_settings = dict(current.get('model_settings') or {})
+        merged_model_settings.update(incoming_model_settings)
+    else:
+        merged_model_settings = current.get('model_settings')
+    incoming_handoff = data.get('human_handoff')
+    if isinstance(incoming_handoff, dict):
+        merged_handoff = dict(current.get('human_handoff') or {})
+        merged_handoff.update(incoming_handoff)
+    else:
+        merged_handoff = current.get('human_handoff')
+    if data.get('enabled') and (not base_url or not model):
+        return jsonify({'success': False, 'error': '启用 AI 前请填写接口地址和模型名称'}), 400
+    config['ai_provider'] = {
+        'enabled': bool(data.get('enabled', current.get('enabled', False))),
+        'format': fmt, 'base_url': base_url, 'model': model, 'api_key': api_key,
+        'platforms': normalize_platforms(data.get('platforms', current.get('platforms'))),
+        'model_settings': normalize_model_settings(merged_model_settings),
+        'human_handoff': normalize_handoff_settings(merged_handoff),
+    }
+    save_config()
+    return jsonify({'success': True, 'api_key_configured': bool(api_key)})
+
+@app.route('/api/ai-test', methods=['POST'])
+def test_ai_provider():
+    data = request.get_json(silent=True) or config.get('ai_provider') or {}
+    fmt = str(data.get('format', 'openai')).lower()
+    base_url = str(data.get('base_url', '')).strip().rstrip('/')
+    model = str(data.get('model', '')).strip()
+    api_key = str(data.get('api_key', '')).strip() or (config.get('ai_provider') or {}).get('api_key', '')
+    if not base_url or not model or not api_key:
+        return jsonify({'success': False, 'error': '请完整填写接口地址、模型和 API Key'}), 400
+    try:
+        if fmt == 'anthropic':
+            url = base_url if base_url.endswith('/messages') else base_url + '/messages'
+            headers = {'x-api-key': api_key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json'}
+            payload = {'model': model, 'max_tokens': 16, 'messages': [{'role': 'user', 'content': 'Reply with OK'}]}
+        else:
+            url = base_url if base_url.endswith('/chat/completions') else base_url + '/chat/completions'
+            headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+            payload = {'model': model, 'max_tokens': 16, 'messages': [{'role': 'user', 'content': 'Reply with OK'}]}
+        response = requests.post(url, headers=headers, json=payload, timeout=12)
+        if response.ok:
+            return jsonify({'success': True, 'message': '连接成功'})
+        return jsonify({'success': False, 'error': f'接口返回 HTTP {response.status_code}'}), 502
+    except requests.RequestException as exc:
+        return jsonify({'success': False, 'error': f'连接失败：{exc}'}), 502
+
+def _ai_provider_request_config(data):
+    """合并页面输入和已保存凭据，避免要求用户重新显示 API Key。"""
+    saved = config.get('ai_provider') or {}
+    return {
+        'format': str(data.get('format', saved.get('format', 'openai'))).lower(),
+        'base_url': str(data.get('base_url', saved.get('base_url', ''))).strip().rstrip('/'),
+        'api_key': str(data.get('api_key', '')).strip() or saved.get('api_key', ''),
+    }
+
+def _ai_models_url(base_url):
+    for suffix in ('/chat/completions', '/messages'):
+        if base_url.endswith(suffix):
+            base_url = base_url[:-len(suffix)]
+            break
+    return base_url if base_url.endswith('/models') else base_url + '/models'
+
+def _request_ai_models(provider):
+    if not provider['base_url'] or not provider['api_key']:
+        raise ValueError('请先填写 Base URL 和 API Key')
+    headers = {'Accept': 'application/json'}
+    if provider['format'] == 'anthropic':
+        headers.update({'x-api-key': provider['api_key'], 'anthropic-version': '2023-06-01'})
+    else:
+        headers['Authorization'] = f"Bearer {provider['api_key']}"
+    started = time.perf_counter()
+    response = requests.get(_ai_models_url(provider['base_url']), headers=headers, timeout=15)
+    latency_ms = round((time.perf_counter() - started) * 1000)
+    if not response.ok:
+        raise requests.HTTPError(f'提供商返回 HTTP {response.status_code}', response=response)
+    return response, latency_ms
+
+@app.route('/api/ai-models', methods=['POST'])
+def list_ai_models():
+    provider = _ai_provider_request_config(request.get_json(silent=True) or {})
+    try:
+        response, latency_ms = _request_ai_models(provider)
+        body = response.json()
+        if isinstance(body, dict):
+            rows = body.get('data', body.get('models', []))
+        elif isinstance(body, list):
+            rows = body
+        else:
+            rows = []
+        models = []
+        for row in rows or []:
+            model_id = row.get('id') or row.get('name') if isinstance(row, dict) else row
+            if model_id:
+                models.append(str(model_id))
+        models = sorted(set(models), key=str.lower)
+        return jsonify({'success': True, 'models': models, 'latency_ms': latency_ms})
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except requests.HTTPError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 502
+    except (requests.RequestException, ValueError) as exc:
+        return jsonify({'success': False, 'error': f'获取模型列表失败：{exc}'}), 502
+
+@app.route('/api/ai-latency', methods=['POST'])
+def test_ai_latency():
+    provider = _ai_provider_request_config(request.get_json(silent=True) or {})
+    try:
+        _, latency_ms = _request_ai_models(provider)
+        level = '优秀' if latency_ms < 300 else '良好' if latency_ms < 800 else '较慢'
+        return jsonify({'success': True, 'latency_ms': latency_ms, 'level': level})
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except requests.HTTPError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 502
+    except requests.RequestException as exc:
+        return jsonify({'success': False, 'error': f'测速失败：{exc}'}), 502
+
+def _safe_ai_knowledge_response(knowledge):
+    normalized = normalize_knowledge_config(knowledge)
+    knowledge_root = os.path.abspath(os.path.join(get_app_root(), 'ai_knowledge'))
+    def display_text(base):
+        text_value = base['text']
+        if text_value:
+            return text_value
+        for document in base['documents']:
+            path = os.path.abspath(str(document.get('path') or ''))
+            try:
+                if os.path.commonpath([knowledge_root, path]) == knowledge_root:
+                    with open(path, 'r', encoding='utf-8') as handle:
+                        return handle.read(2 * 1024 * 1024)
+            except (OSError, ValueError, UnicodeDecodeError):
+                continue
+        return ''
+    return {
+        'enabled': normalized['enabled'],
+        'platform_assignments': normalized['platform_assignments'],
+        'bases': [{
+            'id': base['id'], 'name': base['name'], 'text': display_text(base),
+            'documents': [{
+                'id': str(doc.get('id') or ''), 'name': str(doc.get('name') or ''),
+                'size': int(doc.get('size') or 0),
+            } for doc in base['documents']],
+        } for base in normalized['bases']],
+    }
+
+@app.route('/api/ai-knowledge', methods=['GET', 'POST'])
+def handle_ai_knowledge():
+    global config
+    current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
+    if request.method == 'GET':
+        return jsonify(_safe_ai_knowledge_response(current))
+    data = request.get_json(silent=True) or {}
+    base_id = str(data.get('id') or '').strip()
+    name = str(data.get('name') or '').strip()
+    text_value = str(data.get('text') or '')
+    if not name:
+        return jsonify({'success': False, 'error': '请填写知识库名称'}), 400
+    if len(text_value) > 2 * 1024 * 1024:
+        return jsonify({'success': False, 'error': '知识库内容不能超过 2MB'}), 400
+    existing = next((base for base in current['bases'] if base['id'] == base_id), None)
+    if existing:
+        existing['name'] = name[:100]
+        existing['text'] = text_value
+        saved_base = existing
+    else:
+        saved_base = {'id': uuid.uuid4().hex, 'name': name[:100], 'text': text_value, 'documents': []}
+        current['bases'].append(saved_base)
+    config['ai_knowledge_base'] = current
+    save_config()
+    public = _safe_ai_knowledge_response({'bases': [saved_base]})['bases'][0]
+    return jsonify({'success': True, 'knowledge_base': public})
+
+@app.route('/api/ai-knowledge/settings', methods=['POST'])
+def save_ai_knowledge_settings():
+    global config
+    data = request.get_json(silent=True) or {}
+    current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
+    requested = data.get('platform_assignments') if isinstance(data.get('platform_assignments'), dict) else {}
+    valid_ids = {base['id'] for base in current['bases']}
+    current['enabled'] = bool(data.get('enabled', current['enabled']))
+    current['platform_assignments'] = {
+        key: list(dict.fromkeys(str(item) for item in (requested.get(key) or []) if str(item) in valid_ids))
+        for key in ('bili_message', 'bili_comment', 'xiaohongshu', 'weibo', 'douyin', 'xianyu')
+    }
+    config['ai_knowledge_base'] = current
+    save_config()
+    return jsonify({'success': True, **_safe_ai_knowledge_response(current)})
+
+@app.route('/api/ai-knowledge/upload', methods=['POST'])
+def upload_ai_knowledge_document():
+    global config
+    base_id = str(request.form.get('knowledge_base_id') or '').strip()
+    current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
+    knowledge_base = next((base for base in current['bases'] if base['id'] == base_id), None) if base_id else None
+    if base_id and not knowledge_base:
+        return jsonify({'success': False, 'error': '知识库不存在'}), 404
+    uploaded = request.files.get('file')
+    if not uploaded or not uploaded.filename:
+        return jsonify({'success': False, 'error': '请选择 Markdown 文档'}), 400
+    original_name = os.path.basename(str(uploaded.filename).replace('\\', '/')).strip()
+    extension = os.path.splitext(original_name)[1].lower()
+    if extension not in {'.md', '.markdown'}:
+        return jsonify({'success': False, 'error': '仅支持 .md 或 .markdown 文档'}), 400
+    original_name = original_name[:200] or f'knowledge{extension}'
+    raw = uploaded.read(2 * 1024 * 1024 + 1)
+    if not raw or len(raw) > 2 * 1024 * 1024:
+        return jsonify({'success': False, 'error': 'Markdown 文档大小必须在 2MB 以内'}), 400
+    try:
+        markdown_content = raw.decode('utf-8')
+    except UnicodeDecodeError:
+        return jsonify({'success': False, 'error': 'Markdown 文档必须使用 UTF-8 编码'}), 400
+    if knowledge_base is None:
+        knowledge_base = {
+            'id': uuid.uuid4().hex,
+            'name': os.path.splitext(original_name)[0][:100] or 'Markdown 知识库',
+            'text': markdown_content,
+            'documents': [],
+        }
+        current['bases'].append(knowledge_base)
+        base_id = knowledge_base['id']
+    documents = list(knowledge_base.get('documents') or [])
+    if len(documents) >= 10:
+        return jsonify({'success': False, 'error': '最多上传 10 个知识库文档'}), 400
+    document_id = uuid.uuid4().hex
+    knowledge_dir = os.path.join(get_app_root(), 'ai_knowledge')
+    os.makedirs(knowledge_dir, exist_ok=True)
+    stored_path = os.path.abspath(os.path.join(knowledge_dir, f'{document_id}{extension}'))
+    with open(stored_path, 'wb') as handle:
+        handle.write(raw)
+    document = {
+        'id': document_id, 'name': original_name, 'size': len(raw), 'path': stored_path,
+        'content_in_text': True,
+    }
+    documents.append(document)
+    knowledge_base['documents'] = documents
+    config['ai_knowledge_base'] = current
+    save_config()
+    public_document = {'id': document_id, 'name': original_name, 'size': len(raw)}
+    public_base = _safe_ai_knowledge_response({'bases': [knowledge_base]})['bases'][0]
+    return jsonify({'success': True, 'document': public_document, 'knowledge_base_id': base_id, 'knowledge_base': public_base})
+
+@app.route('/api/ai-knowledge/documents/<document_id>', methods=['DELETE'])
+def delete_ai_knowledge_document(document_id):
+    global config
+    current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
+    owning_base = next((base for base in current['bases'] if any(str(doc.get('id')) == document_id for doc in base['documents'])), None)
+    target = next((doc for doc in owning_base['documents'] if str(doc.get('id')) == document_id), None) if owning_base else None
+    if not target:
+        return jsonify({'success': False, 'error': '知识库文档不存在'}), 404
+    knowledge_root = os.path.abspath(os.path.join(get_app_root(), 'ai_knowledge'))
+    target_path = os.path.abspath(str(target.get('path') or ''))
+    try:
+        if os.path.commonpath([knowledge_root, target_path]) == knowledge_root and os.path.isfile(target_path):
+            os.remove(target_path)
+    except (OSError, ValueError):
+        pass
+    owning_base['documents'] = [doc for doc in owning_base['documents'] if str(doc.get('id')) != document_id]
+    config['ai_knowledge_base'] = current
+    save_config()
+    return jsonify({'success': True})
+
+@app.route('/api/ai-knowledge/bases/<base_id>', methods=['DELETE'])
+def delete_ai_knowledge_base(base_id):
+    global config
+    current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
+    target = next((base for base in current['bases'] if base['id'] == base_id), None)
+    if not target:
+        return jsonify({'success': False, 'error': '知识库不存在'}), 404
+    knowledge_root = os.path.abspath(os.path.join(get_app_root(), 'ai_knowledge'))
+    for document in target['documents']:
+        path = os.path.abspath(str(document.get('path') or ''))
+        try:
+            if os.path.commonpath([knowledge_root, path]) == knowledge_root and os.path.isfile(path):
+                os.remove(path)
+        except (OSError, ValueError):
+            pass
+    current['bases'] = [base for base in current['bases'] if base['id'] != base_id]
+    for key in current['platform_assignments']:
+        current['platform_assignments'][key] = [item for item in current['platform_assignments'][key] if item != base_id]
+    config['ai_knowledge_base'] = current
+    save_config()
+    return jsonify({'success': True})
+
+def generate_ai_reply(user_message, context='', platform=None):
+    """Generate one reply using the configured provider; return None on failure."""
+    return generate_shared_ai_reply(
+        user_message, context, config.get('ai_provider') or {}, config.get('ai_knowledge_base') or {}, platform
+    )
+
+
+def generate_ai_decision(user_message, context='', platform=None):
+    return generate_shared_ai_decision(
+        user_message, context, config.get('ai_provider') or {},
+        config.get('ai_knowledge_base') or {}, platform,
+    )
+
+
+def queue_ai_handoff(
+    platform, external_key, sender_name, sender_id, message_text, reason, target,
+):
+    item_id = ai_handoff_store.add(
+        platform, external_key, sender_name, sender_id, message_text, reason, target,
+    )
+    if item_id:
+        label = sender_name or sender_id or '未知用户'
+        log = add_comment_log if platform == 'bili_comment' else add_log
+        if platform == 'bili_comment':
+            log(f'🧑‍💼 [{label}] AI 已标记为待人工处理：{reason}', 'warning')
+        else:
+            log(f'🧑‍💼 [{label}] AI 已标记为待人工处理：{reason}', 'warning', system='message')
+    return item_id
+
+@app.route('/api/ai-generate', methods=['POST'])
+def ai_generate_endpoint():
+    data = request.get_json(silent=True) or {}
+    message = str(data.get('message', '')).strip()
+    if not message:
+        return jsonify({'success': False, 'error': '消息内容不能为空'}), 400
+    reply = generate_ai_reply(message, data.get('context', ''))
+    if not reply:
+        return jsonify({'success': False, 'error': 'AI 提供商未启用或请求失败'}), 502
+    return jsonify({'success': True, 'reply': reply})
+
+
+def _send_ai_handoff_reply(item, text):
+    platform = item.get('platform')
+    target = item.get('_target') or {}
+    if platform == 'bili_message':
+        account_name = str(target.get('account_name') or '')
+        account = next(
+            (row for row in (config.get('accounts') or []) if str(row.get('name') or '') == account_name),
+            None,
+        ) if account_name else None
+        source = account or config
+        sessdata = source.get('sessdata')
+        bili_jct = source.get('bili_jct')
+        talker_id = target.get('talker_id') or item.get('_sender_id')
+        if not sessdata or not bili_jct or not talker_id:
+            return False, 'B站私信登录信息或回复对象不可用'
+        api = BilibiliAPI(
+            sessdata, bili_jct,
+            dev_id=get_im_dev_id_for_account(account_name) if account_name else None,
+            account_name=account_name,
+        )
+        result = api.send_msg(talker_id, content=text)
+        return bool(result and result.get('code') == 0), (result or {}).get('message', '发送失败')
+
+    if platform == 'bili_comment':
+        oid = target.get('oid')
+        root_rpid = target.get('root_rpid')
+        parent_rpid = target.get('parent_rpid')
+        if not comment_config.get('sessdata') or not comment_config.get('bili_jct') or not oid or not root_rpid:
+            return False, 'B站评论登录信息或评论对象不可用'
+        api = CommentAPI(comment_config['sessdata'], comment_config['bili_jct'])
+        ok = api.reply_comment(oid, root_rpid, text, parent_rpid=parent_rpid)
+        return bool(ok), '发送失败'
+
+    from douyin_reply_system import douyin_system
+    from xiaohongshu_reply_system import xiaohongshu_system
+    from weibo_reply_system import weibo_system
+    from xianyu_reply_system import xianyu_system
+    system = {
+        'douyin': douyin_system,
+        'xiaohongshu': xiaohongshu_system,
+        'weibo': weibo_system,
+        'xianyu': xianyu_system,
+    }.get(platform)
+    if not system:
+        return False, '不支持的平台'
+    result = system.send_manual_reply(
+        target.get('nickname') or item.get('sender_name'), text,
+        category=target.get('category') or 'friend',
+        conv_id=str(target.get('conv_id') or ''),
+    )
+    return bool(result.get('success')), result.get('error', '发送失败')
+
+
+@app.route('/api/ai-handoffs')
+def list_ai_handoffs():
+    provider = config.get('ai_provider') or {}
+    platform = str(request.args.get('platform') or '')
+    return jsonify({
+        'enabled': normalize_handoff_settings(provider.get('human_handoff'))['enabled'],
+        'pending_count': ai_handoff_store.pending_count(),
+        'items': ai_handoff_store.list(status='pending', platform=platform),
+    })
+
+
+@app.route('/api/ai-handoffs/<item_id>/reply', methods=['POST'])
+def reply_ai_handoff(item_id):
+    data = request.get_json(silent=True) or {}
+    text = str(data.get('text') or '').strip()
+    if not text:
+        return jsonify({'success': False, 'error': '请输入回复内容'}), 400
+    if len(text) > 2000:
+        return jsonify({'success': False, 'error': '回复内容不能超过 2000 字'}), 400
+    item = ai_handoff_store.get(item_id)
+    if not item:
+        return jsonify({'success': False, 'error': '待回消息不存在'}), 404
+    if item.get('status') != 'pending' or not ai_handoff_store.claim(item_id):
+        return jsonify({'success': False, 'error': '该消息已处理或正在发送'}), 409
+    try:
+        ok, error = _send_ai_handoff_reply(item, text)
+        if not ok:
+            ai_handoff_store.release(item_id)
+            return jsonify({'success': False, 'error': error or '发送失败'}), 502
+        ai_handoff_store.resolve(item_id, 'replied', text)
+        record_conversation_exchange(
+            item['platform'], str(item.get('_sender_id') or ''),
+            str(item.get('message_text') or ''), text,
+            f"human:{item.get('_external_key') or item_id}",
+            config.get('ai_provider') or {},
+        )
+        record_dashboard_event(
+            item['platform'], 'reply_success', f"human:{item.get('_external_key') or item_id}",
+            contact_id=str(item.get('_sender_id') or ''), reply_mode='human',
+        )
+        return jsonify({'success': True})
+    except Exception as exc:
+        ai_handoff_store.release(item_id)
+        return jsonify({'success': False, 'error': str(exc)}), 502
+
+
+@app.route('/api/ai-handoffs/<item_id>/dismiss', methods=['POST'])
+def dismiss_ai_handoff(item_id):
+    if not ai_handoff_store.claim(item_id):
+        return jsonify({'success': False, 'error': '该消息不存在或已处理'}), 409
+    if not ai_handoff_store.resolve(item_id, 'dismissed'):
+        ai_handoff_store.release(item_id)
+        return jsonify({'success': False, 'error': '忽略失败，请重试'}), 500
+    return jsonify({'success': True})
+
 @app.route('/api/rules', methods=['GET', 'POST'])
 def handle_rules():
     global rules
     
     if request.method == 'POST':
+        if platform_enabled('bili_message', config.get('ai_provider') or {}):
+            return jsonify({'success': False, 'error': '已启用AI模式，无法修改关键词回复'}), 409
         data = request.get_json()
         rules = data.get('rules', [])
         save_rules()
@@ -3719,6 +4441,19 @@ def handle_new_message_config():
                 else:
                     add_log("已关闭仅回复新消息模式，会回复所有未处理的消息", 'success')
         
+        # 更新不限制单用户回复次数配置
+        if 'unlimited_replies_per_user' in data:
+            if not isinstance(data['unlimited_replies_per_user'], bool):
+                return jsonify({'success': False, 'error': '不限制回复次数选项必须为布尔值'})
+            old_unlimited = config.get('unlimited_replies_per_user', False)
+            new_unlimited = data['unlimited_replies_per_user']
+            config['unlimited_replies_per_user'] = new_unlimited
+            if old_unlimited != new_unlimited:
+                if new_unlimited:
+                    add_log("已启用不限制单用户回复次数", 'success')
+                else:
+                    add_log("已关闭不限制单用户回复次数，恢复次数上限", 'success')
+
         # 更新单用户最大回复次数配置
         if 'max_replies_per_user' in data:
             old_max = config.get('max_replies_per_user', 3)
@@ -3747,7 +4482,8 @@ def handle_new_message_config():
         # GET请求，返回当前配置
         return jsonify({
             'only_reply_new_messages': config.get('only_reply_new_messages', False),
-            'max_replies_per_user': config.get('max_replies_per_user', 3)
+            'max_replies_per_user': config.get('max_replies_per_user', 3),
+            'unlimited_replies_per_user': config.get('unlimited_replies_per_user', False),
         })
 
 @app.route('/api/follow-check-interval-config', methods=['GET', 'POST'])
@@ -4441,8 +5177,6 @@ comment_config = {
     'bili_jct': '',
     'default_comment_reply_enabled': False,
     'default_comment_reply_message': '感谢您的评论！',
-    'default_comment_reply_type': 'text',
-    'default_comment_reply_image': '',
     'comment_check_interval': 5,
     'comment_fetch_gap': 1.0,
     'comment_fetch_mode': 'wbi',
@@ -4469,6 +5203,26 @@ comment_program_start_time = int(time.time())
 COMMENT_CONFIG_FILE = None
 COMMENT_RULES_FILE = None
 
+COMMENT_IMAGE_FIELDS = {'default_comment_reply_type', 'default_comment_reply_image'}
+
+
+def normalize_comment_config(value):
+    """Remove retired B站评论图片设置 while retaining all text settings."""
+    normalized = dict(value or {})
+    for key in COMMENT_IMAGE_FIELDS:
+        normalized.pop(key, None)
+    return normalized
+
+
+def normalize_comment_rule(rule):
+    """Convert legacy comment rules to the text-only schema."""
+    normalized = dict(rule or {})
+    was_image = normalized.pop('reply_type', 'text') == 'image'
+    normalized.pop('reply_image', None)
+    if was_image and not str(normalized.get('reply') or '').strip():
+        normalized['enabled'] = False
+    return normalized
+
 def init_comment_config_paths():
     """初始化评论回复配置文件路径"""
     global COMMENT_CONFIG_FILE, COMMENT_RULES_FILE
@@ -4486,7 +5240,9 @@ def load_comment_config():
         if os.path.exists(COMMENT_CONFIG_FILE):
             with open(COMMENT_CONFIG_FILE, 'r', encoding='utf-8') as f:
                 loaded_config = json.load(f)
-                comment_config.update(loaded_config)
+                comment_config.update(normalize_comment_config(loaded_config))
+                for key in COMMENT_IMAGE_FIELDS:
+                    comment_config.pop(key, None)
             logger.info(f"成功加载评论回复配置: {COMMENT_CONFIG_FILE}")
         else:
             logger.info(f"评论回复配置文件不存在，使用默认配置: {COMMENT_CONFIG_FILE}")
@@ -4499,6 +5255,8 @@ def save_comment_config():
     init_comment_config_paths()
     
     try:
+        for key in COMMENT_IMAGE_FIELDS:
+            comment_config.pop(key, None)
         with open(COMMENT_CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(comment_config, f, ensure_ascii=False, indent=2)
         logger.info(f"成功保存评论回复配置: {COMMENT_CONFIG_FILE}")
@@ -4514,7 +5272,8 @@ def load_comment_rules():
     try:
         if os.path.exists(COMMENT_RULES_FILE):
             with open(COMMENT_RULES_FILE, 'r', encoding='utf-8') as f:
-                comment_rules = json.load(f)
+                loaded_rules = json.load(f)
+                comment_rules = [normalize_comment_rule(rule) for rule in loaded_rules if isinstance(rule, dict)]
     except Exception as e:
         logger.error(f"加载评论回复规则失败: {e}")
         comment_rules = []
@@ -4524,6 +5283,7 @@ def save_comment_rules():
     init_comment_config_paths()
     
     try:
+        comment_rules[:] = [normalize_comment_rule(rule) for rule in comment_rules if isinstance(rule, dict)]
         with open(COMMENT_RULES_FILE, 'w', encoding='utf-8') as f:
             json.dump(comment_rules, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -4702,7 +5462,7 @@ class CommentAPI:
             add_comment_log(f"获取所有评论失败: {e}", 'error')
             return []
     
-    def reply_comment(self, oid, root_rpid, message="", image_path="", parent_rpid=None):
+    def reply_comment(self, oid, root_rpid, message="", parent_rpid=None):
         """回复评论。楼中楼回复时 parent_rpid 为被回复的那条评论 rpid，与 root_rpid（根评论）不同。"""
         global comment_last_send_time
         
@@ -4726,11 +5486,6 @@ class CommentAPI:
                 'message': message,
                 'csrf': self.bili_jct
             }
-            
-            # 如果是图片回复
-            if image_path and os.path.exists(image_path):
-                # 这里需要实现图片上传逻辑，暂时使用文字回复
-                data['message'] = message or '[图片回复]'
             
             response = self.session.post(url, data=data, timeout=10)
             comment_last_send_time = time.time()
@@ -4799,8 +5554,14 @@ def comment_monitor_worker():
                 if not comment_time:
                     comment_time = int(time.time())
                 commenter_name = comment.get('member', {}).get('uname', '未知用户')
+                commenter_uid = comment.get('member', {}).get('mid', '')
                 video_id = comment.get('video_id')
                 video_title = comment.get('video_title', '未知视频')
+
+                # 人工待回和自动回复都会产生本账号评论。它们不是新的用户
+                # 消息，必须在进入 AI 判定与待回队列之前直接过滤。
+                if str(commenter_uid or '') == str(my_uid or ''):
+                    continue
                 
                 add_comment_log(f"检查评论: {commenter_name} 在《{video_title}》- {comment_content[:30]}...", 'info')
                 
@@ -4815,16 +5576,48 @@ def comment_monitor_worker():
                 if cache_key in comment_cache:
                     add_comment_log(f"已回复过: {commenter_name}", 'info')
                     continue
+
+                record_dashboard_event(
+                    'bili_comment', 'inbound', cache_key,
+                    contact_id=str(commenter_uid),
+                )
                 
                 # 匹配回复规则 - 使用评论系统独立的规则
                 reply_message = ""
-                reply_image = ""
-                reply_type = "text"
                 matched_rule = None
+
+                if platform_enabled('bili_comment', config.get('ai_provider') or {}):
+                    history = build_conversation_context(
+                        'bili_comment', str(commenter_uid), config.get('ai_provider') or {},
+                    )
+                    ai_context = '请用简洁、友好的中文回复这条评论。'
+                    if history:
+                        ai_context += '\n\n' + history
+                    decision = generate_ai_decision(comment_content, ai_context, 'bili_comment')
+                    if decision.get('needs_human'):
+                        queue_ai_handoff(
+                            'bili_comment', cache_key, commenter_name, str(commenter_uid), comment_content,
+                            decision.get('reason') or 'AI 无法确认可靠回复',
+                            {
+                                'oid': video_id, 'root_rpid': thread_root,
+                                'parent_rpid': reply_target, 'video_title': video_title,
+                            },
+                        )
+                        comment_cache[cache_key] = True
+                        continue
+                    ai_reply = decision.get('reply')
+                    if ai_reply:
+                        reply_message = ai_reply
+                        matched_rule = 'AI 自动回复'
+                    else:
+                        record_dashboard_event(
+                            'bili_comment', 'reply_failure', cache_key,
+                            contact_id=str(commenter_uid), reply_mode='ai',
+                        )
                 
                 # 检查关键词规则 - 使用comment_rules而不是rules
                 content_lower = str(comment_content or '').lower()
-                for rule in comment_rules:
+                for rule in ([] if matched_rule else comment_rules):
                     if not rule.get('enabled', True):
                         continue
                     
@@ -4833,8 +5626,6 @@ def comment_monitor_worker():
                         keyword = keyword.strip()
                         if keyword and keyword.lower() in content_lower:
                             reply_message = rule.get('reply', '')
-                            reply_image = rule.get('reply_image', '')
-                            reply_type = rule.get('reply_type', 'text')
                             matched_rule = rule.get('name', '未命名规则')
                             break
                     
@@ -4844,25 +5635,33 @@ def comment_monitor_worker():
                 # 如果没有匹配规则，使用默认回复 - 使用评论系统独立配置
                 if not matched_rule and comment_config.get('default_comment_reply_enabled', False):
                     reply_message = comment_config.get('default_comment_reply_message', '')
-                    reply_image = comment_config.get('default_comment_reply_image', '')
-                    reply_type = comment_config.get('default_comment_reply_type', 'text')
                     matched_rule = "默认回复"
-                
+
                 # 发送回复
-                if reply_message or reply_image:
-                    if reply_type == 'image' and reply_image:
-                        success = api.reply_comment(
-                            video_id, thread_root, reply_message, reply_image, parent_rpid=reply_target
-                        )
-                    else:
-                        success = api.reply_comment(
-                            video_id, thread_root, reply_message, parent_rpid=reply_target
-                        )
+                if reply_message:
+                    success = api.reply_comment(
+                        video_id, thread_root, reply_message, parent_rpid=reply_target
+                    )
                     
                     if success:
                         comment_cache[cache_key] = True
+                        record_dashboard_event(
+                            'bili_comment', 'reply_success', cache_key,
+                            contact_id=str(commenter_uid),
+                            reply_mode='ai' if matched_rule == 'AI 自动回复' else ('default' if matched_rule == '默认回复' else 'rule'),
+                        )
+                        if matched_rule == 'AI 自动回复':
+                            record_conversation_exchange(
+                                'bili_comment', str(commenter_uid), comment_content,
+                                reply_message, cache_key, config.get('ai_provider') or {},
+                            )
                         add_comment_log(f"已回复 {commenter_name} 在《{video_title}》的评论 (规则: {matched_rule})", 'success')
                     else:
+                        record_dashboard_event(
+                            'bili_comment', 'reply_failure', cache_key,
+                            contact_id=str(commenter_uid),
+                            reply_mode='ai' if matched_rule == 'AI 自动回复' else ('default' if matched_rule == '默认回复' else 'rule'),
+                        )
                         add_comment_log(f"回复 {commenter_name} 在《{video_title}》的评论失败", 'error')
             
             # 等待下次检查 - 使用评论系统独立配置
@@ -4895,6 +5694,11 @@ def handle_comment_config():
     elif request.method == 'POST':
         try:
             data = request.get_json()
+            traditional_keys = {
+                'default_comment_reply_enabled', 'default_comment_reply_message',
+            }
+            if platform_enabled('bili_comment', config.get('ai_provider') or {}) and traditional_keys.intersection(data or {}):
+                return jsonify({'success': False, 'error': '已启用AI模式，无法修改默认回复设置'}), 409
             if data and 'comment_check_interval' in data:
                 try:
                     v = float(data['comment_check_interval'])
@@ -4963,7 +5767,7 @@ def handle_comment_config():
                 if vs not in ('newest', 'both_ends'):
                     return jsonify({'success': False, 'error': '稿件列表策略须为 newest 或 both_ends'})
                 data['video_list_strategy'] = vs
-            comment_config.update(data)
+            comment_config.update(normalize_comment_config(data))
             save_comment_config()
             add_comment_log("评论回复配置已更新", 'success')
             return jsonify({'success': True})
@@ -4981,10 +5785,16 @@ def handle_comment_rules():
     
     elif request.method == 'POST':
         try:
+            if platform_enabled('bili_comment', config.get('ai_provider') or {}):
+                return jsonify({'success': False, 'error': '已启用AI模式，无法修改关键词回复'}), 409
             data = request.get_json()
             if 'rules' in data:
                 comment_rules.clear()
-                comment_rules.extend(data['rules'])
+                comment_rules.extend(
+                    normalize_comment_rule(rule)
+                    for rule in data['rules']
+                    if isinstance(rule, dict)
+                )
                 save_comment_rules()
                 add_comment_log(f"评论回复规则已更新，共 {len(comment_rules)} 条", 'success')
                 return jsonify({'success': True})
@@ -4994,6 +5804,169 @@ def handle_comment_rules():
             error_msg = f"保存评论回复规则失败: {str(e)}"
             add_comment_log(error_msg, 'error')
             return jsonify({'success': False, 'error': error_msg})
+
+
+PLATFORM_IMPORT_LABELS = {
+    'bili_message': 'B站私信',
+    'bili_comment': 'B站评论',
+    'douyin': '抖音私信',
+    'xiaohongshu': '小红书私信',
+    'weibo': '微博私信',
+    'xianyu': '闲鱼消息',
+}
+
+
+def _platform_import_data(platform):
+    """Return portable settings and rules without account/session data."""
+    if platform == 'bili_message':
+        load_config()
+        load_rules()
+        source_config, source_rules = config, rules
+        portable = {
+            'check_interval': source_config.get('message_check_interval'),
+            'send_delay': source_config.get('send_delay_interval'),
+            'only_new': source_config.get('only_reply_new_messages'),
+            'max_replies': source_config.get('max_replies_per_user'),
+            'unlimited_replies': source_config.get('unlimited_replies_per_user'),
+            'default_enabled': source_config.get('default_reply_enabled'),
+            'default_message': source_config.get('default_reply_message'),
+        }
+    elif platform == 'bili_comment':
+        load_comment_config()
+        load_comment_rules()
+        source_rules = comment_rules
+        portable = {
+            'check_interval': comment_config.get('comment_check_interval'),
+            'send_delay': comment_config.get('comment_send_delay'),
+            'only_new': comment_config.get('only_reply_new_comments'),
+            'default_enabled': comment_config.get('default_comment_reply_enabled'),
+            'default_message': comment_config.get('default_comment_reply_message'),
+        }
+    else:
+        from douyin_reply_system import douyin_system
+        from xiaohongshu_reply_system import xiaohongshu_system
+        from weibo_reply_system import weibo_system
+        from xianyu_reply_system import xianyu_system
+        system = {
+            'douyin': douyin_system,
+            'xiaohongshu': xiaohongshu_system,
+            'weibo': weibo_system,
+            'xianyu': xianyu_system,
+        }[platform]
+        system.load_config()
+        system.load_rules()
+        source_config, source_rules = system.config, system.rules
+        portable = {
+            'check_interval': source_config.get('message_check_interval'),
+            'send_delay': source_config.get('send_delay_interval'),
+            'only_new': source_config.get('only_reply_new_messages'),
+            'max_replies': source_config.get('max_replies_per_user'),
+            'unlimited_replies': source_config.get('unlimited_replies_per_user'),
+            'default_enabled': source_config.get('default_reply_enabled'),
+            'default_message': source_config.get('default_reply_message'),
+        }
+    normalized_rules = []
+    for index, rule in enumerate(source_rules or []):
+        if not isinstance(rule, dict):
+            continue
+        keyword = str(rule.get('keyword') or '').strip()
+        reply = str(rule.get('reply') or '').strip()
+        if not keyword or not reply:
+            continue
+        normalized_rules.append({
+            'id': rule.get('id') or int(time.time() * 1000) + index,
+            'name': str(rule.get('name') or rule.get('title') or f'导入规则{index + 1}'),
+            'title': str(rule.get('title') or rule.get('name') or f'导入规则{index + 1}'),
+            'keyword': keyword,
+            'reply': reply,
+            'reply_type': 'text',
+            'reply_image': '',
+            'enabled': rule.get('enabled', True) is not False,
+            'use_regex': bool(rule.get('use_regex', False)),
+        })
+    return {key: value for key, value in portable.items() if value is not None}, normalized_rules
+
+
+def _apply_platform_import(platform, portable, imported_rules, mode):
+    if platform == 'bili_message':
+        target_config, target_rules = config, rules
+        key_map = {
+            'check_interval': 'message_check_interval', 'send_delay': 'send_delay_interval',
+            'only_new': 'only_reply_new_messages', 'max_replies': 'max_replies_per_user',
+            'unlimited_replies': 'unlimited_replies_per_user',
+            'default_enabled': 'default_reply_enabled', 'default_message': 'default_reply_message',
+        }
+        save_target_config, save_target_rules, compile_target = save_config, save_rules, precompile_rules
+    elif platform == 'bili_comment':
+        target_config, target_rules = comment_config, comment_rules
+        key_map = {
+            'check_interval': 'comment_check_interval', 'send_delay': 'comment_send_delay',
+            'only_new': 'only_reply_new_comments', 'default_enabled': 'default_comment_reply_enabled',
+            'default_message': 'default_comment_reply_message',
+        }
+        save_target_config, save_target_rules, compile_target = save_comment_config, save_comment_rules, lambda: None
+    else:
+        from douyin_reply_system import douyin_system
+        from xiaohongshu_reply_system import xiaohongshu_system
+        from weibo_reply_system import weibo_system
+        from xianyu_reply_system import xianyu_system
+        system = {'douyin': douyin_system, 'xiaohongshu': xiaohongshu_system, 'weibo': weibo_system, 'xianyu': xianyu_system}[platform]
+        system.load_config()
+        system.load_rules()
+        target_config, target_rules = system.config, system.rules
+        key_map = {
+            'check_interval': 'message_check_interval', 'send_delay': 'send_delay_interval',
+            'only_new': 'only_reply_new_messages', 'max_replies': 'max_replies_per_user',
+            'unlimited_replies': 'unlimited_replies_per_user',
+            'default_enabled': 'default_reply_enabled', 'default_message': 'default_reply_message',
+        }
+        save_target_config, save_target_rules, compile_target = system.save_config, system.save_rules, system.precompile_rules
+
+    for portable_key, target_key in key_map.items():
+        if portable_key in portable:
+            target_config[target_key] = portable[portable_key]
+    if platform in ('douyin', 'xiaohongshu', 'weibo', 'xianyu'):
+        target_config['message_check_interval'] = max(0.5, float(target_config.get('message_check_interval') or 0.5))
+        target_config['send_delay_interval'] = max(0.5, float(target_config.get('send_delay_interval') or 0.5))
+    if mode == 'replace':
+        target_rules.clear()
+    existing = {str(rule.get('keyword') or '').strip() for rule in target_rules if isinstance(rule, dict)}
+    added = [rule for rule in imported_rules if rule['keyword'] not in existing]
+    target_rules.extend(added)
+    save_target_config()
+    save_target_rules()
+    compile_target()
+    return len(added)
+
+
+@app.route('/api/platform-import', methods=['GET', 'POST'])
+def platform_import_api():
+    if request.method == 'GET':
+        return jsonify({'platforms': PLATFORM_IMPORT_LABELS})
+    data = request.get_json(silent=True) or {}
+    source = str(data.get('source') or '')
+    target = str(data.get('target') or '')
+    mode = str(data.get('mode') or 'replace')
+    if source not in PLATFORM_IMPORT_LABELS or target not in PLATFORM_IMPORT_LABELS:
+        return jsonify({'success': False, 'error': '无效的平台'}), 400
+    if source == target:
+        return jsonify({'success': False, 'error': '源平台和目标平台不能相同'}), 400
+    if mode not in ('replace', 'append'):
+        return jsonify({'success': False, 'error': '导入模式无效'}), 400
+    if platform_enabled(target, config.get('ai_provider') or {}):
+        return jsonify({'success': False, 'error': '目标平台已启用AI模式，请先关闭该平台AI回复后再导入传统规则'}), 409
+    try:
+        portable, imported_rules = _platform_import_data(source)
+        added = _apply_platform_import(target, portable, imported_rules, mode)
+        return jsonify({
+            'success': True,
+            'message': f'已从{PLATFORM_IMPORT_LABELS[source]}导入到{PLATFORM_IMPORT_LABELS[target]}',
+            'imported_rules': added,
+            'source_rules': len(imported_rules),
+        })
+    except Exception as exc:
+        logger.exception('跨平台导入失败')
+        return jsonify({'success': False, 'error': f'跨平台导入失败: {exc}'}), 500
 
 @app.route('/api/comment-start', methods=['POST'])
 def start_comment_monitoring():
@@ -5034,7 +6007,8 @@ def get_comment_status():
     """获取评论监控状态"""
     return jsonify({
         'monitoring': comment_monitoring,
-        'rules_count': len(comment_rules)
+        'rules_count': len(comment_rules),
+        'logged_in': bool(comment_config.get('sessdata') and comment_config.get('bili_jct')),
     })
 
 @app.route('/api/comment-logs')
@@ -5071,8 +6045,6 @@ def import_from_message_config():
             comment_config['bili_jct'] = config.get('bili_jct', '')
         comment_config['default_comment_reply_enabled'] = config.get('default_reply_enabled', False)
         comment_config['default_comment_reply_message'] = config.get('default_reply_message', '感谢您的评论！')
-        comment_config['default_comment_reply_type'] = config.get('default_reply_type', 'text')
-        comment_config['default_comment_reply_image'] = config.get('default_reply_image', '')
         
         # 导入规则
         imported_rules = []
@@ -5082,8 +6054,6 @@ def import_from_message_config():
                 'name': rule.get('name', '导入的规则'),
                 'keyword': rule.get('keyword', ''),
                 'reply': rule.get('reply', ''),
-                'reply_type': rule.get('reply_type', 'text'),
-                'reply_image': rule.get('reply_image', ''),
                 'enabled': rule.get('enabled', True),
                 'created_at': rule.get('created_at', datetime.now().isoformat())
             }
@@ -5126,8 +6096,8 @@ def export_comment_config():
             'app_version': APP_VERSION,
             'export_time': datetime.now().isoformat(),
             'app_name': 'BiliGo - 评论回复系统',
-            'config': comment_config.copy(),
-            'rules': comment_rules.copy()
+            'config': normalize_comment_config(comment_config),
+            'rules': [normalize_comment_rule(rule) for rule in comment_rules]
         }
         
         # 导出文件路径
@@ -5181,7 +6151,7 @@ def import_comment_config():
         if 'config' in data:
             if import_mode == 'replace':
                 comment_config.clear()
-            comment_config.update(data['config'])
+            comment_config.update(normalize_comment_config(data['config']))
             save_comment_config()
         
         # 导入规则
@@ -5196,10 +6166,10 @@ def import_comment_config():
                         # 检查是否已存在相同关键词的规则
                         existing = any(r.get('keyword') == rule.get('keyword') for r in comment_rules)
                         if not existing:
-                            comment_rules.append(rule)
+                            comment_rules.append(normalize_comment_rule(rule))
                             imported_count += 1
                     else:
-                        comment_rules.append(rule)
+                        comment_rules.append(normalize_comment_rule(rule))
                         imported_count += 1
             
             save_comment_rules()
@@ -5256,8 +6226,10 @@ def save_email_config():
         global config
         data = request.get_json()
         
-        # 更新邮件配置
-        config['email_notification'] = {
+        platform = str(data.get('platform') or 'bili_message')
+        if platform not in ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu'):
+            return jsonify({'success': False, 'error': '不支持的平台'}), 400
+        email_config = {
             'enabled': data.get('enabled', False),
             'smtp_server': data.get('smtp_server', 'smtp.qq.com'),
             'smtp_port': data.get('smtp_port', 587),
@@ -5265,6 +6237,9 @@ def save_email_config():
             'sender_password': data.get('sender_password', ''),
             'receiver_email': data.get('receiver_email', '')
         }
+        config.setdefault('email_notifications', {})[platform] = email_config
+        if platform == 'bili_message':
+            config['email_notification'] = email_config
         
         # 保存配置到文件
         save_config()
@@ -5281,7 +6256,8 @@ def get_email_config():
     """获取邮件配置"""
     try:
         global config
-        email_config = config.get('email_notification', {
+        platform = request.args.get('platform', 'bili_message')
+        email_config = config.get('email_notifications', {}).get(platform) or config.get('email_notification', {
             'enabled': False,
             'smtp_server': 'smtp.qq.com',
             'smtp_port': 587,
@@ -5297,14 +6273,38 @@ def get_email_config():
         logger.error(error_msg)
         return jsonify({'success': False, 'error': error_msg})
 
+@app.route('/api/platform-email-config/<platform>', methods=['GET', 'POST'])
+def platform_email_config(platform):
+    """Read or update per-platform error email alerts."""
+    if platform not in ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu'):
+        return jsonify({'success': False, 'error': '不支持的平台'}), 400
+    global config
+    configs = config.setdefault('email_notifications', {})
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        configs[platform] = {
+            'enabled': bool(data.get('enabled', False)),
+            'smtp_server': str(data.get('smtp_server', 'smtp.qq.com')).strip(),
+            'smtp_port': int(data.get('smtp_port', 587)),
+            'sender_email': str(data.get('sender_email', '')).strip(),
+            'sender_password': str(data.get('sender_password', '')),
+            'receiver_email': str(data.get('receiver_email', '')).strip(),
+        }
+        save_config()
+        return jsonify({'success': True, 'config': configs[platform]})
+    return jsonify({'success': True, 'config': configs.get(platform, {'enabled': False, 'smtp_server': 'smtp.qq.com', 'smtp_port': 587, 'sender_email': '', 'sender_password': '', 'receiver_email': ''})})
+
 @app.route('/api/test_email', methods=['POST'])
 def test_email():
     """发送测试邮件"""
     try:
         data = request.get_json()
+        platform = data.get('platform', 'bili_message')
         sender_email = data.get('sender_email', '')
         sender_password = data.get('sender_password', '')
         receiver_email = data.get('receiver_email', '')
+        smtp_server = data.get('smtp_server', 'smtp.qq.com')
+        smtp_port = int(data.get('smtp_port', 587))
         
         if not sender_email or not sender_password or not receiver_email:
             return jsonify({'success': False, 'error': '邮件配置信息不完整'})
@@ -5367,7 +6367,7 @@ def test_email():
         # 发送邮件
         server = None
         try:
-            server = smtplib.SMTP('smtp.qq.com', 587, timeout=10)
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=10)
             server.starttls()
             server.login(sender_email, sender_password)
             server.send_message(msg)
@@ -5445,6 +6445,7 @@ def reset_all_data():
             'unfollow_reply_image': '',
             'only_reply_new_messages': False,
             'max_replies_per_user': 3,
+            'unlimited_replies_per_user': False,
             'follow_check_interval': 1800,
             'follow_scan_pages': 3,
             'follow_new_window_seconds': 90,
@@ -5500,8 +6501,6 @@ def reset_all_data():
             'bili_jct': '',
             'default_comment_reply_enabled': False,
             'default_comment_reply_message': '感谢您的评论！',
-            'default_comment_reply_type': 'text',
-            'default_comment_reply_image': '',
             'comment_check_interval': 5,
             'comment_fetch_gap': 1.0,
             'comment_fetch_mode': 'wbi',
@@ -5535,6 +6534,9 @@ def reset_all_data():
         comment_reply_system.last_send_time = 0
         comment_reply_system.last_comment_times.clear()
         comment_reply_system.program_start_time = int(time.time())
+        dashboard_metrics.clear_all()
+        ai_handoff_store.clear_all()
+        ai_conversation_store.clear_all()
         
         logger.info("所有数据已清除，恢复初始设置")
         add_log("所有数据已清除，系统已恢复初始设置", 'warning')
@@ -5609,6 +6611,10 @@ def run_server():
     add_log(f"Web服务器启动在端口 {port}", 'info', system='message')
     add_log(f"请在浏览器中访问: http://localhost:{port}", 'info', system='message')
     add_log(f"评论回复系统: http://localhost:{port}/comment", 'info', system='message')
+    add_log(f"抖音私信系统: http://localhost:{port}/douyin", 'info', system='message')
+    add_log(f"小红书私信系统: http://localhost:{port}/xiaohongshu", 'info', system='message')
+    add_log(f"微博私信系统: http://localhost:{port}/weibo", 'info', system='message')
+    add_log(f"闲鱼消息系统: http://localhost:{port}/xianyu", 'info', system='message')
     add_log("日志系统已就绪", 'success', system='message')
 
     add_log("评论回复系统已初始化", 'info', system='comment')
@@ -5618,6 +6624,19 @@ def run_server():
     print(f"BiliGo {APP_VERSION} - B站私信自动回复系统启动中...")
     print(f"请在浏览器中访问: http://localhost:{port}")
     print(f"评论回复系统: http://localhost:{port}/comment")
+    print(f"抖音私信系统: http://localhost:{port}/douyin")
+    print(f"小红书私信系统: http://localhost:{port}/xiaohongshu")
+    print(f"微博私信系统: http://localhost:{port}/weibo")
+    print(f"闲鱼消息系统: http://localhost:{port}/xianyu")
+
+    from douyin_reply_system import douyin_system
+    douyin_system.init_on_startup()
+    from xiaohongshu_reply_system import xiaohongshu_system
+    xiaohongshu_system.init_on_startup()
+    from weibo_reply_system import weibo_system
+    weibo_system.init_on_startup()
+    from xianyu_reply_system import xianyu_system
+    xianyu_system.init_on_startup()
 
     app.run(host='0.0.0.0', port=port, debug=False)
 

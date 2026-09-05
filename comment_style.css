@@ -50,6 +50,12 @@
     --transition: all 0.3s ease;
     --gradient-primary: linear-gradient(135deg, #00a1d6 0%, #0088b3 100%);
     --gradient-dark: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+
+    /* 版本徽章 — 暗色主题香槟金 */
+    --badge-gold-text: #c9ad62;
+    --badge-gold-bg: rgba(201, 173, 98, 0.1);
+    --badge-gold-border: rgba(201, 173, 98, 0.28);
+    --badge-gold-shadow: none;
 }
 
 body {
@@ -111,17 +117,17 @@ body {
 }
 
 .toast.success {
-    border-left: 4px solid var(--success-color);
+    border-color: var(--success-color);
     background: linear-gradient(135deg, var(--card-bg) 0%, rgba(46, 213, 115, 0.1) 100%);
 }
 
 .toast.error {
-    border-left: 4px solid var(--danger-color);
+    border-color: var(--danger-color);
     background: linear-gradient(135deg, var(--card-bg) 0%, rgba(255, 71, 87, 0.1) 100%);
 }
 
 .toast.warning {
-    border-left: 4px solid var(--warning-color);
+    border-color: var(--warning-color);
     background: linear-gradient(135deg, var(--card-bg) 0%, rgba(255, 165, 2, 0.1) 100%);
 }
 
@@ -197,6 +203,23 @@ header {
     text-shadow: 0 0 20px rgba(0, 161, 214, 0.3);
 }
 
+.version-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 11px;
+    border-radius: 6px;
+    color: var(--badge-gold-text);
+    background: var(--badge-gold-bg);
+    border: 1px solid var(--badge-gold-border);
+    box-shadow: var(--badge-gold-shadow);
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
 .subtitle {
     color: var(--text-light);
     font-size: 14px;
@@ -220,6 +243,88 @@ header {
 .btn-switch:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 161, 214, 0.3);
+}
+
+/* 平台切换下拉菜单 */
+.platform-switcher {
+    position: relative;
+}
+
+.platform-switcher-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.platform-switcher-toggle .chevron {
+    font-size: 11px;
+    transition: transform 0.2s ease;
+}
+
+.platform-switcher.open .platform-switcher-toggle .chevron {
+    transform: rotate(180deg);
+}
+
+.platform-switcher-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 210px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-hover);
+    padding: 6px;
+    z-index: 500;
+    display: none;
+}
+
+.platform-switcher.open .platform-switcher-menu {
+    display: block;
+    animation: platformMenuIn 0.15s ease-out;
+}
+
+@keyframes platformMenuIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.platform-switcher-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-color);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    transition: var(--transition);
+}
+
+.platform-switcher-item:hover:not(:disabled) {
+    background: var(--bg-tertiary);
+}
+
+.platform-switcher-item.active {
+    color: var(--primary-color);
+    font-weight: 700;
+}
+
+.platform-switcher-item .check {
+    color: var(--primary-color);
+    font-weight: 700;
+}
+
+.platform-switcher-item:disabled {
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 .status-indicator {
@@ -265,26 +370,10 @@ section {
     overflow: hidden;
 }
 
-section::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--gradient-primary);
-    opacity: 0;
-    transition: var(--transition);
-}
-
 section:hover {
     box-shadow: var(--shadow-hover);
     border-color: var(--border-light);
     background: var(--card-hover);
-}
-
-section:hover::before {
-    opacity: 1;
 }
 
 h2 {
@@ -491,27 +580,11 @@ button:disabled::before {
     overflow: hidden;
 }
 
-.rule-item::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 4px;
-    height: 100%;
-    background: var(--primary-color);
-    opacity: 0;
-    transition: var(--transition);
-}
-
 .rule-item:hover {
     border-color: var(--primary-color);
     background: var(--card-bg);
     transform: translateY(-2px);
     box-shadow: var(--shadow-hover);
-}
-
-.rule-item:hover::before {
-    opacity: 1;
 }
 
 .rule-title {
@@ -533,10 +606,10 @@ button:disabled::before {
 
 .rule-reply {
     background: var(--bg-tertiary);
-    border-left: 3px solid var(--primary-color);
+    border: 1px solid var(--border-color);
     padding: 12px;
     margin-bottom: 18px;
-    border-radius: 0 var(--radius) var(--radius) 0;
+    border-radius: var(--radius);
     font-size: 14px;
     color: var(--text-light);
     max-height: 80px;
@@ -600,7 +673,36 @@ button:disabled::before {
     font-size: 14px;
 }
 
-/* 日志重定向样式 */
+/* 运行日志面板 */
+.log-viewer {
+    height: clamp(360px, 48vh, 560px);
+    max-height: none;
+    overflow-y: auto;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 12px;
+    font-size: 13px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.log-viewer .log-entry {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border-color);
+    line-height: 1.5;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.log-viewer .log-entry:last-child { border-bottom: none; }
+.log-viewer .log-time { color: var(--text-light); margin-right: 4px; }
+.log-viewer .log-message { word-break: break-all; }
+.log-viewer .log-entry.success { color: var(--success-color); }
+.log-viewer .log-entry.error { color: var(--danger-color); }
+.log-viewer .log-entry.warning { color: var(--warning-color); }
+
+/* 日志重定向样式（保留供 logs 页等使用） */
 .log-redirect {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -704,11 +806,18 @@ button:disabled::before {
     background: none;
     padding: 8px;
     font-size: 20px;
+    line-height: 1;
+    font-weight: 700;
     color: var(--text-muted);
     border: 1px solid var(--border-color);
     border-radius: 50%;
     width: 36px;
     height: 36px;
+}
+
+#comment-qrcode-login-modal .close-btn {
+    color: var(--text-color);
+    font-size: 24px;
 }
 
 .close-btn:hover {
@@ -924,7 +1033,7 @@ button:disabled::before {
 
 .file-item.selected {
     background: rgba(0, 161, 214, 0.2);
-    border-left: 3px solid var(--primary-color);
+    border-color: var(--primary-color);
 }
 
 .file-icon {
@@ -1420,4 +1529,18 @@ footer {
     .reply-settings-row {
         grid-template-columns: 1fr;
     }
+}
+/* Unified AI mode entry and traditional-settings lock */
+.ai-reply-nav { background: linear-gradient(180deg, #efd17a 0%, #d5a846 100%); color: #3d2a08; border: 1px solid #ba8b30; font-weight: 750; box-shadow: 0 4px 10px rgba(137, 96, 20, .18), inset 0 1px rgba(255,255,255,.45); }
+.ai-reply-nav:hover, .ai-reply-nav.active { color: #3d2a08; filter: brightness(1.035); border-color: #a87922; }
+.ai-mode-notice { display: flex; align-items: center; gap: 12px; padding: 13px 16px; margin-bottom: 14px; border: 1px solid #b8cff8; border-radius: 10px; background: #eef5ff; color: #305d9b; cursor: pointer; }
+.ai-mode-notice strong { white-space: nowrap; }.ai-mode-notice span { font-size: 13px; }
+.ai-mode-locked { opacity: .46 !important; filter: grayscale(.75); user-select: none; pointer-events: none; position: relative; }
+.btn-secondary.dashboard-nav { color: #72551b; border-color: #dbc58c; background: #fffaf0; }
+.btn-secondary.dashboard-nav:hover { color: #51390d; border-color: #bc9138; background: #fff6df; box-shadow: 0 4px 12px rgba(143, 102, 26, .16); }
+@media (max-width: 768px) {
+    .header-actions { align-items: stretch; flex-direction: column; }
+    .header-actions > div:first-child { width: 100%; display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .header-actions > div:first-child .version-badge { display: none; }
+    .header-actions > div:first-child .btn-switch { width: 100%; min-width: 0; }
 }

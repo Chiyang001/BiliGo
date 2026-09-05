@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <title>BiliGo - 运行仪表盘</title>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+<body class="is-loading">
+    <div class="dashboard-shell">
+        <header class="topbar">
+            <div class="brand"><strong>BiliGo</strong><span>统一运行仪表盘</span></div>
+            <div class="topbar-actions">
+                <span class="sync-state"><i></i><span id="sync-label">正在同步</span></span>
+                <span class="version-badge">V3 Ultra</span>
+                <button type="button" class="back-button" id="dashboard-back">返回平台</button>
+            </div>
+        </header>
+
+        <main>
+            <section class="overview-hero">
+                <canvas id="dashboard-ambient-canvas" aria-hidden="true"></canvas>
+                <div>
+                    <span class="eyebrow">OPERATIONS OVERVIEW</span>
+                    <h1>全平台运行概览</h1>
+                </div>
+                <div class="hero-controls">
+                    <div class="range-switch" role="group" aria-label="统计时间范围">
+                        <button type="button" data-range="7d">7天</button>
+                        <button type="button" data-range="30d" class="active">30天</button>
+                        <button type="button" data-range="90d">90天</button>
+                        <button type="button" data-range="all">全部</button>
+                    </div>
+                    <button type="button" class="refresh-button" id="refresh-dashboard" aria-label="刷新数据"><span>↻</span>刷新</button>
+                </div>
+            </section>
+
+            <section class="kpi-grid" aria-label="核心指标">
+                <article class="kpi-card"><span>累计成功回复</span><strong id="kpi-total">0</strong></article>
+                <article class="kpi-card"><span>周期收到消息</span><strong id="kpi-inbound">0</strong><small id="kpi-range-label">最近 30 天</small></article>
+                <article class="kpi-card"><span>回复成功率</span><strong id="kpi-rate">0%</strong><small id="kpi-outcome">成功 0 · 失败 0</small></article>
+                <article class="kpi-card"><span>运行中的平台</span><strong id="kpi-running">0/6</strong><small>基于实时监控状态</small></article>
+            </section>
+
+            <section class="chart-grid" aria-label="数据图表">
+                <article class="chart-card">
+                    <div class="section-heading"><div><span>消息与回复</span><h2>每日处理趋势</h2></div><div class="legend"><i class="inbound"></i>收到 <i class="success"></i>成功 <i class="failure"></i>失败</div></div>
+                    <div class="chart-frame" id="trend-chart" role="img" aria-label="每日消息与回复趋势图"></div>
+                </article>
+                <article class="chart-card">
+                    <div class="section-heading"><div><span>平台表现</span><h2>消息处理对比</h2></div><div class="legend"><i class="inbound"></i>收到 <i class="success"></i>成功</div></div>
+                    <div class="chart-frame" id="platform-chart" role="img" aria-label="各平台消息处理对比图"></div>
+                </article>
+            </section>
+
+            <section class="platform-section">
+                <div class="section-heading platform-heading"><div><span>LIVE HEALTH</span><h2>平台运行状态</h2></div><small id="last-updated">等待首次同步</small></div>
+                <div class="platform-grid" id="platform-grid"></div>
+            </section>
+        </main>
+
+        <footer>统计仅保存在本机，不记录消息正文、昵称或原始用户 ID。</footer>
+    </div>
+    <div class="chart-tooltip" id="chart-tooltip" role="status"></div>
+    <script src="dashboard.js"></script>
+</body>
+</html>

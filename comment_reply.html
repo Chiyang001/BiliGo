@@ -8,8 +8,9 @@
     <meta name="format-detection" content="telephone=no">
     <title>BiliGo - B站回复管理工具</title>
     <link rel="stylesheet" href="comment_style.css">
+    <link rel="stylesheet" href="platform_tabs.css">
 </head>
-<body>
+<body data-ai-platform="bili_comment">
     <!-- 提示消息 -->
     <div id="toast-container"></div>
     
@@ -21,7 +22,9 @@
             </div>
             <div class="header-actions">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 13px; color: #00a1d6; font-weight: 600; padding: 4px 12px; background: linear-gradient(135deg, #e3f2fd 0%, #f0f8ff 100%); border-radius: 20px; border: 1px solid #b3e5fc;">20260830</span>
+                    <span class="version-badge">V3 Ultra</span>
+                    <button class="btn-switch btn-secondary dashboard-nav" onclick="location.href='/dashboard?from=bili_comment'">仪表盘</button>
+                    <button class="btn-switch ai-reply-nav" onclick="location.href='/ai-reply?from=bili_comment'">AI回复</button>
                     <button class="btn-switch btn-secondary" onclick="openDocsPage()" title="教程文档">
                         教程文档
                     </button>
@@ -29,9 +32,19 @@
                         检查更新
                     </button>
                 </div>
-                <button class="btn-secondary btn-switch" onclick="switchToMessageMode()">
-                     切换到私信模式
-                </button>
+                <div class="platform-switcher" id="platform-switcher">
+                    <button class="btn-switch btn-secondary platform-switcher-toggle" onclick="togglePlatformSwitcher(event)">
+                         切换平台 <span class="chevron">▾</span>
+                    </button>
+                    <div class="platform-switcher-menu">
+                        <button class="platform-switcher-item" onclick="switchToMessageMode()">B站私信</button>
+                        <button class="platform-switcher-item active" disabled>B站评论 <span class="check">✓</span></button>
+                        <button class="platform-switcher-item" onclick="location.href='/douyin'">抖音私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/xiaohongshu'">小红书私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/weibo'">微博私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/xianyu'">闲鱼消息</button>
+                    </div>
+                </div>
                 <button class="btn-danger btn-switch" onclick="confirmResetAllData()">
                     清除所有数据
                 </button>
@@ -46,12 +59,16 @@
             <section class="control-panel">
                 <h2> 评论回复控制</h2>
                 <div class="button-group">
-                    <button id="start-btn" class="btn-primary" onclick="startCommentMonitoring()">
+                    <button id="start-btn" class="btn-primary" onclick="startCommentMonitoring()" disabled>
                         开始监控评论
                     </button>
                     <button id="stop-btn" class="btn-danger" onclick="stopCommentMonitoring()" disabled>
                         停止监控评论
                     </button>
+                </div>
+                <div class="login-required-hint" id="login-required-hint" role="status" hidden>
+                    <span>请先在登录配置面板中登录B站账号，再开始监控。</span>
+                    <button type="button" onclick="openPlatformAccountPanel()">前往登录配置</button>
                 </div>
                 
                 <!-- 评论监控配置 -->
@@ -65,13 +82,13 @@
                         <div class="form-row">
                             <label for="comment-check-interval">评论检查间隔 (秒):</label>
                             <input type="number" id="comment-check-interval" min="0" step="any" value="5" placeholder="5">
-                            <p class="help-text">检查新评论的频率；可为 0（尽量连续检查）或任意正数，过短可能触发频率限制</p>
+                            <p class="help-text">检查新评论的频率。可为 0（尽量连续检查）或任意正数，过短可能触发频率限制</p>
                         </div>
                         
                         <div class="form-row">
                             <label for="comment-fetch-gap">多视频评论拉取间隔 (秒):</label>
                             <input type="number" id="comment-fetch-gap" min="0" step="0.05" value="1" placeholder="1">
-                            <p class="help-text">每轮会依次请求多个稿件的评论接口；此处为相邻两次请求之间的间隔，略大于 0 可明显减少「有时能拉到、有时为 0 条」的风控空返回（建议 0.2～0.5）</p>
+                            <p class="help-text">每轮会依次请求多个稿件的评论接口。此处为相邻两次请求之间的间隔，略大于 0 可明显减少「有时能拉到、有时为 0 条」的风控空返回（建议 0.2～0.5）</p>
                         </div>
                         
                         <div class="form-row">
@@ -80,13 +97,13 @@
                                 <option value="wbi">WBI 签名（与网页接口一致，推荐）</option>
                                 <option value="browser">浏览器（Playwright，需安装 Chromium）</option>
                             </select>
-                            <p class="help-text">默认使用 WBI 签名接口，避免旧版直连导致的 HTTP 412；若仍异常可尝试浏览器模式（需安装 playwright 与 Chromium）</p>
+                            <p class="help-text">默认使用 WBI 签名接口，避免旧版直连导致的 HTTP 412。若仍异常可尝试浏览器模式（需安装 playwright 与 Chromium）</p>
                         </div>
                         
                         <div class="form-row">
                             <label for="max-videos-to-check">本轮检查的视频数量上限:</label>
                             <input type="number" id="max-videos-to-check" min="1" max="500" step="1" value="50" placeholder="50">
-                            <p class="help-text">稿件数量大于上限时，由下方「稿件策略」决定取最新稿还是新旧各半；不超过上限时会拉取全部稿件</p>
+                            <p class="help-text">稿件数量大于上限时，由下方「稿件策略」决定取最新稿还是新旧各半。不超过上限时会拉取全部稿件</p>
                         </div>
                         
                         <div class="form-row">
@@ -95,13 +112,13 @@
                                 <option value="both_ends">新旧各半（推荐，避免漏掉最旧稿件）</option>
                                 <option value="newest">只扫最新稿件</option>
                             </select>
-                            <p class="help-text">仅当「投稿总数 &gt; 视频数量上限」时生效；否则始终扫描全部稿件</p>
+                            <p class="help-text">仅当「投稿总数 &gt; 视频数量上限」时生效，否则始终扫描全部稿件</p>
                         </div>
                         
                         <div class="form-row">
                             <label for="comments-per-video">每个视频拉取的顶层评论条数:</label>
                             <input type="number" id="comments-per-video" min="1" max="30" step="1" value="10" placeholder="10">
-                            <p class="help-text">单页条数，每页最多 30；与下方「主评论翻页」相乘为单稿可抓到的顶层评论上限</p>
+                            <p class="help-text">单页条数，每页最多 30。与下方「主评论翻页」相乘为单稿可抓到的顶层评论上限</p>
                         </div>
                         
                         <div class="form-row">
@@ -116,7 +133,7 @@
                         <div class="form-row">
                             <label for="comment-main-pages-max">每个稿件主评论最多翻页数:</label>
                             <input type="number" id="comment-main-pages-max" min="1" max="50" step="1" value="15" placeholder="15">
-                            <p class="help-text">主评论分页拉取，热门视频评论多需适当增大；请求量 ≈ 稿件数 × 翻页数</p>
+                            <p class="help-text">主评论分页拉取，热门视频评论多需适当增大。请求量 ≈ 稿件数 × 翻页数</p>
                         </div>
                         
                         <div class="form-row">
@@ -162,9 +179,6 @@
                     <button class="btn-primary" onclick="openCommentImportModal()" title="导入评论回复配置">
                          导入配置
                     </button>
-                    <button class="btn-success" onclick="importFromMessageConfig()" title="从私信配置导入">
-                         导入私信配置
-                    </button>
                 </div>
             </section>
 
@@ -200,6 +214,7 @@
                 <button class="btn-primary" onclick="saveCommentLoginConfig()">
                      保存登录配置
                 </button>
+                <div class="platform-email-alert" style="margin-top: 24px;"></div>
             </section>
 
             <section class="reply-settings-container">
@@ -215,33 +230,8 @@
                         </div>
                         
                         <div class="form-row">
-                            <label>回复类型:</label>
-                            <div class="radio-group">
-                                <div class="radio-wrapper">
-                                    <input type="radio" id="default-comment-reply-text" name="default-comment-reply-type" value="text" checked>
-                                    <label for="default-comment-reply-text">文字回复</label>
-                                </div>
-                                <div class="radio-wrapper">
-                                    <input type="radio" id="default-comment-reply-image" name="default-comment-reply-type" value="image">
-                                    <label for="default-comment-reply-image">图片回复</label>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div id="default-comment-text-content" class="form-row">
                             <label for="default-comment-reply-message">默认回复内容:</label>
                             <textarea id="default-comment-reply-message" placeholder="请输入默认评论回复内容，例如：感谢您的评论！"></textarea>
-                        </div>
-                        
-                        <div id="default-comment-image-content" class="form-row" style="display: none;">
-                            <label for="default-comment-reply-image-path">选择图片:</label>
-                            <div class="image-selector">
-                                <input type="text" id="default-comment-reply-image-path" placeholder="请选择图片文件" readonly>
-                                <button type="button" class="btn-secondary" onclick="openImageBrowser('default-comment')">
-                                     选择图片
-                                </button>
-                            </div>
-                            <div id="default-comment-image-preview" class="image-preview" style="display: none;"></div>
                         </div>
                         
                         <button class="btn-primary" onclick="saveDefaultCommentReply()">
@@ -282,15 +272,6 @@
                     <div class="rules-actions">
                     </div>
                 </div>
-                <div class="pagination">
-                    <button id="prev-page" class="btn-icon" onclick="changePage(-1)" disabled>
-                        上一页
-                    </button>
-                    <span id="page-info">第 1 页，共 1 页</span>
-                    <button id="next-page" class="btn-icon" onclick="changePage(1)" disabled>
-                        下一页
-                    </button>
-                </div>
                 <div id="comment-rules-list" class="rules-list"></div>
                 <div class="pagination">
                     <button id="prev-page-bottom" class="btn-icon" onclick="changePage(-1)" disabled>
@@ -304,57 +285,14 @@
             </section>
 
             <section class="log-panel">
-                <h2> 系统日志</h2>
-                <div class="log-redirect">
-                    <div class="log-redirect-content">
-                        <h3> 查看系统日志</h3>
-                        <p>点击下方按钮跳转到专门的日志页面查看详细的系统运行日志</p>
-                        <button class="btn-primary" onclick="goToLogsPage()">
-                            
-                            打开日志页面
-                        </button>
-                    </div>
-                </div>
+                <h2>运行日志</h2>
+                <div id="logs-container" class="log-viewer"></div>
             </section>
         </div>
 
         <footer>
-            <p>© 2026 <a href="https://space.bilibili.com/404891612" target="_blank">炽阳001</a> | BiliGo 评论回复管理工具</p>
+            <p>© 2026 <a href="https://space.bilibili.com/404891612" target="_blank" rel="noopener noreferrer">炽阳001</a> | BiliGo 评论回复管理工具</p>
         </footer>
-    </div>
-
-    <!-- 图片浏览器模态框 -->
-    <div id="image-browser-modal" class="modal">
-        <div class="modal-content image-browser-content">
-            <div class="modal-header">
-                <h3> 选择图片</h3>
-                <button class="close-btn" onclick="closeImageBrowser()">
-                    
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="browser-toolbar">
-                    <div class="current-path">
-                        <span id="current-path-text"> 加载中...</span>
-                    </div>
-                    <div class="quick-nav">
-                        <button class="btn-secondary btn-sm" onclick="goToHomeDirectory()">
-                             主目录
-                        </button>
-                    </div>
-                </div>
-                <div id="file-list" class="file-list">
-                    <div class="loading">
-                         加载中...
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-secondary" onclick="closeImageBrowser()">
-                     取消
-                </button>
-            </div>
-        </div>
     </div>
 
     <!-- 导入配置模态框 -->
@@ -460,9 +398,7 @@
         <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
                 <h3> 哔哩哔哩扫码登录</h3>
-                <button class="close-btn" onclick="closeCommentQRCodeLoginModal()">
-                    
-                </button>
+                <button class="close-btn" type="button" onclick="closeCommentQRCodeLoginModal()" aria-label="关闭扫码登录" title="关闭">&times;</button>
             </div>
             <div class="modal-body" style="text-align: center; padding: 30px;">
                 <div id="comment-qrcode-container" style="margin: 20px auto;">
@@ -519,7 +455,7 @@
                 </button>
             </div>
             <div class="modal-body">
-                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
+                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #ffc107;">
                     <p style="margin: 0; color: #000; font-weight: 600;">此操作将清除以下所有数据：</p>
                 </div>
 
@@ -534,7 +470,7 @@
                     <li>用户回复统计数据</li>
                 </ul>
 
-                <div style="background: #f8d7da; padding: 15px; border-radius: 5px; margin-top: 20px; border-left: 4px solid #dc3545;">
+                <div style="background: #f8d7da; padding: 15px; border-radius: 5px; margin-top: 20px; border: 1px solid #dc3545;">
                     <p style="margin: 0; color: #000; font-weight: 600;">此操作不可撤销！</p>
                     <p style="margin: 8px 0 0 0; color: #000;">建议在清除前先导出配置备份。</p>
                 </div>
@@ -552,6 +488,10 @@
         </div>
     </div>
 
+    <script src="platform_log_view.js"></script>
+    <script src="platform_import.js"></script>
+    <script src="ai_mode.js"></script>
+    <script src="platform_tabs.js"></script>
     <script src="comment_script.js"></script>
 </body>
 </html>

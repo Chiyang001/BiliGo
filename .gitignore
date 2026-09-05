@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.log
+.env
+.env.*
+
+build/
+dist/
+*.exe
+
+*.sqlite3
+*_storage.json
+*_browser_profile/
+*_media/
+ai_knowledge/
+
+# Local runtime state. Credential-free templates live in docker/defaults/.
+*_user_reply_stats.json
+
+.codex-*

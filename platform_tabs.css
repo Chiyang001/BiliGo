@@ -1,0 +1,471 @@
+:root {
+    --workspace-accent: #00a9e0;
+    --workspace-accent-deep: #087ba7;
+    --workspace-accent-soft: #eefaff;
+    --workspace-accent-border: #93d9ee;
+    --workspace-navy: #243047;
+    --workspace-muted: #8490a1;
+    --workspace-line: #e1e6ed;
+}
+
+.platform-console-page .container {
+    width: min(1680px, calc(100% - 30px));
+    max-width: none;
+}
+
+.platform-settings-workspace,
+.platform-settings-workspace:hover {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    min-height: max(610px, calc(100vh - 190px));
+    min-width: 0;
+    margin: 0 0 24px;
+    overflow: hidden;
+    border: 1px solid #dce3ec;
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 12px 34px rgba(34, 52, 77, .08);
+}
+
+.platform-tab-sidebar {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 20px 14px 16px;
+    border-right: 1px solid var(--workspace-accent-border);
+    background: #fff;
+}
+
+.platform-tab-switcher {
+    position: relative;
+    z-index: 20;
+    display: grid;
+    gap: 7px;
+    margin: 0 4px 14px;
+}
+
+.platform-tab-switcher > span {
+    padding-left: 2px;
+    color: #8b96a6;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .08em;
+}
+
+.platform-tab-switcher .platform-switcher { width: 100%; }
+
+.platform-tab-switcher .platform-switcher-toggle,
+.platform-tab-switcher .platform-switcher-toggle:hover {
+    width: 100%;
+    min-height: 42px;
+    justify-content: space-between;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border: 1px solid var(--workspace-accent-border);
+    border-radius: 10px;
+    background: var(--workspace-accent-soft) !important;
+    color: var(--workspace-accent-deep) !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+
+.platform-tab-switcher .platform-switcher-menu {
+    right: auto;
+    left: 0;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    border-color: var(--workspace-accent-border);
+}
+
+.platform-tab-switcher .platform-switcher-item.active,
+.platform-tab-switcher .platform-switcher-item .check { color: var(--workspace-accent-deep); }
+.platform-tab-switcher .platform-switcher-item:hover:not(:disabled) { background: var(--workspace-accent-soft); }
+
+.platform-tab-identity {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 11px;
+    align-items: center;
+    margin: 0 4px 19px;
+    padding: 4px 3px 16px;
+    border-bottom: 1px solid #edf0f4;
+}
+
+.platform-tab-identity img {
+    width: 44px;
+    height: 44px;
+    box-sizing: border-box;
+    object-fit: contain;
+    padding: 7px;
+    border: 1px solid #e1e6ec;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 4px 12px rgba(39, 51, 70, .06);
+}
+
+.platform-tab-identity span,
+.platform-tab-copy,
+.platform-tab-runtime span {
+    min-width: 0;
+    display: grid;
+}
+
+.platform-tab-identity small {
+    overflow: hidden;
+    color: var(--workspace-accent-deep);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .12em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.platform-tab-identity strong {
+    margin-top: 3px;
+    color: var(--workspace-navy);
+    font-size: 15px;
+}
+
+.platform-tab-group-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px 8px;
+    color: #8b96a6;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .08em;
+}
+
+.platform-tab-group-label b {
+    color: #b5bdc8;
+    font-size: 8px;
+    font-weight: 800;
+}
+
+.platform-tab-list { display: grid; gap: 5px; }
+
+.platform-tab-button {
+    position: relative;
+    width: 100%;
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr) auto;
+    gap: 11px;
+    align-items: center;
+    margin: 0;
+    padding: 10px;
+    border: 1px solid transparent;
+    border-radius: 11px;
+    background: transparent;
+    color: var(--workspace-navy);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+
+.platform-tab-button:hover {
+    border-color: #e3e8ef;
+    background: #fbfcfd;
+    transform: none;
+}
+
+.platform-tab-button.active {
+    border-color: var(--workspace-accent-border);
+    background: var(--workspace-accent-soft);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--workspace-accent) 14%, transparent);
+}
+
+.platform-tab-button:focus-visible {
+    outline: 2px solid var(--workspace-accent-border);
+    outline-offset: 2px;
+}
+
+.platform-tab-icon {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    border: 1px solid #e1e6ec;
+    border-radius: 9px;
+    background: #fff;
+    color: #66758a;
+}
+
+.platform-tab-button.active .platform-tab-icon {
+    border-color: var(--workspace-accent-border);
+    color: var(--workspace-accent-deep);
+}
+
+.platform-tab-icon svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.platform-tab-copy { gap: 2px; }
+.platform-tab-copy strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.platform-tab-copy small { overflow: hidden; color: var(--workspace-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.platform-tab-button > b { color: var(--workspace-accent-deep); font-size: 21px; font-weight: 400; }
+
+.platform-tab-runtime {
+    display: grid;
+    grid-template-columns: 9px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    margin-top: auto;
+    padding: 13px 11px 4px;
+    border-top: 1px solid #edf0f4;
+}
+
+.platform-tab-runtime > i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #aeb7c3;
+    box-shadow: 0 0 0 4px #eef1f5;
+}
+
+.platform-tab-runtime > i.is-running {
+    background: #2ea66f;
+    box-shadow: 0 0 0 4px #dff4e9;
+    animation: platform-status-pulse 1.8s ease-in-out infinite;
+}
+
+.platform-tab-runtime small { color: #98a2af; font-size: 9px; }
+.platform-tab-runtime strong { overflow: hidden; margin-top: 2px; color: #566276; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.platform-tab-content.main-content {
+    min-width: 0;
+    min-height: 0;
+    width: 100% !important;
+    align-self: stretch;
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible;
+    background: #fff;
+}
+
+/* AI mode inserts its notice asynchronously as a sibling of the tab panels.
+   In that state a panel cannot keep min-height: 100%, otherwise the notice
+   makes the right column taller than the clipped workspace. Split the column
+   into a fixed notice and a panel that owns the remaining height instead. */
+.platform-tab-content.main-content:has(> .ai-mode-notice) {
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100% !important;
+    min-height: 0;
+}
+
+.platform-tab-content.main-content:has(> .ai-mode-notice) > .ai-mode-notice {
+    flex: 0 0 auto;
+}
+
+.platform-tab-content.main-content:has(> .ai-mode-notice) > .platform-tab-panel:not([hidden]),
+.platform-tab-content.main-content:has(> .ai-mode-notice) > .platform-tab-panel:not([hidden]):hover {
+    flex: 1 1 auto;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 0;
+}
+
+.platform-tab-content > .platform-tab-panel,
+.platform-tab-content > .platform-tab-panel:hover {
+    position: static !important;
+    width: auto !important;
+    max-width: none !important;
+    align-self: stretch;
+    min-width: 0 !important;
+    min-height: 0;
+    display: block;
+    grid-column: auto !important;
+    grid-row: auto !important;
+    box-sizing: border-box;
+    margin: 0 !important;
+    padding: 31px 34px 30px !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    transform: none !important;
+    animation: platform-panel-enter .2s ease-out both;
+}
+
+.platform-tab-content > .platform-tab-panel[hidden] { display: none !important; }
+
+/* A panel can be taller than the fixed workspace once the AI notice is
+   present. Keep the active panel scrollable instead of letting the workspace
+   clip its lower content. */
+.platform-tab-content > .platform-tab-panel:not([hidden]) {
+    overflow-y: auto;
+}
+
+/* The log tab owns the remaining workspace height. Keep entries scrolling
+   inside the viewer instead of leaving an unused block below a fixed 260px box. */
+.platform-tab-content > .platform-tab-panel.log-panel,
+.platform-tab-content > .platform-tab-panel.log-panel:hover {
+    display: flex !important;
+    flex-direction: column;
+}
+
+.platform-tab-content > .platform-tab-panel.log-panel[hidden] {
+    display: none !important;
+}
+
+.platform-tab-content > .platform-tab-panel.log-panel > .log-viewer {
+    flex: 1 1 0;
+    width: 100%;
+    height: auto;
+    min-height: clamp(260px, 48vh, 560px);
+    max-height: none !important;
+    box-sizing: border-box;
+    border-color: var(--workspace-line) !important;
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--workspace-line) 75%, transparent);
+    overflow-y: auto;
+}
+
+.platform-tab-content > .platform-tab-panel > h2 {
+    position: relative;
+    margin: 0 0 25px !important;
+    padding: 0 0 15px !important;
+    border-bottom: 1px solid #e7ebf0;
+    color: var(--workspace-navy) !important;
+    font-size: clamp(20px, 2vw, 26px) !important;
+    letter-spacing: -.02em;
+}
+
+.platform-tab-content > .platform-tab-panel > h2::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    width: 52px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--workspace-accent-deep), var(--workspace-accent));
+}
+
+.platform-console-page footer { margin-top: 0; }
+
+/* B站评论沿用页面本身的暗色主题，避免共享工作区的浅色底覆盖内容区。 */
+body[data-platform-theme="bili_comment"] {
+    --workspace-navy: #e6e8eb;
+    --workspace-muted: #9aa3ad;
+    --workspace-line: #383c42;
+}
+
+body[data-platform-theme="bili_comment"] .platform-settings-workspace,
+body[data-platform-theme="bili_comment"] .platform-settings-workspace:hover {
+    border-color: var(--border-color);
+    background: var(--card-bg);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .32);
+}
+
+body[data-platform-theme="bili_comment"] .platform-tab-sidebar,
+body[data-platform-theme="bili_comment"] .platform-tab-content.main-content,
+body[data-platform-theme="bili_comment"] .platform-tab-content > .platform-tab-panel,
+body[data-platform-theme="bili_comment"] .platform-tab-content > .platform-tab-panel:hover {
+    background: var(--card-bg) !important;
+}
+
+body[data-platform-theme="bili_comment"] .platform-tab-sidebar {
+    border-color: var(--border-color);
+}
+
+body[data-platform-theme="bili_comment"] .platform-tab-identity,
+body[data-platform-theme="bili_comment"] .platform-tab-runtime,
+body[data-platform-theme="bili_comment"] .platform-tab-content > .platform-tab-panel > h2 {
+    border-color: var(--workspace-line);
+}
+
+body[data-platform-theme="bili_comment"] .platform-tab-identity img,
+body[data-platform-theme="bili_comment"] .platform-tab-icon {
+    border-color: var(--border-color);
+    background: var(--bg-tertiary);
+    color: var(--text-light);
+}
+
+body[data-platform-theme="bili_comment"] .platform-tab-button:hover {
+    border-color: var(--border-light);
+    background: var(--card-hover);
+}
+
+body[data-platform-theme="bili_comment"] .platform-tab-button.active {
+    border-color: var(--primary-dark);
+    background: rgba(0, 161, 214, .12);
+    box-shadow: 0 4px 12px rgba(0, 161, 214, .12);
+}
+
+body[data-platform-theme="bili_comment"] .platform-tab-button.active .platform-tab-icon {
+    border-color: var(--primary-dark);
+    background: rgba(0, 161, 214, .1);
+}
+
+body[data-platform-theme="bili_comment"] .platform-tab-runtime > i {
+    box-shadow: 0 0 0 4px var(--bg-tertiary);
+}
+
+@keyframes platform-panel-enter {
+    from { opacity: 0; transform: translateX(5px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes platform-status-pulse {
+    50% { box-shadow: 0 0 0 6px rgba(46, 166, 111, .09); }
+}
+
+@media (max-width: 900px) {
+    .platform-settings-workspace,
+    .platform-settings-workspace:hover { grid-template-columns: 86px minmax(0, 1fr); }
+    .platform-tab-sidebar { padding: 16px 8px; }
+    .platform-tab-identity { display: flex; justify-content: center; margin: 0 0 15px; padding-bottom: 14px; }
+    .platform-tab-identity span, .platform-tab-group-label, .platform-tab-copy, .platform-tab-button > b, .platform-tab-runtime span { display: none; }
+    .platform-tab-switcher { margin-inline: 0; }
+    .platform-tab-switcher > span { display: none; }
+    .platform-tab-switcher .platform-switcher-toggle { justify-content: center; padding-inline: 6px; font-size: 0; }
+    .platform-tab-switcher .platform-switcher-toggle::before { content: '平台'; font-size: 11px; }
+    .platform-tab-switcher .platform-switcher-menu { left: 0; width: 210px; }
+    .platform-tab-button { grid-template-columns: 1fr; justify-items: center; padding: 9px 5px; }
+    .platform-tab-runtime { display: flex; justify-content: center; }
+    .platform-tab-content > .platform-tab-panel,
+    .platform-tab-content > .platform-tab-panel:hover { padding: 27px 23px 25px !important; }
+}
+
+@media (max-width: 600px) {
+    .platform-console-page .container { width: min(100% - 16px, 1680px); }
+    .platform-settings-workspace,
+    .platform-settings-workspace:hover { grid-template-columns: 1fr; grid-template-rows: auto; min-height: 0; border-radius: 14px; }
+    .platform-tab-sidebar { display: block; padding: 10px; border-right: 0; border-bottom: 1px solid var(--workspace-line); }
+    .platform-tab-identity, .platform-tab-group-label, .platform-tab-runtime { display: none; }
+    .platform-tab-switcher { margin: 0 0 9px; }
+    .platform-tab-switcher > span { display: block; }
+    .platform-tab-switcher .platform-switcher-toggle { justify-content: space-between; font-size: 13px; }
+    .platform-tab-switcher .platform-switcher-toggle::before { display: none; }
+    .platform-tab-switcher .platform-switcher-menu { width: 100%; }
+    .platform-tab-list { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+    .platform-tab-list::-webkit-scrollbar { display: none; }
+    .platform-tab-button { flex: 0 0 54px; width: 54px; padding: 7px; }
+    .platform-tab-icon { width: 36px; height: 36px; }
+    .platform-tab-content > .platform-tab-panel,
+    .platform-tab-content > .platform-tab-panel:hover { min-height: 520px; padding: 23px 17px 22px !important; }
+    .platform-tab-content > .platform-tab-panel.log-panel > .log-viewer {
+        flex: 1 1 360px;
+        height: auto;
+        min-height: 360px;
+        max-height: none !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .platform-tab-content > .platform-tab-panel { animation: none; }
+    .platform-tab-runtime > i.is-running { animation: none; }
+    .platform-tab-button { transition: none; }
+}

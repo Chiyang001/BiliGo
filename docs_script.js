@@ -1,4 +1,6 @@
 document.addEventListener('DOMContentLoaded', function () {
+    setupDocsBackLink();
+
     const tabGroups = document.querySelectorAll('.tabs');
     tabGroups.forEach(group => {
         group.addEventListener('click', e => {
@@ -31,6 +33,41 @@ document.addEventListener('DOMContentLoaded', function () {
         updateRiskDemo();
     }
 });
+
+function setupDocsBackLink() {
+    const params = new URLSearchParams(window.location.search);
+    const from = params.get('from') || '';
+    const backLink = document.getElementById('docs-back-link');
+    if (!backLink) return;
+
+    const backTargets = {
+        douyin: { href: '/douyin', label: '返回抖音私信' },
+        comment: { href: '/comment', label: '返回 B 站评论' },
+        message: { href: 'index.html', label: '返回 B 站私信' },
+    };
+    const target = backTargets[from];
+    if (target) {
+        backLink.href = target.href;
+        backLink.textContent = target.label;
+    }
+
+    if (from === 'douyin' && !window.location.hash) {
+        window.location.hash = 'douyin-mode';
+    } else if (from === 'comment' && !window.location.hash) {
+        window.location.hash = 'comment-mode';
+    }
+
+    scrollToDocsSection(window.location.hash);
+}
+
+function scrollToDocsSection(hash) {
+    if (!hash) return;
+    const target = document.querySelector(hash);
+    if (!target) return;
+    window.setTimeout(() => {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+}
 
 function runRuleDemo() {
     const input = document.getElementById('demo-message-input');
@@ -109,14 +146,14 @@ function updateRiskDemo() {
     if (checkInterval < checkSafeBase) causeList.push(`检测间隔偏短（当前 ${checkInterval}s，建议 >= ${checkSafeBase}s）`);
     if (concurrency > 16) causeList.push(`并发对象偏多（当前 ${concurrency}）`);
     if (estimatedRequestsPerHour > 1800) causeList.push(`请求频次偏高（${estimatedRequestsPerHour}/h）`);
-    causes.textContent = causeList.length ? causeList.join('；') : '参数处于较稳健区间，暂无明显高风险来源';
+    causes.textContent = causeList.length ? causeList.join('，') : '参数处于较稳健区间，暂无明显高风险来源';
 
     const actionList = [];
     if (sendDelay < sendSafeBase) actionList.push(`将发送间隔提高到 ${sendSafeBase}-${sendSafeBase + 0.8}s`);
     if (checkInterval < checkSafeBase) actionList.push(`将检测间隔提高到 ${checkSafeBase}-${checkSafeBase + 20}s`);
     if (concurrency > 16) actionList.push('减少单轮处理对象数量，分批检测');
     if (actionList.length === 0) actionList.push('可小幅优化速度，每次仅调整一个参数并观察日志');
-    actions.textContent = actionList.join('；');
+    actions.textContent = actionList.join('，');
 
     if (score >= 70) {
         impact.textContent = '可能影响：触发限流、发送失败率上升、短期内回复中断';

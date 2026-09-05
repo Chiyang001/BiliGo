@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>BiliGo - 抖音私信自动回复</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="douyin_theme.css">
+    <link rel="stylesheet" href="platform_tabs.css">
+</head>
+<body data-ai-platform="douyin">
+    <div id="toast-container"></div>
+
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>BiliGo</h1>
+                <div class="subtitle">抖音私信自动回复工具</div>
+            </div>
+            <div class="header-actions">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="version-badge">V3 Ultra</span>
+                    <button class="btn-switch btn-secondary dashboard-nav" onclick="location.href='/dashboard?from=douyin'">仪表盘</button>
+                    <button class="btn-switch ai-reply-nav" onclick="location.href='/ai-reply?from=douyin'">AI回复</button>
+                    <button class="btn-switch btn-secondary" onclick="openDocsPage()" title="教程文档">
+                        教程文档
+                    </button>
+                    <button class="btn-switch btn-secondary" onclick="checkUpdate()" title="检查更新">
+                        检查更新
+                    </button>
+                </div>
+                <div class="platform-switcher" id="platform-switcher">
+                    <button class="btn-switch btn-secondary platform-switcher-toggle" onclick="togglePlatformSwitcher(event)">
+                         切换平台 <span class="chevron">▾</span>
+                    </button>
+                    <div class="platform-switcher-menu">
+                        <button class="platform-switcher-item" onclick="location.href='/'">B站私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/comment'">B站评论</button>
+                        <button class="platform-switcher-item active" disabled>抖音私信 <span class="check">✓</span></button>
+                        <button class="platform-switcher-item" onclick="location.href='/xiaohongshu'">小红书私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/weibo'">微博私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/xianyu'">闲鱼消息</button>
+                    </div>
+                </div>
+                <button class="btn-switch btn-danger" onclick="confirmResetAllData()" title="清除所有配置和数据">
+                    清除所有数据
+                </button>
+                <div class="status-indicator" id="status-indicator">
+                    <span class="status-icon" id="status-dot">●</span>
+                    <span id="status">未启动</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <section class="control-panel">
+                <h2>系统控制</h2>
+                <div class="button-group">
+                    <button class="btn-primary" id="start-btn" onclick="startDouyinMonitoring()" disabled>开始监控</button>
+                    <button class="btn-danger" id="stop-btn" onclick="stopDouyinMonitoring()" disabled>停止监控</button>
+                </div>
+                <div class="login-required-hint" id="login-required-hint" role="status" hidden>
+                    <span>请先在账号配置面板中登录抖音账号，再开始监控。</span>
+                    <button type="button" onclick="openPlatformAccountPanel()">前往账号配置</button>
+                </div>
+
+                <div class="collapsible-section" style="margin-top: 20px;">
+                    <div class="collapsible-header" onclick="toggleDouyinTimingConfig()">
+                        <h3>⏰ 时间间隔配置</h3>
+                        <span class="toggle-icon" id="douyin-timing-toggle-icon">▼</span>
+                    </div>
+                    <div class="collapsible-content" id="douyin-timing-config-content" style="display: none;">
+                        <div class="form-row">
+                            <label for="message-check-interval">消息监测间隔 (秒):</label>
+                            <input type="number" id="message-check-interval" min="0.5" max="60" step="0.5" value="0.5" placeholder="0.5">
+                            <p class="help-text">控制检查新消息的频率，越小响应越快，建议 0.5 秒以上</p>
+                        </div>
+                        <div class="form-row">
+                            <label for="send-delay-interval">发送等待间隔 (秒):</label>
+                            <input type="number" id="send-delay-interval" min="0.5" max="30" step="0.5" value="0.5" placeholder="0.5">
+                            <p class="help-text">两次发送消息之间的等待时间，建议 1 秒以上避免触发风控</p>
+                        </div>
+                        <button class="btn-primary" onclick="saveDouyinTimingConfig()">保存时间配置</button>
+                    </div>
+                </div>
+
+                <div class="form-row" style="margin-top: 20px;">
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="only-reply-new-messages" checked>
+                        <label for="only-reply-new-messages">仅回复新消息</label>
+                    </div>
+                    <p class="help-text">启用后，只会回复程序启动之后收到的消息，不会回复启动前的历史消息</p>
+                </div>
+
+                <div class="form-row" style="margin-top: 15px;">
+                    <label for="max-replies-per-user">单用户最大回复次数:</label>
+                    <div class="input-wrapper">
+                        <input type="number" id="max-replies-per-user" min="1" max="100" value="3" placeholder="3">
+                    </div>
+                    <p class="help-text">设置对同一个用户的最大回复次数，避免重复回复同一用户，建议设置 3-5 次</p>
+                </div>
+
+                <div class="form-row" style="margin-top: 10px;">
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="unlimited-replies-per-user" onchange="updateDouyinReplyLimitState()">
+                        <label for="unlimited-replies-per-user">不限制单用户回复次数</label>
+                    </div>
+                    <p class="help-text">启用后忽略上方次数限制，停用后继续使用已填写的上限</p>
+                </div>
+
+                <button class="btn-secondary" onclick="saveDouyinMessageConfig()" style="margin-top: 10px;">保存消息设置</button>
+                <div class="button-group" style="margin-top: 20px;">
+                    <button class="btn-secondary" onclick="exportDouyinConfig()" title="导出抖音私信配置">导出配置</button>
+                    <button class="btn-primary" onclick="openDouyinImportModal()" title="导入抖音私信配置">导入配置</button>
+                </div>
+            </section>
+
+            <section class="config-panel">
+                <h2>账号配置</h2>
+
+                <div class="info-banner douyin-banner" style="margin-bottom: 16px;">
+                    <div class="info-banner-icon"></div>
+                    <div class="info-banner-content">
+                        <strong>账号登录</strong>
+                        <p>点击「打开登录窗口」，完成抖音扫码或密码登录。</p>
+                        <p>登录成功后系统将自动保存会话。下次启动无需重复登录（会话失效时需重新登录）。</p>
+                    </div>
+                </div>
+
+                <div id="session-expired-banner" class="info-banner" style="margin-bottom: 16px; display: none; border-color: rgba(255, 71, 87, 0.35); background: linear-gradient(135deg, #fff 0%, #fff5f5 100%);">
+                    <div class="info-banner-content">
+                        <strong style="color: #ff4757;">登录状态已失效</strong>
+                        <p>保存的登录会话已过期，请点击「打开登录窗口」重新登录。</p>
+                    </div>
+                </div>
+
+                <div class="account-card" id="account-card">
+                    <div class="account-profile">
+                        <div class="account-avatar account-avatar--default" id="account-avatar">
+                            <img src="tik-tok.png" alt="抖音">
+                        </div>
+                        <div class="account-meta">
+                            <h3 id="account-nickname">未登录</h3>
+                            <p id="account-uid">UID: -</p>
+                        </div>
+                    </div>
+                    <div class="account-row">
+                        <span class="label">登录状态</span>
+                        <span id="login-status-text" class="value warn">未登录</span>
+                    </div>
+                    <div class="account-row">
+                        <span class="label">登录时间</span>
+                        <span id="account-login-time" class="value">-</span>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-primary" id="login-btn" onclick="startDouyinLogin()">打开登录窗口</button>
+                    <button class="btn-secondary" onclick="refreshAccountInfo()">刷新账号</button>
+                    <button class="btn-danger" onclick="douyinLogout()">退出登录</button>
+                </div>
+                <div class="platform-email-alert" style="margin-top: 24px;"></div>
+            </section>
+
+            <section class="reply-settings-container">
+                <div class="reply-settings-row">
+                    <div class="default-reply-panel half-width">
+                        <h2>默认回复</h2>
+                        <div class="form-row">
+                            <div class="checkbox-wrapper">
+                                <input type="checkbox" id="default-reply-enabled">
+                                <label for="default-reply-enabled">启用默认回复</label>
+                            </div>
+                            <p class="help-text">未匹配关键词时自动发送默认消息</p>
+                        </div>
+                        <div class="form-row" id="douyin-default-text-content">
+                            <label for="default-reply-message">默认回复内容:</label>
+                            <textarea id="default-reply-message" rows="4" placeholder="您好，我现在不在，稍后会回复您的消息。"></textarea>
+                        </div>
+                        <button class="btn-primary" onclick="saveDouyinDefaultReply()">保存默认回复</button>
+                    </div>
+
+                    <div class="keyword-panel half-width">
+                        <h2>添加关键词</h2>
+                        <div class="form-row">
+                            <label for="rule-name">规则名称:</label>
+                            <input type="text" id="rule-name" placeholder="例如：问候语">
+                        </div>
+                        <div class="form-row">
+                            <label for="rule-keyword">关键词 (逗号分隔):</label>
+                            <input type="text" id="rule-keyword" placeholder="你好,您好,在吗">
+                        </div>
+                        <div class="form-row" id="douyin-rule-text-content">
+                            <label for="rule-reply">回复内容:</label>
+                            <textarea id="rule-reply" placeholder="请输入自动回复内容"></textarea>
+                        </div>
+                        <div class="button-group">
+                            <button class="btn-primary" onclick="addDouyinRuleFromForm()">添加规则</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="rules-panel">
+                <div class="rules-header">
+                    <h2>回复规则列表</h2>
+                </div>
+                <div id="rules-list" class="rules-list"></div>
+                <div class="pagination">
+                    <button id="prev-page-bottom" class="btn-icon" onclick="changeDouyinPage(-1)" disabled>上一页</button>
+                    <span id="page-info-bottom">第 1 页，共 1 页</span>
+                    <button id="next-page-bottom" class="btn-icon" onclick="changeDouyinPage(1)" disabled>下一页</button>
+                </div>
+                <button class="btn-primary" style="margin-top: 14px;" onclick="saveDouyinRules()">保存全部规则</button>
+            </section>
+
+            <section class="log-panel">
+                <h2>运行日志</h2>
+                <div id="logs-container" class="log-viewer"></div>
+            </section>
+        </div>
+
+        <footer>
+            <p>© 2026 <a href="https://space.bilibili.com/404891612" target="_blank" rel="noopener noreferrer">炽阳001</a> | BiliGo 抖音私信自动回复</p>
+        </footer>
+    </div>
+
+    <div id="reset-confirm-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="background: #fff3cd; border-bottom: 2px solid #ffc107;">
+                <h3 style="color: #856404;">确认清除所有数据</h3>
+                <button class="close-btn" onclick="closeResetConfirmModal()"></button>
+            </div>
+            <div class="modal-body">
+                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #ffc107;">
+                    <p style="margin: 0; color: #856404; font-weight: 600;">此操作将清除以下抖音私信相关数据：</p>
+                </div>
+                <ul style="margin: 15px 0; padding-left: 25px; line-height: 2;">
+                    <li>抖音登录会话与浏览器 Profile</li>
+                    <li>所有抖音私信回复规则</li>
+                    <li>默认回复与时间间隔配置</li>
+                    <li>已上传的自动回复图片</li>
+                    <li>单用户回复次数统计</li>
+                    <li>运行日志与监控缓存</li>
+                </ul>
+                <div style="background: #f8d7da; padding: 15px; border-radius: 5px; margin-top: 20px; border: 1px solid #dc3545;">
+                    <p style="margin: 0; color: #721c24; font-weight: 600;">此操作不可撤销！</p>
+                    <p style="margin: 8px 0 0 0; color: #721c24;">建议在清除前先导出配置备份。</p>
+                </div>
+                <div style="margin-top: 20px; padding: 15px; background: #e7f3ff; border-radius: 5px;">
+                    <p style="margin: 0; color: #004085; font-size: 14px;">
+                        <strong>提示：</strong>此操作仅清除抖音模块数据，不影响 B 站私信与评论配置。
+                    </p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeResetConfirmModal()">取消</button>
+                <button class="btn-danger" onclick="executeResetAllData()">确认清除</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="douyin-import-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>导入抖音私信配置</h3>
+                <button class="close-btn" onclick="closeDouyinImportModal()"></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label>选择 JSON 文件:</label>
+                    <div class="file-upload-area" id="douyin-file-upload-area">
+                        <input type="file" id="douyin-config-file" accept=".json" style="display: none;" onchange="handleDouyinFileSelect(event)">
+                        <div class="upload-placeholder" onclick="document.getElementById('douyin-config-file').click()">
+                            <p>点击选择文件或拖拽文件到此处</p>
+                            <small>支持 .json 格式，文件大小不超过 5MB</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="douyin-file-info" class="file-info" style="display: none;">
+                    <div class="file-details">
+                        <div class="file-text">
+                            <strong id="douyin-file-name"></strong>
+                            <small id="douyin-file-size"></small>
+                        </div>
+                        <button class="btn-icon" onclick="clearDouyinSelectedFile()" title="清除选择"></button>
+                    </div>
+                </div>
+
+                <div class="form-row" id="douyin-import-options" style="display: none;">
+                    <label>导入模式:</label>
+                    <div class="radio-group">
+                        <div class="radio-wrapper">
+                            <input type="radio" id="douyin-import-replace" name="douyin-import-mode" value="replace" checked>
+                            <label for="douyin-import-replace">替换现有规则</label>
+                        </div>
+                        <div class="radio-wrapper">
+                            <input type="radio" id="douyin-import-append" name="douyin-import-mode" value="append">
+                            <label for="douyin-import-append">追加到现有规则</label>
+                        </div>
+                    </div>
+                    <p class="help-text">替换模式会清空现有规则。追加模式保留现有规则并添加新关键词</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="douyin-import-btn" class="btn-primary" onclick="importDouyinConfig()" disabled>导入</button>
+                <button class="btn-secondary" onclick="closeDouyinImportModal()">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="platform_log_view.js"></script>
+    <script src="platform_import.js"></script>
+    <script src="ai_mode.js"></script>
+    <script src="platform_tabs.js"></script>
+    <script src="douyin_script.js"></script>
+</body>
+</html>

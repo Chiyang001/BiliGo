@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BiliGo - 小红书私信自动回复</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="xiaohongshu_theme.css">
+    <link rel="stylesheet" href="platform_tabs.css">
+</head>
+<body data-api-prefix="xiaohongshu" data-platform-name="小红书">
+    <div id="toast-container"></div>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>BiliGo</h1>
+                <div class="subtitle">小红书私信自动回复工具</div>
+            </div>
+            <div class="header-actions">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="version-badge">V3 Ultra</span>
+                    <button class="btn-switch btn-secondary dashboard-nav" onclick="location.href='/dashboard?from=xiaohongshu'">仪表盘</button>
+                    <button class="btn-switch ai-reply-nav" onclick="location.href='/ai-reply?from=xiaohongshu'">AI回复</button>
+                    <button class="btn-switch btn-secondary" onclick="openDocsPage()" title="教程文档">教程文档</button>
+                    <button class="btn-switch btn-secondary" onclick="checkUpdate()" title="检查更新">检查更新</button>
+                </div>
+                <div class="platform-switcher" id="platform-switcher">
+                    <button class="btn-switch btn-secondary platform-switcher-toggle" onclick="togglePlatformSwitcher(event)">切换平台 <span class="chevron">▾</span></button>
+                    <div class="platform-switcher-menu">
+                        <button class="platform-switcher-item" onclick="location.href='/'">B站私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/comment'">B站评论</button>
+                        <button class="platform-switcher-item" onclick="location.href='/douyin'">抖音私信</button>
+                        <button class="platform-switcher-item active" disabled>小红书私信 <span class="check">✓</span></button>
+                        <button class="platform-switcher-item" onclick="location.href='/weibo'">微博私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/xianyu'">闲鱼消息</button>
+                    </div>
+                </div>
+                <button class="btn-switch btn-danger" onclick="resetXhsData()">清除所有数据</button>
+                <div class="status-indicator" id="status-indicator"><span class="status-icon">●</span><span id="status">未启动</span></div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <section class="control-panel">
+                <h2>系统控制</h2>
+                <div class="button-group">
+                    <button class="btn-primary" id="start-btn" onclick="startXhsMonitoring()" disabled>开始监控</button>
+                    <button class="btn-danger" id="stop-btn" onclick="stopXhsMonitoring()" disabled>停止监控</button>
+                </div>
+                <div class="login-required-hint" id="login-required-hint" role="status" hidden>
+                    <span>请先在账号配置面板中登录小红书账号，再开始监控。</span>
+                    <button type="button" onclick="openPlatformAccountPanel()">前往账号配置</button>
+                </div>
+                <div class="form-row" style="margin-top:20px;">
+                    <label for="message-check-interval">消息检测间隔（秒）:</label>
+                    <input type="number" id="message-check-interval" min="0.5" max="60" step="0.5" value="1">
+                </div>
+                <div class="form-row">
+                    <label for="send-delay-interval">发送间隔（秒）:</label>
+                    <input type="number" id="send-delay-interval" min="0.5" max="30" step="0.5" value="1">
+                </div>
+                <div class="form-row">
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="only-reply-new-messages" checked>
+                        <label for="only-reply-new-messages">仅回复启动后收到的新消息</label>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <label for="max-replies-per-user">单用户最大回复次数:</label>
+                    <input type="number" id="max-replies-per-user" min="1" max="100" value="3">
+                </div>
+                <div class="checkbox-wrapper">
+                    <input type="checkbox" id="unlimited-replies-per-user" onchange="updateXhsReplyLimitState()">
+                    <label for="unlimited-replies-per-user">不限制单用户回复次数</label>
+                </div>
+                <button class="btn-secondary" onclick="saveXhsConfig()">保存消息设置</button>
+                <div class="button-group" style="margin-top: 20px;">
+                    <button class="btn-secondary" onclick="exportPlatformConfig()" title="导出当前平台配置">导出配置</button>
+                    <button class="btn-primary" onclick="openPlatformConfigImport()" title="导入当前平台配置">导入配置</button>
+                </div>
+            </section>
+
+            <section class="config-panel">
+                <h2>账号配置</h2>
+                <div class="info-banner xhs-banner">
+                    <div class="info-banner-content">
+                        <strong>小红书账号登录</strong>
+                        <p>点击打开登录窗口，完成扫码或手机号登录。登录会话会保存到独立浏览器目录。</p>
+                    </div>
+                </div>
+                <div class="account-card" id="account-card">
+                    <div class="account-profile">
+                        <div class="account-avatar xhs-avatar" id="account-avatar"><img class="default-platform-avatar" src="/xiaohongshu-seeklogo.png" alt="小红书默认头像"></div>
+                        <div class="account-meta"><h3 id="account-nickname">未登录</h3><p id="account-uid">用户 ID: -</p></div>
+                    </div>
+                    <div class="account-row"><span class="label">登录状态</span><span id="login-status-text" class="value warn">未登录</span></div>
+                    <div class="account-row"><span class="label">登录时间</span><span id="account-login-time" class="value">-</span></div>
+                </div>
+                <div class="button-group">
+                    <button class="btn-primary" id="login-btn" onclick="startXhsLogin()">打开登录窗口</button>
+                    <button class="btn-secondary" onclick="refreshXhsAccount()">刷新账号</button>
+                    <button class="btn-danger" onclick="xhsLogout()">退出登录</button>
+                </div>
+                <div class="platform-email-alert" style="margin-top: 24px;"></div>
+            </section>
+
+            <section class="reply-settings-container">
+                <div class="reply-settings-row">
+                    <div class="default-reply-panel half-width">
+                        <h2>默认回复</h2>
+                        <div class="checkbox-wrapper">
+                            <input type="checkbox" id="default-reply-enabled">
+                            <label for="default-reply-enabled">启用默认回复</label>
+                        </div>
+                        <p class="help-text">消息未匹配任何关键词时发送</p>
+                        <div class="form-row" id="xhs-default-text-content"><label for="default-reply-message">回复内容:</label><textarea id="default-reply-message" rows="4" placeholder="感谢您的私信，我会尽快回复~"></textarea></div>
+                        <button class="btn-primary" onclick="saveXhsDefaultReply()">保存默认回复</button>
+                    </div>
+
+                    <div class="keyword-panel half-width">
+                        <h2>添加关键词</h2>
+                        <div class="form-row"><label for="rule-name">规则名称:</label><input id="rule-name" placeholder="例如：问候语"></div>
+                        <div class="form-row"><label for="rule-keyword">关键词（逗号分隔）:</label><input id="rule-keyword" placeholder="你好,您好,在吗"></div>
+                        <div class="form-row" id="xhs-rule-text-content"><label for="rule-reply">回复内容:</label><textarea id="rule-reply" placeholder="请输入自动回复内容"></textarea></div>
+                        <button class="btn-primary" onclick="addXhsRule()">添加规则</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="rules-panel">
+                <h2>回复规则列表</h2>
+                <div id="rules-list" class="rules-list"></div>
+                <div class="pagination">
+                    <button id="xhs-prev-page-bottom" class="btn-icon" onclick="changeXhsPage(-1)" disabled>上一页</button>
+                    <span id="xhs-page-info-bottom">第 1 页，共 1 页</span>
+                    <button id="xhs-next-page-bottom" class="btn-icon" onclick="changeXhsPage(1)" disabled>下一页</button>
+                </div>
+                <button class="btn-primary" style="margin-top:14px;" onclick="saveXhsRules()">保存全部规则</button>
+            </section>
+            <section class="log-panel">
+                <h2>运行日志</h2>
+                <div id="logs-container" class="log-viewer"></div>
+            </section>
+        </div>
+        <footer><p>© 2026 <a href="https://space.bilibili.com/404891612" target="_blank" rel="noopener noreferrer">炽阳001</a> | BiliGo 小红书私信自动回复</p></footer>
+    </div>
+    <div id="platform-config-import-modal" class="modal">
+        <div class="modal-content" style="max-width: 460px;">
+            <div class="modal-header">
+                <h3>导入配置</h3>
+                <button class="close-btn" onclick="closePlatformConfigImport()" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label for="platform-config-file">配置文件:</label>
+                    <input id="platform-config-file" type="file" accept=".json,application/json">
+                </div>
+                <div class="form-row">
+                    <label>导入模式:</label>
+                    <div class="radio-group">
+                        <div class="radio-wrapper"><input type="radio" id="platform-config-replace" name="platform-config-import-mode" value="replace" checked><label for="platform-config-replace">替换现有规则</label></div>
+                        <div class="radio-wrapper"><input type="radio" id="platform-config-append" name="platform-config-import-mode" value="append"><label for="platform-config-append">追加新规则</label></div>
+                    </div>
+                </div>
+                <p class="help-text">配置包不包含账号登录会话。导入前建议先导出当前配置备份。</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" id="platform-config-import-submit" onclick="importPlatformConfig()">导入</button>
+                <button class="btn-secondary" onclick="closePlatformConfigImport()">取消</button>
+            </div>
+        </div>
+    </div>
+    <script src="platform_log_view.js"></script>
+    <script src="platform_import.js"></script>
+    <script src="ai_mode.js"></script>
+    <script src="platform_tabs.js"></script>
+    <script src="xiaohongshu_script.js"></script>
+</body>
+</html>

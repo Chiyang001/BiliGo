@@ -12,6 +12,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+# Root-level runtime configuration is excluded from the build context because
+# it may contain platform cookies and API keys. Install credential-free
+# templates for the entrypoint to copy into a new /data volume.
+COPY docker/defaults/ /app/
 
 RUN mkdir -p /data \
     && sed -i 's/\r$//' /app/docker/entrypoint.sh \

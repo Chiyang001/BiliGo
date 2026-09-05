@@ -114,17 +114,17 @@ body {
 }
 
 .toast.success {
-    border-left: 4px solid var(--success-color);
+    border-color: var(--success-color);
     background: linear-gradient(135deg, var(--card-bg) 0%, rgba(46, 213, 115, 0.05) 100%);
 }
 
 .toast.error {
-    border-left: 4px solid var(--danger-color);
+    border-color: var(--danger-color);
     background: linear-gradient(135deg, var(--card-bg) 0%, rgba(255, 71, 87, 0.05) 100%);
 }
 
 .toast.warning {
-    border-left: 4px solid var(--warning-color);
+    border-color: var(--warning-color);
     background: linear-gradient(135deg, var(--card-bg) 0%, rgba(255, 165, 2, 0.05) 100%);
 }
 
@@ -304,25 +304,9 @@ section {
     overflow: hidden;
 }
 
-section::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--gradient-primary);
-    opacity: 0;
-    transition: var(--transition);
-}
-
 section:hover {
     box-shadow: var(--shadow-hover);
     border-color: var(--border-light);
-}
-
-section:hover::before {
-    opacity: 1;
 }
 
 h2 {

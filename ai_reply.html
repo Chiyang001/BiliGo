@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BiliGo - AI回复设置</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="ai_reply.css">
+</head>
+<body class="ai-settings-page">
+    <div id="toast-container"></div>
+    <div class="container">
+        <header>
+            <div class="logo"><h1>BiliGo</h1><div class="subtitle">统一 AI 回复设置</div></div>
+            <div class="header-actions">
+                <span class="version-badge">V3 Ultra</span>
+                <button class="btn-switch btn-secondary" id="ai-back-button">返回平台</button>
+            </div>
+        </header>
+
+        <main class="ai-settings-shell">
+            <section class="ai-settings-hero">
+                <canvas id="ai-ambient-canvas" aria-hidden="true"></canvas>
+                <div class="ai-hero-copy">
+                    <span class="ai-settings-kicker">AI REPLY</span>
+                    <h2>一个面板，管理所有平台</h2>
+                    <p>按平台开放 AI 接管。未启用的平台继续沿用原有回复规则。</p>
+                </div>
+                <label class="ai-master-switch"><input type="checkbox" id="ai-enabled"><span></span><strong>启用AI回复</strong></label>
+            </section>
+
+            <section class="ai-settings-workspace">
+                <aside class="ai-tab-sidebar" aria-label="AI 设置分类">
+                    <div class="ai-tab-group-label">模型服务</div>
+                    <button class="ai-tab-button provider-tab" type="button" data-tab="provider">
+                        <img class="provider-tab-icon" src="openai.png" alt=""><span><strong>AI 提供商</strong><small>接口与模型</small></span><b>›</b>
+                    </button>
+                    <button class="ai-tab-button model-settings-tab" type="button" data-tab="model-settings">
+                        <img class="provider-tab-icon" src="icons8-设置-50.png" alt=""><span><strong>大模型 AI 配置</strong><small>上下文与安全</small></span><b>›</b>
+                    </button>
+                    <button class="ai-tab-button knowledge-tab" type="button" data-tab="knowledge">
+                        <img class="knowledge-tab-icon" src="icons8-知识库-50.png" alt=""><span><strong>知识库配置</strong><small>文本与文档</small></span><b>›</b>
+                    </button>
+                    <button class="ai-tab-button handoff-tab" type="button" data-tab="handoff">
+                        <img class="handoff-tab-icon" src="icons8-人-50.png" alt=""><span><strong>人工待回</strong><small>AI 标记与快速回复</small></span><b>›</b><em id="ai-handoff-badge" hidden>0</em>
+                    </button>
+                    <div class="ai-tab-divider"></div>
+                    <div class="ai-tab-group-label">平台设置 <span id="ai-platform-count">0 / 6</span></div>
+                    <button class="ai-tab-button" type="button" data-tab="bili_message">
+                        <img src="bilibili.png" alt=""><span><strong>B站私信</strong><small>私信回复</small></span><i></i>
+                    </button>
+                    <button class="ai-tab-button" type="button" data-tab="bili_comment">
+                        <img src="bilibili.png" alt=""><span><strong>B站评论</strong><small>评论回复</small></span><i></i>
+                    </button>
+                    <button class="ai-tab-button" type="button" data-tab="xiaohongshu">
+                        <img src="xiaohongshu-seeklogo.png" alt=""><span><strong>小红书</strong><small>私信回复</small></span><i></i>
+                    </button>
+                    <button class="ai-tab-button" type="button" data-tab="weibo">
+                        <img src="sina-weibo-seeklogo.png" alt=""><span><strong>微博</strong><small>私信回复</small></span><i></i>
+                    </button>
+                    <button class="ai-tab-button" type="button" data-tab="douyin">
+                        <img src="tik-tok.png" alt=""><span><strong>抖音</strong><small>私信回复</small></span><i></i>
+                    </button>
+                    <button class="ai-tab-button" type="button" data-tab="xianyu">
+                        <img src="xianyu.jpg" alt=""><span><strong>闲鱼</strong><small>买家消息</small></span><i></i>
+                    </button>
+                </aside>
+
+                <div class="ai-tab-content">
+                    <section class="ai-tab-panel" data-panel="bili_message">
+                        <div class="ai-panel-heading"><div class="ai-panel-title"><img src="bilibili.png" alt="哔哩哔哩"><div><span>BILIBILI</span><h3>B站私信 AI 回复</h3></div></div><label class="ai-platform-switch"><input type="checkbox" data-platform="bili_message"><span></span><strong>开放此平台</strong></label></div>
+                        <div class="ai-platform-info"><div><small>回复渠道</small><strong>站内私信</strong></div><div><small>接管方式</small><strong>AI 独立回复</strong></div><div><small>传统规则</small><strong>启用后停用</strong></div></div>
+                        <div class="ai-platform-knowledge"><div><strong>使用知识库</strong><small>可选择一个或多个知识库</small></div><div class="ai-platform-knowledge-options" data-knowledge-platform="bili_message"></div></div>
+                        <div class="ai-mode-explanation"><strong>启用后的行为</strong><p>新私信将直接交给 AI 生成中文回复，默认回复与自定义关键词规则会被锁定。</p></div>
+                    </section>
+
+                    <section class="ai-tab-panel" data-panel="bili_comment" hidden>
+                        <div class="ai-panel-heading"><div class="ai-panel-title"><img src="bilibili.png" alt="哔哩哔哩"><div><span>BILIBILI</span><h3>B站评论 AI 回复</h3></div></div><label class="ai-platform-switch"><input type="checkbox" data-platform="bili_comment"><span></span><strong>开放此平台</strong></label></div>
+                        <div class="ai-platform-info"><div><small>回复渠道</small><strong>视频评论</strong></div><div><small>接管方式</small><strong>AI 独立回复</strong></div><div><small>传统规则</small><strong>启用后停用</strong></div></div>
+                        <div class="ai-platform-knowledge"><div><strong>使用知识库</strong><small>可选择一个或多个知识库</small></div><div class="ai-platform-knowledge-options" data-knowledge-platform="bili_comment"></div></div>
+                        <div class="ai-mode-explanation"><strong>启用后的行为</strong><p>检测到新评论后由 AI 生成简洁友好的回复，不再匹配评论关键词或默认回复。</p></div>
+                    </section>
+
+                    <section class="ai-tab-panel" data-panel="xiaohongshu" hidden>
+                        <div class="ai-panel-heading"><div class="ai-panel-title"><img src="xiaohongshu-seeklogo.png" alt="小红书"><div><span>XIAOHONGSHU</span><h3>小红书 AI 回复</h3></div></div><label class="ai-platform-switch"><input type="checkbox" data-platform="xiaohongshu"><span></span><strong>开放此平台</strong></label></div>
+                        <div class="ai-platform-info"><div><small>回复渠道</small><strong>站内私信</strong></div><div><small>接管方式</small><strong>AI 独立回复</strong></div><div><small>传统规则</small><strong>启用后停用</strong></div></div>
+                        <div class="ai-platform-knowledge"><div><strong>使用知识库</strong><small>可选择一个或多个知识库</small></div><div class="ai-platform-knowledge-options" data-knowledge-platform="xiaohongshu"></div></div>
+                        <div class="ai-mode-explanation"><strong>启用后的行为</strong><p>小红书新私信将直接使用 AI 回复，对应页面的默认回复和关键词设置会置灰锁定。</p></div>
+                    </section>
+
+                    <section class="ai-tab-panel" data-panel="weibo" hidden>
+                        <div class="ai-panel-heading"><div class="ai-panel-title"><img src="sina-weibo-seeklogo.png" alt="微博"><div><span>WEIBO</span><h3>微博 AI 回复</h3></div></div><label class="ai-platform-switch"><input type="checkbox" data-platform="weibo"><span></span><strong>开放此平台</strong></label></div>
+                        <div class="ai-platform-info"><div><small>回复渠道</small><strong>站内私信</strong></div><div><small>接管方式</small><strong>AI 独立回复</strong></div><div><small>传统规则</small><strong>启用后停用</strong></div></div>
+                        <div class="ai-platform-knowledge"><div><strong>使用知识库</strong><small>可选择一个或多个知识库</small></div><div class="ai-platform-knowledge-options" data-knowledge-platform="weibo"></div></div>
+                        <div class="ai-mode-explanation"><strong>启用后的行为</strong><p>微博新私信将由 AI 生成回复。未开启时仍使用微博平台原有规则。</p></div>
+                    </section>
+
+                    <section class="ai-tab-panel" data-panel="douyin" hidden>
+                        <div class="ai-panel-heading"><div class="ai-panel-title"><img src="tik-tok.png" alt="抖音"><div><span>DOUYIN</span><h3>抖音 AI 回复</h3></div></div><label class="ai-platform-switch"><input type="checkbox" data-platform="douyin"><span></span><strong>开放此平台</strong></label></div>
+                        <div class="ai-platform-info"><div><small>回复渠道</small><strong>站内私信</strong></div><div><small>接管方式</small><strong>AI 独立回复</strong></div><div><small>传统规则</small><strong>启用后停用</strong></div></div>
+                        <div class="ai-platform-knowledge"><div><strong>使用知识库</strong><small>可选择一个或多个知识库</small></div><div class="ai-platform-knowledge-options" data-knowledge-platform="douyin"></div></div>
+                        <div class="ai-mode-explanation"><strong>启用后的行为</strong><p>抖音私信由 AI 直接生成回复，对应的默认回复与关键词规则不再执行。</p></div>
+                    </section>
+
+                    <section class="ai-tab-panel" data-panel="xianyu" hidden>
+                        <div class="ai-panel-heading"><div class="ai-panel-title"><img src="xianyu.jpg" alt="闲鱼"><div><span>XIANYU</span><h3>闲鱼 AI 回复</h3></div></div><label class="ai-platform-switch"><input type="checkbox" data-platform="xianyu"><span></span><strong>开放此平台</strong></label></div>
+                        <div class="ai-platform-info"><div><small>回复渠道</small><strong>买家消息</strong></div><div><small>接管方式</small><strong>AI 独立回复</strong></div><div><small>传统规则</small><strong>启用后停用</strong></div></div>
+                        <div class="ai-platform-knowledge"><div><strong>使用知识库</strong><small>可选择一个或多个知识库</small></div><div class="ai-platform-knowledge-options" data-knowledge-platform="xianyu"></div></div>
+                        <div class="ai-mode-explanation"><strong>启用后的行为</strong><p>闲鱼新消息将由 AI 生成回复；未开启时继续使用默认回复和关键词规则。</p></div>
+                    </section>
+
+                    <section class="ai-tab-panel provider-panel" data-panel="provider" hidden>
+                        <div class="ai-panel-heading"><div class="provider-heading-title"><img src="openai.png" alt="OpenAI"><div><span class="ai-panel-eyebrow">MODEL SERVICE</span><h3>AI 提供商</h3><p>配置 OpenAI、Anthropic 或兼容接口，凭据仅保存在本机。</p></div></div></div>
+                        <div class="ai-provider-form">
+                            <label>协议格式<select id="ai-format"><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic 兼容</option><option value="custom">自定义兼容</option></select></label>
+                            <label class="wide-field">接口地址<input id="ai-base-url" type="url" placeholder="https://api.openai.com/v1"></label>
+                            <label class="wide-field">模型名称<div class="ai-model-control"><input id="ai-model" type="text" list="ai-model-options" placeholder="选择模型或手动填写"><button type="button" class="btn-secondary" id="ai-load-models-button">获取模型列表</button><datalist id="ai-model-options"></datalist><select id="ai-model-select" hidden aria-label="选择已获取的模型"><option value="">选择已获取的模型</option></select></div></label>
+                            <label class="wide-field">API Key<input id="ai-api-key" type="password" placeholder="请输入 API Key" autocomplete="new-password"></label>
+                        </div>
+                        <div class="ai-provider-tools">
+                            <button type="button" class="btn-secondary" id="ai-latency-button">延迟测速</button>
+                            <span id="ai-provider-tools-result" role="status">填写 Base URL 与 API Key 后可查询</span>
+                        </div>
+                        <div class="ai-provider-note"><strong>安全提示</strong><span>已保存的 API Key 会以星号掩码显示。未修改掩码时会继续使用原密钥。</span></div>
+                    </section>
+
+                    <section class="ai-tab-panel" data-panel="model-settings" hidden>
+                        <div class="ai-panel-heading"><div class="provider-heading-title"><img class="provider-tab-icon" src="icons8-设置-50.png" alt="设置"><div><span class="ai-panel-eyebrow">MODEL RUNTIME</span><h3>大模型 AI 配置</h3><p>控制上下文、自动压缩以及违禁词拦截。</p></div></div></div>
+                        <div class="ai-provider-form">
+                            <label>上下文开关<select id="ai-context-enabled"><option value="true">开启</option><option value="false">关闭</option></select></label>
+                            <label>上下文窗口大小<input id="ai-context-window" type="number" min="500" max="128000" step="100"></label>
+                            <label>自动压缩<select id="ai-auto-compress"><option value="true">开启</option><option value="false">关闭</option></select></label>
+                            <label class="wide-field">违禁词（使用中文逗号分隔）<textarea id="ai-prohibited-words" rows="3" placeholder="例如：博彩，诈骗"></textarea></label>
+                        </div>
+                    </section>
+
+                    <section class="ai-tab-panel knowledge-panel" data-panel="knowledge" hidden>
+                        <div class="ai-panel-heading">
+                            <div class="knowledge-heading-title"><img class="knowledge-heading-icon" src="icons8-知识库-50.png" alt="知识库"><div><span class="ai-panel-eyebrow">KNOWLEDGE BASE</span><h3>知识库配置</h3><p>创建多个知识库，再按平台灵活选择使用。</p></div></div>
+                            <label class="ai-platform-switch"><input type="checkbox" id="ai-knowledge-enabled"><span></span><strong>启用知识库</strong></label>
+                        </div>
+                        <div class="ai-knowledge-manager">
+                            <aside class="ai-knowledge-list-pane"><div class="ai-knowledge-list-heading"><strong>知识库列表</strong><div><button type="button" id="ai-new-knowledge-button">＋ 新建</button><input id="ai-knowledge-file" type="file" accept=".md,.markdown,text/markdown" hidden><button type="button" id="ai-knowledge-upload-button">上传 MD</button></div></div><div id="ai-knowledge-list" class="ai-knowledge-list"></div></aside>
+                            <div class="ai-knowledge-editor">
+                                <div class="ai-knowledge-editor-top"><label>知识库名称<input id="ai-knowledge-name" maxlength="100" placeholder="例如：产品售后知识库"></label><button type="button" class="btn-primary" id="ai-save-knowledge-button">保存知识库</button></div>
+                                <div class="ai-knowledge-card-heading"><div><strong>文档和内容</strong><small id="ai-knowledge-content-hint">适合录入常见问题、品牌信息和回复规范</small></div><span id="ai-knowledge-char-count">0 / 20000</span></div>
+                                <textarea id="ai-knowledge-text" maxlength="2097152" placeholder="输入知识文本，填写名称后点击保存……"></textarea>
+                            </div>
+                        </div>
+                        <div class="ai-provider-note"><strong>使用方式</strong><span>启用后，在线文本和 Markdown 文档会在各平台生成回复时作为知识上下文提供给 AI。</span></div>
+                    </section>
+
+                    <section class="ai-tab-panel handoff-panel" data-panel="handoff" hidden>
+                        <div class="ai-panel-heading">
+                            <div class="handoff-heading-title"><img class="handoff-heading-icon" src="icons8-人-50.png" alt=""><div><span class="ai-panel-eyebrow">HUMAN HANDOFF</span><h3>人工待回提醒</h3><p>AI 无法可靠处理时暂停自动回复，并将消息加入人工待回列表。</p></div></div>
+                            <div class="ai-handoff-switch-control">
+                                <label class="ai-platform-switch"><input type="checkbox" id="ai-human-handoff-enabled"><span></span><strong>启用人工待回</strong></label>
+                                <small id="ai-handoff-save-status" role="status" aria-live="polite"></small>
+                            </div>
+                        </div>
+                        <div class="ai-handoff-summary">
+                            <div><strong id="ai-handoff-count">0</strong><span>条待处理消息</span></div>
+                            <p>适用于知识库信息不足、订单与退款、账号权限、投诉争议、隐私或用户明确要求人工等情况。此功能默认关闭。</p>
+                        </div>
+                        <div class="ai-handoff-toolbar">
+                            <label>筛选平台<select id="ai-handoff-platform"><option value="">全部平台</option><option value="bili_message">B站私信</option><option value="bili_comment">B站评论</option><option value="douyin">抖音私信</option><option value="xiaohongshu">小红书私信</option><option value="weibo">微博私信</option><option value="xianyu">闲鱼消息</option></select></label>
+                            <button type="button" class="btn-secondary" id="ai-refresh-handoffs">刷新列表</button>
+                        </div>
+                        <div class="ai-handoff-list" id="ai-handoff-list" aria-live="polite"><div class="ai-handoff-empty">正在读取待回消息…</div></div>
+                    </section>
+
+                    <div class="ai-save-bar"><span id="ai-save-result" role="status"></span><button class="btn-secondary" id="ai-test-button">测试连接</button><button class="btn-primary" id="ai-save-button">保存设置</button></div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="ai_reply.js"></script>
+</body>
+</html>

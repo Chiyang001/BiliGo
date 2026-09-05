@@ -10,6 +10,14 @@ DEFAULT_CONFIG_FILES = (
     'comment_keywords.json',
     'comment_rules.json',
     'user_reply_stats.json',
+    'douyin_config.json',
+    'douyin_keywords.json',
+    'xiaohongshu_config.json',
+    'xiaohongshu_keywords.json',
+    'weibo_config.json',
+    'weibo_keywords.json',
+    'xianyu_config.json',
+    'xianyu_keywords.json',
 )
 
 

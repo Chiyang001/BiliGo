@@ -2,48 +2,42 @@
 
 let commentRules = [];
 let isCommentMonitoring = false;
+let isCommentLoggedIn = false;
 let currentCommentPage = 1;
 const commentRulesPerPage = 10;
 let editingCommentRuleId = null;
 
-// 全局变量
-let currentImageBrowserTarget = null;
-let currentBrowserPath = '';
-let selectedImagePath = '';
-
 // 页面加载时初始化
 document.addEventListener('DOMContentLoaded', function() {
+    loadCommentPlatformEmailConfig();
     loadCommentConfig();
     loadCommentRules();
     checkCommentServerStatus();
+    loadCommentLogs();
+    setInterval(loadCommentLogs, 4000);
     initCommentMobileOptimizations();
-    initCommentReplyTypeHandlers();
     loadCommentTimingConfig();
 });
 
-// 初始化回复类型处理器
-function initCommentReplyTypeHandlers() {
-    // 默认评论回复类型切换
-    const defaultCommentRadios = document.querySelectorAll('input[name="default-comment-reply-type"]');
-    defaultCommentRadios.forEach(radio => {
-        radio.addEventListener('change', function() {
-            toggleDefaultCommentReplyContent(this.value);
-        });
-    });
+function loadCommentPlatformEmailConfig() {
+    fetch('/api/platform-email-config/bili_comment').then(r => r.json()).then(data => {
+        const cfg = data.config || {};
+        const enabled = document.getElementById('platform-email-enabled');
+        const receiver = document.getElementById('platform-email-receiver');
+        if (enabled) enabled.checked = !!cfg.enabled;
+        if (receiver) receiver.value = cfg.receiver_email || '';
+    }).catch(error => console.warn('加载评论邮件提醒配置失败', error));
 }
 
-// 切换默认评论回复内容显示
-function toggleDefaultCommentReplyContent(type) {
-    const textContent = document.getElementById('default-comment-text-content');
-    const imageContent = document.getElementById('default-comment-image-content');
-    
-    if (type === 'text') {
-        textContent.style.display = 'block';
-        imageContent.style.display = 'none';
-    } else {
-        textContent.style.display = 'none';
-        imageContent.style.display = 'block';
-    }
+function saveCommentPlatformEmailConfig() {
+    const enabled = !!document.getElementById('platform-email-enabled')?.checked;
+    const receiver_email = document.getElementById('platform-email-receiver')?.value.trim() || '';
+    fetch('/api/platform-email-config/bili_comment', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled, receiver_email})
+    }).then(r => r.json()).then(data => {
+        if (typeof showToast === 'function') showToast(data.success ? '评论邮件提醒设置已保存' : (data.error || '保存失败'), data.success ? 'success' : 'error');
+    }).catch(error => { if (typeof showToast === 'function') showToast('保存失败: ' + error.message, 'error'); });
 }
 
 // 移动端优化初始化
@@ -143,11 +137,6 @@ function switchToMessageMode() {
     window.location.href = 'index.html';
 }
 
-// 跳转到日志页面
-function goToLogsPage() {
-    window.location.href = 'logs.html';
-}
-
 // 检查更新
 function checkUpdate() {
     window.open('https://github.com/Chiyang001/BiliGo/releases/', '_blank');
@@ -155,14 +144,29 @@ function checkUpdate() {
 
 // 打开教程文档页
 function openDocsPage() {
-    window.location.href = 'docs.html';
+    window.location.href = 'docs.html?from=comment#comment-mode';
 }
+
+// 平台切换下拉菜单
+function togglePlatformSwitcher(event) {
+    event.stopPropagation();
+    document.getElementById('platform-switcher').classList.toggle('open');
+}
+
+document.addEventListener('click', function(event) {
+    const switcher = document.getElementById('platform-switcher');
+    if (switcher && !switcher.contains(event.target)) {
+        switcher.classList.remove('open');
+    }
+});
 
 // 加载评论回复配置
 function loadCommentConfig() {
     fetch('/api/comment-config')
     .then(response => response.json())
     .then(data => {
+        isCommentLoggedIn = !!(data.sessdata && data.bili_jct);
+        updateCommentButtonStates();
         // 加载登录配置
         if (data.sessdata) {
             document.getElementById('sessdata').value = data.sessdata;
@@ -175,16 +179,7 @@ function loadCommentConfig() {
         if (document.getElementById('default-comment-reply-enabled')) {
             document.getElementById('default-comment-reply-enabled').checked = data.default_comment_reply_enabled || false;
             
-            const replyType = data.default_comment_reply_type || 'text';
-            document.querySelector(`input[name="default-comment-reply-type"][value="${replyType}"]`).checked = true;
-            toggleDefaultCommentReplyContent(replyType);
-            
             document.getElementById('default-comment-reply-message').value = data.default_comment_reply_message || '感谢您的评论！';
-            
-            if (data.default_comment_reply_image) {
-                document.getElementById('default-comment-reply-image-path').value = data.default_comment_reply_image;
-                showImagePreview('default-comment', data.default_comment_reply_image);
-            }
         }
         
         // 加载监控配置
@@ -288,30 +283,15 @@ function saveCommentLoginConfig() {
 // 保存默认评论回复设置
 function saveDefaultCommentReply() {
     const enabled = document.getElementById('default-comment-reply-enabled').checked;
-    const replyType = document.querySelector('input[name="default-comment-reply-type"]:checked').value;
-    
-    let configData = {
-        default_comment_reply_enabled: enabled,
-        default_comment_reply_type: replyType
-    };
-    
-    if (replyType === 'text') {
-        const message = document.getElementById('default-comment-reply-message').value.trim();
-        if (!message) {
-            showToast('请填写默认评论回复内容', 'warning');
-            return;
-        }
-        configData.default_comment_reply_message = message;
-        configData.default_comment_reply_image = '';
-    } else {
-        const imagePath = document.getElementById('default-comment-reply-image-path').value.trim();
-        if (!imagePath) {
-            showToast('请选择默认评论回复图片', 'warning');
-            return;
-        }
-        configData.default_comment_reply_image = imagePath;
-        configData.default_comment_reply_message = '';
+    const message = document.getElementById('default-comment-reply-message').value.trim();
+    if (!message) {
+        showToast('请填写默认评论回复内容', 'warning');
+        return;
     }
+    const configData = {
+        default_comment_reply_enabled: enabled,
+        default_comment_reply_message: message
+    };
     
     fetch('/api/comment-config', {
         method: 'POST',
@@ -355,9 +335,7 @@ function addCommentRule() {
         id: Date.now(),
         name: name,
         keyword: keywords,
-        reply_type: 'text',
         reply: reply,
-        reply_image: '',
         enabled: true,
         created_at: new Date().toISOString()
     };
@@ -429,6 +407,7 @@ function updateCommentRulesDisplay() {
     const container = document.getElementById('comment-rules-list');
     
     if (commentRules.length === 0) {
+        currentCommentPage = 1;
         container.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">暂无评论回复规则</p>';
         updateCommentPaginationControls();
         return;
@@ -440,7 +419,8 @@ function updateCommentRulesDisplay() {
         return timeB - timeA;
     });
     
-    const totalPages = Math.ceil(sortedRules.length / commentRulesPerPage);
+    const totalPages = Math.max(1, Math.ceil(sortedRules.length / commentRulesPerPage));
+    currentCommentPage = Math.max(1, Math.min(currentCommentPage, totalPages));
     const startIndex = (currentCommentPage - 1) * commentRulesPerPage;
     const endIndex = startIndex + commentRulesPerPage;
     const currentRules = sortedRules.slice(startIndex, endIndex);
@@ -448,22 +428,14 @@ function updateCommentRulesDisplay() {
     container.innerHTML = currentRules.map(rule => {
         const enabledStatus = rule.enabled ? '<span style="color: #2ed573;"></span>' : '<span style="color: #ff4757;"></span>';
         
-        let replyContent = '';
-        const replyType = rule.reply_type || 'text';
-        
-        if (replyType === 'image') {
-            const imageName = rule.reply_image ? rule.reply_image.split(/[/\\]/).pop() : '未选择图片';
-            replyContent = `<span style="color: #007bff;"></span> 图片回复: ${imageName}`;
-        } else {
-            const replyText = rule.reply && rule.reply.length > 100 ? rule.reply.substring(0, 100) + '...' : (rule.reply || '');
-            replyContent = `<span style="color: #28a745;"></span> 文字回复: ${replyText}`;
-        }
+        const replyText = rule.reply && rule.reply.length > 100 ? rule.reply.substring(0, 100) + '...' : (rule.reply || '');
+        const replyContent = `<span style="color: #28a745;"></span> 文字回复: ${replyText}`;
         
         return `
         <div class="rule-item">
             <div class="rule-title">${enabledStatus} ${rule.name || '未命名规则'}</div>
             <div class="rule-keywords">关键词: ${rule.keyword || ''}</div>
-            <div class="rule-reply" title="${rule.reply || rule.reply_image || ''}">${replyContent}</div>
+            <div class="rule-reply" title="${rule.reply || ''}">${replyContent}</div>
             <div class="rule-actions">
                 <button class="edit-btn" onclick="editCommentRule(${rule.id})"> 编辑</button>
                 <button class="delete-btn" onclick="deleteCommentRule(${rule.id})"> 删除</button>
@@ -481,14 +453,14 @@ function updateCommentRulesDisplay() {
 
 // 更新评论回复分页控件
 function updateCommentPaginationControls() {
-    const totalPages = Math.ceil(commentRules.length / commentRulesPerPage);
+    const totalPages = Math.max(1, Math.ceil(commentRules.length / commentRulesPerPage));
     const pageInfo = `第 ${currentCommentPage} 页，共 ${totalPages} 页`;
     
-    document.getElementById('page-info').textContent = pageInfo;
-    document.getElementById('page-info-bottom').textContent = pageInfo;
+    const pageInfoBottom = document.getElementById('page-info-bottom');
+    if (pageInfoBottom) pageInfoBottom.textContent = pageInfo;
     
-    const prevButtons = [document.getElementById('prev-page'), document.getElementById('prev-page-bottom')];
-    const nextButtons = [document.getElementById('next-page'), document.getElementById('next-page-bottom')];
+    const prevButtons = [document.getElementById('prev-page-bottom')].filter(Boolean);
+    const nextButtons = [document.getElementById('next-page-bottom')].filter(Boolean);
     
     prevButtons.forEach(btn => {
         btn.disabled = currentCommentPage <= 1;
@@ -501,7 +473,7 @@ function updateCommentPaginationControls() {
 
 // 切换评论回复页面
 function changePage(direction) {
-    const totalPages = Math.ceil(commentRules.length / commentRulesPerPage);
+    const totalPages = Math.max(1, Math.ceil(commentRules.length / commentRulesPerPage));
     
     if (direction === -1 && currentCommentPage > 1) {
         currentCommentPage--;
@@ -525,7 +497,6 @@ function startCommentMonitoring() {
             updateCommentStatus('监控评论中...');
             showToast('开始监控评论回复', 'success');
             addCommentLog('开始监控评论回复', 'success');
-            startCommentLogPolling();
         } else {
             showToast('启动评论监控失败: ' + data.error, 'error');
             addCommentLog('启动评论监控失败: ' + data.error, 'error');
@@ -563,8 +534,11 @@ function stopCommentMonitoring() {
 
 // 更新评论按钮状态
 function updateCommentButtonStates() {
-    document.getElementById('start-btn').disabled = isCommentMonitoring;
-    document.getElementById('stop-btn').disabled = !isCommentMonitoring;
+    document.getElementById('start-btn').disabled = isCommentMonitoring || !isCommentLoggedIn;
+    document.getElementById('stop-btn').disabled = !isCommentMonitoring || !isCommentLoggedIn;
+    if (typeof setPlatformLoginRequired === 'function') {
+        setPlatformLoginRequired(!isCommentLoggedIn);
+    }
     
     const statusIndicator = document.querySelector('.status-indicator');
     if (isCommentMonitoring) {
@@ -583,28 +557,26 @@ function updateCommentStatus(status) {
 
 // 添加评论日志
 function addCommentLog(message, type = 'info') {
-    const log = document.getElementById('comment-log');
-    
-    // 安全检查：如果log容器不存在，直接返回
-    if (!log) {
+    const container = document.getElementById('logs-container');
+    if (!container) {
         console.log(`Comment Log: [${type.toUpperCase()}] ${message}`);
         return;
     }
-    
-    const timestamp = new Date().toLocaleTimeString();
-    const entry = document.createElement('div');
-    entry.className = `log-entry log-${type}`;
-    entry.textContent = `[${timestamp}] ${message}`;
-    log.appendChild(entry);
-    
-    const container = document.getElementById('log-container');
-    if (container) {
-        container.scrollTop = container.scrollHeight;
-    }
-    
-    const entries = log.children;
-    if (entries.length > 100) {
-        log.removeChild(entries[0]);
+    appendPlatformLog(container, message, type);
+}
+
+async function loadCommentLogs() {
+    try {
+        const res = await fetch('/api/comment-logs');
+        const data = await res.json();
+        renderPlatformLogs(data.logs, document.getElementById('logs-container'));
+        if (data.monitoring !== isCommentMonitoring) {
+            isCommentMonitoring = data.monitoring;
+            updateCommentButtonStates();
+            updateCommentStatus(data.monitoring ? '监控评论中...' : '未启动');
+        }
+    } catch (e) {
+        console.error('获取评论日志失败:', e);
     }
 }
 
@@ -614,52 +586,15 @@ function checkCommentServerStatus() {
     .then(response => response.json())
     .then(data => {
         isCommentMonitoring = data.monitoring;
+        isCommentLoggedIn = !!data.logged_in;
         updateCommentButtonStates();
         updateCommentStatus(data.monitoring ? '监控评论中...' : '未启动');
-        if (data.monitoring) {
-            startCommentLogPolling();
-        }
     })
     .catch(error => {
         updateCommentStatus('服务器连接失败');
         showToast('无法连接到评论回复服务器', 'error');
         addCommentLog('无法连接到评论回复服务器', 'error');
     });
-}
-
-// 轮询评论日志
-let lastCommentLogCount = 0;
-
-function startCommentLogPolling() {
-    if (!isCommentMonitoring) return;
-    
-    fetch('/api/comment-logs')
-    .then(response => response.json())
-    .then(data => {
-        if (data.logs && data.logs.length > 0) {
-            // 只显示新的日志条目
-            if (data.logs.length > lastCommentLogCount) {
-                const newLogs = data.logs.slice(0, data.logs.length - lastCommentLogCount);
-                newLogs.reverse().forEach(logEntry => {
-                    addCommentLog(logEntry.message, logEntry.type);
-                });
-                lastCommentLogCount = data.logs.length;
-            }
-        }
-        
-        // 更新监控状态
-        if (data.monitoring !== isCommentMonitoring) {
-            isCommentMonitoring = data.monitoring;
-            updateCommentButtonStates();
-            updateCommentStatus(data.monitoring ? '监控评论中...' : '未启动');
-        }
-    })
-    .catch(error => {
-        console.error('获取评论日志失败:', error);
-        addCommentLog('获取日志失败: ' + error.message, 'error');
-    });
-    
-    setTimeout(startCommentLogPolling, 2000);
 }
 
 // 编辑评论回复规则
@@ -672,8 +607,7 @@ function editCommentRule(id) {
     document.getElementById('edit-comment-rule-title').value = rule.name || '';
     document.getElementById('edit-comment-keywords').value = rule.keyword || '';
     
-    const isImageRule = (rule.reply_type || 'text') === 'image';
-    document.getElementById('edit-comment-reply').value = isImageRule ? '' : (rule.reply || '');
+    document.getElementById('edit-comment-reply').value = rule.reply || '';
     
     const modal = document.getElementById('comment-edit-modal');
     modal.style.display = 'block';
@@ -710,9 +644,7 @@ function saveEditCommentRule() {
             ...commentRules[ruleIndex],
             name: name,
             keyword: keywords,
-            reply_type: 'text',
-            reply: reply,
-            reply_image: ''
+            reply: reply
         };
         
         saveCommentRules();
@@ -986,217 +918,6 @@ function exportCommentConfig() {
     });
 }
 
-// 图片浏览器相关函数（复用私信系统的逻辑）
-function openImageBrowser(target) {
-    currentImageBrowserTarget = target;
-    selectedImagePath = '';
-    
-    const modal = document.getElementById('image-browser-modal');
-    modal.style.display = 'block';
-    
-    fetch('/api/get-home-directory')
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            const startPath = data.common_directories.length > 0 ? 
-                data.common_directories[0].path : data.home_directory;
-            browsePath(startPath);
-        } else {
-            showToast('获取主目录失败: ' + data.error, 'error');
-        }
-    })
-    .catch(error => {
-        showToast('获取主目录失败: ' + error, 'error');
-    });
-}
-
-function browsePath(path) {
-    currentBrowserPath = path;
-    document.getElementById('current-path-text').textContent = ' ' + path;
-    
-    const fileList = document.getElementById('file-list');
-    fileList.innerHTML = '<div class="loading"><i class="bi bi-arrow-clockwise spin"></i> 加载中...</div>';
-    
-    fetch('/api/browse-images', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            folder_path: path
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            displayFileList(data.items);
-        } else {
-            fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);"> ${data.error}</div>`;
-        }
-    })
-    .catch(error => {
-        fileList.innerHTML = `<div class="loading" style="color: var(--danger-color);"> 加载失败: ${error}</div>`;
-    });
-}
-
-function displayFileList(items) {
-    const fileList = document.getElementById('file-list');
-    
-    if (items.length === 0) {
-        fileList.innerHTML = '<div class="loading">此文件夹为空</div>';
-        return;
-    }
-    
-    fileList.innerHTML = items.map(item => {
-        let icon, details = '';
-        
-        if (item.type === 'directory') {
-            icon = item.name === '..' ? '⬆' : '';
-        } else {
-            icon = '';
-            details = `${item.extension} • ${item.size}`;
-        }
-        
-        const encodedPath = encodeURIComponent(item.path);
-        const escapedName = escapeHtml(item.name);
-        
-        return `
-            <div class="file-item ${item.type}" onclick="selectFileItem('${encodedPath}', '${item.type}', this)">
-                <span class="file-icon">${icon}</span>
-                <div class="file-info">
-                    <div class="file-name">${escapedName}</div>
-                    ${details ? `<div class="file-details">${details}</div>` : ''}
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function selectFileItem(path, type, element) {
-    const decodedPath = decodeURIComponent(path);
-    
-    if (type === 'directory') {
-        browsePath(decodedPath);
-    } else {
-        selectedImagePath = decodedPath;
-        
-        document.querySelectorAll('.file-item').forEach(item => {
-            item.classList.remove('selected');
-        });
-        element.classList.add('selected');
-        
-        confirmImageSelection();
-    }
-}
-
-function confirmImageSelection() {
-    if (!selectedImagePath) {
-        showToast('请选择一张图片', 'warning');
-        return;
-    }
-    
-    if (currentImageBrowserTarget === 'default-comment') {
-        document.getElementById('default-comment-reply-image-path').value = selectedImagePath;
-        showImagePreview('default-comment', selectedImagePath);
-    }
-    
-    closeImageBrowser();
-    showToast('图片选择成功', 'success');
-}
-
-function closeImageBrowser() {
-    document.getElementById('image-browser-modal').style.display = 'none';
-    currentImageBrowserTarget = null;
-    selectedImagePath = '';
-}
-
-function goToHomeDirectory() {
-    fetch('/api/get-home-directory')
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            browsePath(data.home_directory);
-        } else {
-            showToast('获取主目录失败: ' + data.error, 'error');
-        }
-    })
-    .catch(error => {
-        showToast('获取主目录失败: ' + error, 'error');
-    });
-}
-
-function showImagePreview(target, imagePath) {
-    const previewId = target + '-image-preview';
-    const preview = document.getElementById(previewId);
-    
-    if (!preview) return;
-    
-    const fileName = imagePath.split(/[/\\]/).pop();
-    
-    fetch('/api/preview-image', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            image_path: imagePath
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            preview.innerHTML = `
-                <img src="data:${data.mime_type};base64,${data.image_data}" alt="预览图片" style="max-width: 200px; max-height: 150px; border-radius: 8px;">
-                <div class="image-info">
-                     ${fileName}
-                    <br><small>${data.file_size}</small>
-                </div>
-            `;
-        } else {
-            preview.innerHTML = `
-                <div style="color: var(--text-light); text-align: center; padding: 20px;">
-                    
-                    <div>无法预览图片</div>
-                    <small>${data.error || '未知错误'}</small>
-                </div>
-                <div class="image-info">
-                     ${fileName}
-                </div>
-            `;
-        }
-        preview.style.display = 'block';
-    })
-    .catch(error => {
-        preview.innerHTML = `
-            <div style="color: var(--text-light); text-align: center; padding: 20px;">
-                
-                <div>无法预览图片</div>
-                <small>网络错误</small>
-            </div>
-            <div class="image-info">
-                 ${fileName}
-            </div>
-        `;
-        preview.style.display = 'block';
-    });
-}
-
-function hideImagePreview(target) {
-    const previewId = target + '-image-preview';
-    const preview = document.getElementById(previewId);
-    
-    if (preview) {
-        preview.style.display = 'none';
-        preview.innerHTML = '';
-    }
-}
-
 // 导入配置相关函数
 function openCommentImportModal() {
     document.getElementById('comment-import-modal').style.display = 'block';
@@ -1320,14 +1041,11 @@ function importCommentConfig() {
 window.onclick = function(event) {
     const editModal = document.getElementById('comment-edit-modal');
     const importModal = document.getElementById('comment-import-modal');
-    const imageModal = document.getElementById('image-browser-modal');
     
     if (event.target === editModal) {
         closeCommentEditModal();
     } else if (event.target === importModal) {
         closeCommentImportModal();
-    } else if (event.target === imageModal) {
-        closeImageBrowser();
     }
 }
 
@@ -1336,14 +1054,14 @@ document.addEventListener('keydown', function(event) {
     if (event.key === 'Escape') {
         const editModal = document.getElementById('comment-edit-modal');
         const importModal = document.getElementById('comment-import-modal');
-        const imageModal = document.getElementById('image-browser-modal');
-        
+        const platformSwitcher = document.getElementById('platform-switcher');
+
         if (editModal.style.display === 'block') {
             closeCommentEditModal();
         } else if (importModal.style.display === 'block') {
             closeCommentImportModal();
-        } else if (imageModal.style.display === 'block') {
-            closeImageBrowser();
+        } else if (platformSwitcher) {
+            platformSwitcher.classList.remove('open');
         }
     }
     

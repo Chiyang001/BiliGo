@@ -128,15 +128,15 @@ th, td {
 }
 th { background: #f1f6fb; text-align: left; }
 .highlight {
-    border-left: 4px solid var(--primary);
+    border: 1px solid var(--primary);
     background: var(--primary-soft);
     padding: 10px 12px;
     border-radius: 8px;
     margin: 8px 0;
 }
-.warn { border-left-color: #f59e0b; background: var(--warn-soft); }
-.danger { border-left-color: #ef4444; background: var(--danger-soft); }
-.success { border-left-color: #10b981; background: var(--success-soft); }
+.warn { border-color: #f59e0b; background: var(--warn-soft); }
+.danger { border-color: #ef4444; background: var(--danger-soft); }
+.success { border-color: #10b981; background: var(--success-soft); }
 .tabs {
     display: flex;
     gap: 8px;

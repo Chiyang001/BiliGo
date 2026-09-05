@@ -1,5 +1,6 @@
 let rules = [];
 let isMonitoring = false;
+let isMessageLoggedIn = false;
 let currentPage = 1;
 const rulesPerPage = 10;
 let editingRuleId = null;
@@ -9,6 +10,8 @@ document.addEventListener('DOMContentLoaded', function() {
     loadConfig();
     loadRules(); // loadRules内部会调用updateRulesDisplay()
     checkServerStatus();
+    loadMessageLogs();
+    setInterval(loadMessageLogs, 4000);
     initMobileOptimizations();
     initReplyTypeHandlers();
     loadNewMessageConfig();
@@ -17,6 +20,76 @@ document.addEventListener('DOMContentLoaded', function() {
     loadAccounts();  // 加载多账号列表
     loadEmailConfig();  // 加载邮件配置
 });
+
+function toggleAiProviderPanel(forceOpen) {
+    const panel = document.getElementById('ai-provider-panel');
+    if (!panel) return;
+    const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : panel.hidden;
+    panel.hidden = !shouldOpen;
+}
+
+function updateAiProviderHint() {
+    const format = document.getElementById('ai-provider-format').value;
+    const url = document.getElementById('ai-provider-base-url');
+    const model = document.getElementById('ai-provider-model');
+    const hint = document.getElementById('ai-provider-hint');
+    const formats = {
+        openai: ['https://api.openai.com/v1', '例如 gpt-4o-mini', '支持标准 /chat/completions 请求格式。'],
+        anthropic: ['https://api.anthropic.com/v1', '例如 claude-3-5-sonnet-latest', '支持标准 /messages 请求格式。'],
+        custom: ['https://your-provider.example/v1', '请输入模型 ID', '请确保接口兼容所选请求协议。']
+    };
+    const [urlPlaceholder, modelPlaceholder, message] = formats[format];
+    url.placeholder = urlPlaceholder;
+    model.placeholder = modelPlaceholder;
+    hint.textContent = message;
+}
+
+async function loadAiProviderConfig() {
+    try {
+        const response = await fetch('/api/ai-config');
+        if (!response.ok) return;
+        const config = await response.json();
+        document.getElementById('ai-auto-reply-enabled').checked = Boolean(config.enabled);
+        document.getElementById('ai-provider-format').value = config.format || 'openai';
+        document.getElementById('ai-provider-base-url').value = config.base_url || '';
+        document.getElementById('ai-provider-model').value = config.model || '';
+        updateAiProviderHint();
+    } catch (_) {
+        // Beta API may not be available in older server builds.
+    }
+}
+
+async function saveAiProviderConfig() {
+    const result = document.getElementById('ai-provider-result');
+    const payload = {
+        enabled: document.getElementById('ai-auto-reply-enabled').checked,
+        format: document.getElementById('ai-provider-format').value,
+        base_url: document.getElementById('ai-provider-base-url').value.trim(),
+        model: document.getElementById('ai-provider-model').value.trim(),
+        api_key: document.getElementById('ai-provider-api-key').value.trim()
+    };
+    if (!payload.base_url || !payload.model || !payload.api_key) {
+        result.textContent = '请完整填写接口地址、模型和 API Key';
+        result.style.color = 'var(--danger-color)';
+        return;
+    }
+    result.textContent = '正在测试连接...';
+    result.style.color = 'var(--text-muted)';
+    try {
+        const response = await fetch('/api/ai-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await response.json();
+        if (!response.ok || data.success === false) throw new Error(data.error || data.message || '保存失败');
+        const testResponse = await fetch('/api/ai-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const testData = await testResponse.json();
+        if (!testResponse.ok || testData.success === false) throw new Error(testData.error || '连接失败');
+        result.textContent = testData.message || '连接成功，配置已保存';
+        result.style.color = 'var(--success-color)';
+        document.getElementById('ai-provider-api-key').value = '';
+    } catch (error) {
+        result.textContent = error.message || '暂时无法连接提供商';
+        result.style.color = 'var(--danger-color)';
+    }
+}
 
 // 全局变量
 let currentImageBrowserTarget = null; // 当前图片浏览器的目标
@@ -466,6 +539,10 @@ function loadConfig() {
     fetch('/api/config')
     .then(response => response.json())
     .then(data => {
+        isMessageLoggedIn = data.multi_account_mode
+            ? (data.accounts || []).some(account => account.enabled !== false && account.sessdata && account.bili_jct)
+            : !!(data.sessdata && data.bili_jct);
+        updateButtonStates();
         if (data.sessdata) {
             document.getElementById('sessdata').value = data.sessdata;
         }
@@ -527,6 +604,10 @@ function loadConfig() {
         // 加载单用户最大回复次数设置
         if (document.getElementById('max-replies-per-user')) {
             document.getElementById('max-replies-per-user').value = data.max_replies_per_user || 3;
+        }
+        if (document.getElementById('unlimited-replies-per-user')) {
+            document.getElementById('unlimited-replies-per-user').checked = !!data.unlimited_replies_per_user;
+            updateReplyLimitState();
         }
     })
     .catch(error => {
@@ -767,6 +848,7 @@ function updateRulesDisplay() {
     const container = document.getElementById('rules-list');
     
     if (rules.length === 0) {
+        currentPage = 1;
         container.innerHTML = '<p style="color: #999; text-align: center; padding: 20px;">暂无回复规则</p>';
         updatePaginationControls();
         return;
@@ -780,7 +862,8 @@ function updateRulesDisplay() {
     });
     
     // 计算分页
-    const totalPages = Math.ceil(sortedRules.length / rulesPerPage);
+    const totalPages = Math.max(1, Math.ceil(sortedRules.length / rulesPerPage));
+    currentPage = Math.max(1, Math.min(currentPage, totalPages));
     const startIndex = (currentPage - 1) * rulesPerPage;
     const endIndex = startIndex + rulesPerPage;
     const currentRules = sortedRules.slice(startIndex, endIndex);
@@ -822,16 +905,16 @@ function updateRulesDisplay() {
 
 // 更新分页控件
 function updatePaginationControls() {
-    const totalPages = Math.ceil(rules.length / rulesPerPage);
+    const totalPages = Math.max(1, Math.ceil(rules.length / rulesPerPage));
     const pageInfo = `第 ${currentPage} 页，共 ${totalPages} 页`;
     
     // 更新页面信息
-    document.getElementById('page-info').textContent = pageInfo;
-    document.getElementById('page-info-bottom').textContent = pageInfo;
+    const pageInfoBottom = document.getElementById('page-info-bottom');
+    if (pageInfoBottom) pageInfoBottom.textContent = pageInfo;
     
     // 更新按钮状态
-    const prevButtons = [document.getElementById('prev-page'), document.getElementById('prev-page-bottom')];
-    const nextButtons = [document.getElementById('next-page'), document.getElementById('next-page-bottom')];
+    const prevButtons = [document.getElementById('prev-page-bottom')].filter(Boolean);
+    const nextButtons = [document.getElementById('next-page-bottom')].filter(Boolean);
     
     prevButtons.forEach(btn => {
         btn.disabled = currentPage <= 1;
@@ -844,7 +927,7 @@ function updatePaginationControls() {
 
 // 切换页面
 function changePage(direction) {
-    const totalPages = Math.ceil(rules.length / rulesPerPage);
+    const totalPages = Math.max(1, Math.ceil(rules.length / rulesPerPage));
     
     if (direction === -1 && currentPage > 1) {
         currentPage--;
@@ -867,7 +950,6 @@ function startMonitoring() {
             updateStatus('监控中...');
             showToast('开始监控私信', 'success');
             addLog('开始监控私信', 'success');
-            startLogPolling();
         } else {
             showToast('启动私信监控失败: ' + data.error, 'error');
             addLog('启动私信监控失败: ' + data.error, 'error');
@@ -907,8 +989,11 @@ function stopMonitoring() {
 
 // 更新按钮状态
 function updateButtonStates() {
-    document.getElementById('start-btn').disabled = isMonitoring;
-    document.getElementById('stop-btn').disabled = !isMonitoring;
+    document.getElementById('start-btn').disabled = isMonitoring || !isMessageLoggedIn;
+    document.getElementById('stop-btn').disabled = !isMonitoring || !isMessageLoggedIn;
+    if (typeof setPlatformLoginRequired === 'function') {
+        setPlatformLoginRequired(!isMessageLoggedIn);
+    }
     
     // 更新状态指示器样式
     const statusIndicator = document.querySelector('.status-indicator');
@@ -928,30 +1013,22 @@ function updateStatus(status) {
 
 // 添加日志
 function addLog(message, type = 'info') {
-    const log = document.getElementById('log');
-    
-    // 安全检查：如果log容器不存在，直接返回
-    if (!log) {
+    const container = document.getElementById('logs-container');
+    if (!container) {
         console.log(`Log: [${type.toUpperCase()}] ${message}`);
         return;
     }
-    
-    const timestamp = new Date().toLocaleTimeString();
-    const entry = document.createElement('div');
-    entry.className = `log-entry log-${type}`;
-    entry.textContent = `[${timestamp}] ${message}`;
-    log.appendChild(entry);
-    
-    // 自动滚动到底部
-    const container = document.getElementById('log-container');
-    if (container) {
-        container.scrollTop = container.scrollHeight;
-    }
-    
-    // 限制日志条数
-    const entries = log.children;
-    if (entries.length > 100) {
-        log.removeChild(entries[0]);
+    appendPlatformLog(container, message, type);
+}
+
+async function loadMessageLogs() {
+    try {
+        const res = await fetch('/api/logs?type=message');
+        const data = await res.json();
+        const logs = [...(data.logs || [])].reverse();
+        renderPlatformLogs(logs, document.getElementById('logs-container'));
+    } catch (e) {
+        console.error('获取日志失败:', e);
     }
 }
 
@@ -961,38 +1038,15 @@ function checkServerStatus() {
     .then(response => response.json())
     .then(data => {
         isMonitoring = data.monitoring;
+        isMessageLoggedIn = !!data.message_config_set;
         updateButtonStates();
         updateStatus(data.monitoring ? '监控中...' : '未启动');
-        if (data.monitoring) {
-            startLogPolling();
-        }
     })
     .catch(error => {
         updateStatus('服务器连接失败');
         showToast('无法连接到服务器', 'error');
         addLog('无法连接到服务器', 'error');
     });
-}
-
-// 轮询日志
-function startLogPolling() {
-    if (!isMonitoring) return;
-    
-    fetch('/api/logs')
-    .then(response => response.json())
-    .then(data => {
-        if (data.logs && data.logs.length > 0) {
-            data.logs.forEach(logEntry => {
-                addLog(logEntry.message, logEntry.type);
-            });
-        }
-    })
-    .catch(error => {
-        console.error('获取日志失败:', error);
-    });
-    
-    // 每3秒轮询一次
-    setTimeout(startLogPolling, 3000);
 }
 
 // 编辑规则
@@ -1701,19 +1755,32 @@ function loadNewMessageConfig() {
         if (document.getElementById('max-replies-per-user')) {
             document.getElementById('max-replies-per-user').value = data.max_replies_per_user || 3;
         }
+        if (document.getElementById('unlimited-replies-per-user')) {
+            document.getElementById('unlimited-replies-per-user').checked = !!data.unlimited_replies_per_user;
+            updateReplyLimitState();
+        }
     })
     .catch(error => {
         console.error('加载仅回复新消息配置失败:', error);
     });
 }
 
+function updateReplyLimitState() {
+    const unlimited = document.getElementById('unlimited-replies-per-user');
+    const maxInput = document.getElementById('max-replies-per-user');
+    if (!unlimited || !maxInput) return;
+    maxInput.disabled = unlimited.checked;
+    maxInput.title = unlimited.checked ? '当前已启用不限制回复次数' : '';
+}
+
 // 保存仅回复新消息配置
 function saveNewMessageConfig() {
     const onlyReplyNewMessages = document.getElementById('only-reply-new-messages').checked;
-    const maxRepliesPerUser = parseInt(document.getElementById('max-replies-per-user').value);
+    const unlimitedReplies = document.getElementById('unlimited-replies-per-user').checked;
+    const maxRepliesPerUser = parseInt(document.getElementById('max-replies-per-user').value, 10);
     
     // 验证输入值
-    if (isNaN(maxRepliesPerUser) || maxRepliesPerUser < 1 || maxRepliesPerUser > 100) {
+    if (!unlimitedReplies && (isNaN(maxRepliesPerUser) || maxRepliesPerUser < 1 || maxRepliesPerUser > 100)) {
         showToast('单用户最大回复次数必须在1-100之间', 'error');
         return;
     }
@@ -1725,7 +1792,8 @@ function saveNewMessageConfig() {
         },
         body: JSON.stringify({
             only_reply_new_messages: onlyReplyNewMessages,
-            max_replies_per_user: maxRepliesPerUser
+            max_replies_per_user: Number.isInteger(maxRepliesPerUser) && maxRepliesPerUser >= 1 ? maxRepliesPerUser : 3,
+            unlimited_replies_per_user: unlimitedReplies
         })
     })
     .then(response => response.json())
@@ -1733,7 +1801,9 @@ function saveNewMessageConfig() {
         if (data.success) {
             showToast('消息设置已保存', 'success');
             addLog('仅回复新消息配置已更新', 'success');
-            if (maxRepliesPerUser <= 5) {
+            if (unlimitedReplies) {
+                addLog('已启用不限制单用户回复次数', 'success');
+            } else if (maxRepliesPerUser <= 5) {
                 addLog(`单用户最大回复次数设置为${maxRepliesPerUser}次，有助于避免重复骚扰`, 'success');
             }
         } else {
@@ -2178,9 +2248,9 @@ function switchToCommentMode() {
     window.location.href = 'comment';
 }
 
-// 跳转到日志页面
-function goToLogsPage() {
-    window.location.href = 'logs.html';
+// 切换到抖音私信模式
+function switchToDouyinMode() {
+    window.location.href = 'douyin';
 }
 
 // 检查更新
@@ -2190,8 +2260,28 @@ function checkUpdate() {
 
 // 打开教程文档页
 function openDocsPage() {
-    window.location.href = 'docs.html';
+    window.location.href = 'docs.html?from=message';
 }
+
+// 平台切换下拉菜单
+function togglePlatformSwitcher(event) {
+    event.stopPropagation();
+    document.getElementById('platform-switcher').classList.toggle('open');
+}
+
+document.addEventListener('click', function(event) {
+    const switcher = document.getElementById('platform-switcher');
+    if (switcher && !switcher.contains(event.target)) {
+        switcher.classList.remove('open');
+    }
+});
+
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        const switcher = document.getElementById('platform-switcher');
+        if (switcher) switcher.classList.remove('open');
+    }
+});
 
 
 // ==================== 多账号管理功能 ====================

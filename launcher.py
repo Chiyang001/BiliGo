@@ -23,6 +23,7 @@ def main():
     print('[OK] Starting Flask application...')
     print('Access at: http://localhost:4999')
     print('Comment system: http://localhost:4999/comment')
+    print('Douyin DM: http://localhost:4999/douyin')
     print('Press Ctrl+C to stop')
     print('========================================')
     print()

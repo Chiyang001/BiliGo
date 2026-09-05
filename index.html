@@ -8,8 +8,9 @@
     <meta name="format-detection" content="telephone=no">
     <title>BiliGo - B站私信和评论自动回复系统</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="platform_tabs.css">
 </head>
-<body>
+<body data-ai-platform="bili_message">
     <!-- 提示消息 -->
     <div id="toast-container"></div>
     
@@ -21,7 +22,9 @@
             </div>
             <div class="header-actions">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 13px; color: #00a1d6; font-weight: 600; padding: 4px 12px; background: linear-gradient(135deg, #e3f2fd 0%, #f0f8ff 100%); border-radius: 20px; border: 1px solid #b3e5fc;">20260830</span>
+                    <span class="version-badge">V3 Ultra</span>
+                    <button class="btn-switch btn-secondary dashboard-nav" onclick="location.href='/dashboard?from=bili_message'">仪表盘</button>
+                    <button class="btn-switch ai-reply-nav" onclick="location.href='/ai-reply?from=bili_message'">AI回复</button>
                     <button class="btn-switch btn-secondary" onclick="openDocsPage()" title="教程文档">
                          教程文档
                     </button>
@@ -29,9 +32,19 @@
                          检查更新
                     </button>
                 </div>
-                <button class="btn-switch btn-primary" onclick="switchToCommentMode()">
-                     切换到评论回复
-                </button>
+                <div class="platform-switcher" id="platform-switcher">
+                    <button class="btn-switch btn-secondary platform-switcher-toggle" onclick="togglePlatformSwitcher(event)">
+                         切换平台 <span class="chevron">▾</span>
+                    </button>
+                    <div class="platform-switcher-menu">
+                        <button class="platform-switcher-item active" disabled>B站私信 <span class="check">✓</span></button>
+                        <button class="platform-switcher-item" onclick="switchToCommentMode()">B站评论</button>
+                        <button class="platform-switcher-item" onclick="switchToDouyinMode()" title="抖音私信（浏览器自动化）">抖音私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/xiaohongshu'" title="小红书私信（浏览器自动化）">小红书私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/weibo'" title="微博私信（浏览器自动化）">微博私信</button>
+                        <button class="platform-switcher-item" onclick="location.href='/xianyu'" title="闲鱼消息（浏览器自动化）">闲鱼消息</button>
+                    </div>
+                </div>
                 <button class="btn-switch btn-danger" onclick="confirmResetAllData()" title="清除所有配置和数据">
                     清除所有数据
                 </button>
@@ -46,12 +59,16 @@
             <section class="control-panel">
                 <h2> 系统控制</h2>
                 <div class="button-group">
-                    <button id="start-btn" class="btn-primary" onclick="startMonitoring()">
+                    <button id="start-btn" class="btn-primary" onclick="startMonitoring()" disabled>
                         开始监控
                     </button>
                     <button id="stop-btn" class="btn-danger" onclick="stopMonitoring()" disabled>
                         停止监控
                     </button>
+                </div>
+                <div class="login-required-hint" id="login-required-hint" role="status" hidden>
+                    <span>请先在账号配置面板中登录B站账号，再开始监控。</span>
+                    <button type="button" onclick="openPlatformAccountPanel()">前往账号配置</button>
                 </div>
                 
                 <!-- 时间间隔配置 - 可收纳容器 -->
@@ -104,6 +121,14 @@
                     <p class="help-text">
                         设置对同一个用户的最大回复次数，避免重复回复同一用户，建议设置3-5次
                     </p>
+                </div>
+
+                <div class="form-row" style="margin-top: 10px;">
+                    <div class="checkbox-wrapper">
+                        <input type="checkbox" id="unlimited-replies-per-user" onchange="updateReplyLimitState()">
+                        <label for="unlimited-replies-per-user">不限制单用户回复次数</label>
+                    </div>
+                    <p class="help-text">启用后忽略上方次数限制，停用后继续使用已填写的上限</p>
                 </div>
                 
                 <button class="btn-secondary" onclick="saveNewMessageConfig()" style="margin-top: 10px;">
@@ -378,10 +403,10 @@
                     </div>
 
                     <div class="follow-reply-panel half-width">
-                        <h2> 关注后回复设置</h2>
+                        <h2> 关注回复</h2>
                         <div class="reply-mode-switch">
-                            <button id="follow-mode-btn" type="button" class="btn-secondary active" onclick="toggleFollowReplyMode('follow')">关注后回复</button>
-                            <button id="unfollow-mode-btn" type="button" class="btn-secondary" onclick="toggleFollowReplyMode('unfollow')">取消关注回复</button>
+                            <button id="follow-mode-btn" type="button" class="btn-secondary active" onclick="toggleFollowReplyMode('follow')">关注后</button>
+                            <button id="unfollow-mode-btn" type="button" class="btn-secondary" onclick="toggleFollowReplyMode('unfollow')">取消关注后</button>
                         </div>
 
                         <div id="follow-reply-config-panel">
@@ -580,15 +605,6 @@
                     <div class="rules-actions">
                     </div>
                 </div>
-                <div class="pagination">
-                    <button id="prev-page" class="btn-icon" onclick="changePage(-1)" disabled>
-                        上一页
-                    </button>
-                    <span id="page-info">第 1 页，共 1 页</span>
-                    <button id="next-page" class="btn-icon" onclick="changePage(1)" disabled>
-                        下一页
-                    </button>
-                </div>
                 <div id="rules-list" class="rules-list"></div>
                 <div class="pagination">
                     <button id="prev-page-bottom" class="btn-icon" onclick="changePage(-1)" disabled>
@@ -602,22 +618,13 @@
             </section>
 
             <section class="log-panel">
-                <h2> 系统日志</h2>
-                <div class="log-redirect">
-                    <div class="log-redirect-content">
-                        <h3> 查看系统日志</h3>
-                        <p>点击下方按钮跳转到专门的日志页面查看详细的系统运行日志</p>
-                        <button class="btn-primary" onclick="goToLogsPage()">
-                            
-                            打开日志页面
-                        </button>
-                    </div>
-                </div>
+                <h2>运行日志</h2>
+                <div id="logs-container" class="log-viewer"></div>
             </section>
         </div>
 
         <footer>
-            <p>© 2026 <a href="https://space.bilibili.com/404891612" target="_blank">炽阳001</a> | BiliGo 自动回复系统</p>
+            <p>© 2026 <a href="https://space.bilibili.com/404891612" target="_blank" rel="noopener noreferrer">炽阳001</a> | BiliGo 自动回复系统</p>
         </footer>
     </div>
 
@@ -871,7 +878,7 @@
                 </button>
             </div>
             <div class="modal-body">
-                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
+                <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #ffc107;">
                     <p style="margin: 0; color: #856404; font-weight: 600;">此操作将清除以下所有数据：</p>
                 </div>
                 
@@ -886,7 +893,7 @@
                     <li>用户回复统计数据</li>
                 </ul>
                 
-                <div style="background: #f8d7da; padding: 15px; border-radius: 5px; margin-top: 20px; border-left: 4px solid #dc3545;">
+                <div style="background: #f8d7da; padding: 15px; border-radius: 5px; margin-top: 20px; border: 1px solid #dc3545;">
                     <p style="margin: 0; color: #721c24; font-weight: 600;"> 此操作不可撤销！</p>
                     <p style="margin: 8px 0 0 0; color: #721c24;">建议在清除前先导出配置备份。</p>
                 </div>
@@ -913,9 +920,7 @@
         <div class="modal-content" style="max-width: 450px;">
             <div class="modal-header">
                 <h3> 哔哩哔哩扫码登录</h3>
-                <button class="close-btn" onclick="closeQRCodeLoginModal()">
-                    
-                </button>
+                <button class="close-btn" type="button" onclick="closeQRCodeLoginModal()" aria-label="关闭扫码登录" title="关闭">&times;</button>
             </div>
             <div class="modal-body" style="text-align: center; padding: 30px;">
                 <div id="qrcode-container" style="margin: 20px auto;">
@@ -1002,6 +1007,10 @@
         </div>
     </div>
 
+    <script src="platform_log_view.js"></script>
+    <script src="platform_import.js"></script>
+    <script src="ai_mode.js"></script>
+    <script src="platform_tabs.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

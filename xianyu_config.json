@@ -1,0 +1,17 @@
+{
+  "default_reply_enabled": false,
+  "default_reply_message": "您好，我现在不在，稍后会回复您的消息。",
+  "default_reply_type": "text",
+  "default_reply_image": "",
+  "message_check_interval": 2,
+  "send_delay_interval": 2,
+  "only_reply_new_messages": true,
+  "max_replies_per_user": 3,
+  "unlimited_replies_per_user": false,
+  "headless": true,
+  "auto_start_monitoring": false,
+  "account": {},
+  "logged_in": false,
+  "session_expired": false,
+  "login_time": ""
+}
