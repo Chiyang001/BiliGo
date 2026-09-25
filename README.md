@@ -1,8 +1,8 @@
-# BiliGo V3 Ultra
+# BiliGo V3.2 Ultra
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-V3_Ultra-blue.svg)
+![Version](https://img.shields.io/badge/version-V3.2_Ultra-blue.svg)
 ![Status](https://img.shields.io/badge/status-released-brightgreen.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB.svg)
 ![Docker](https://img.shields.io/badge/Docker-supported-2496ED.svg)
@@ -18,7 +18,7 @@
 
 ## 功能概览
 
-BiliGo V3 Ultra 将五个平台、六类消息入口整合到同一个 Web 管理界面：
+BiliGo V3.2 Ultra 将五个平台、六类消息入口整合到同一个 Web 管理界面：
 
 | 平台/入口 | 登录方式 | 传统规则回复 | AI 回复 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -286,6 +286,14 @@ python scripts/smoke_test_comment_ui.py
 V3 Ultra 已移除 B 站评论图片回复，评论默认回复和关键词规则统一为文字，减少上传失败和平台兼容问题。B 站私信仍可使用图片回复。
 
 ## 更新日志
+
+### V3.2 Ultra（2026-09-25）
+
+修复 EXE 重启后配置丢失问题，用户数据迁移至 `%APPDATA%\\BiliGo` 持久化目录。
+
+### V3.1 Ultra（2026-09-13）
+
+在 V3 Ultra 基础上继续迭代，完善视频号私信、本地 Web UI 访问控制与 Playwright 便携部署体验。
 
 ### V3 Ultra（2026-09-05）
 

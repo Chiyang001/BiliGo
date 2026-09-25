@@ -22,7 +22,7 @@
             </div>
             <div class="header-actions">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span class="version-badge">V3 Ultra</span>
+                    <span class="version-badge">V3.2 Ultra</span>
                     <button class="btn-switch btn-secondary dashboard-nav" onclick="location.href='/dashboard?from=bili_comment'">仪表盘</button>
                     <button class="btn-switch ai-reply-nav" onclick="location.href='/ai-reply?from=bili_comment'">AI回复</button>
                     <button class="btn-switch btn-secondary" onclick="openDocsPage()" title="教程文档">
@@ -43,6 +43,7 @@
                         <button class="platform-switcher-item" onclick="location.href='/xiaohongshu'">小红书私信</button>
                         <button class="platform-switcher-item" onclick="location.href='/weibo'">微博私信</button>
                         <button class="platform-switcher-item" onclick="location.href='/xianyu'">闲鱼消息</button>
+                        <button class="platform-switcher-item" onclick="location.href='/channels'">视频号私信</button>
                     </div>
                 </div>
                 <button class="btn-danger btn-switch" onclick="confirmResetAllData()">
@@ -488,6 +489,7 @@
         </div>
     </div>
 
+    <script src="web_auth.js"></script>
     <script src="platform_log_view.js"></script>
     <script src="platform_import.js"></script>
     <script src="ai_mode.js"></script>

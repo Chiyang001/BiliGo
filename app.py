@@ -15,6 +15,9 @@ from werkzeug.utils import secure_filename
 import bili_wbi
 import comment_monitor_helpers
 from app_paths import ensure_data_files, get_app_root, get_static_root
+from playwright_runtime import configure_playwright_env, ensure_playwright_ready
+
+configure_playwright_env()
 from dashboard_metrics import dashboard_metrics, record_dashboard_event
 from ai_handoff_store import ai_handoff_store
 from ai_conversation_store import ai_conversation_store
@@ -24,8 +27,8 @@ from ai_reply_service import (
     normalize_handoff_settings, normalize_knowledge_config, normalize_model_settings,
     normalize_platforms, platform_enabled, record_conversation_exchange,
 )
-APP_VERSION = 'V3 Ultra'
-APP_VERSION_DATE = '2026-09-05'
+APP_VERSION = 'V3.2 Ultra'
+APP_VERSION_DATE = '2026-09-25'
 
 app = Flask(__name__)
 
@@ -37,6 +40,11 @@ from weibo_reply_system import register_weibo_routes
 register_weibo_routes(app)
 from xianyu_reply_system import register_xianyu_routes
 register_xianyu_routes(app)
+from channels_reply_system import register_channels_routes
+register_channels_routes(app)
+from web_access import build_access_url, ensure_runtime_token, open_browser_when_ready, register_web_auth
+
+register_web_auth(app)
 
 
 def merge_bilibili_reply_main_block(reply_data):
@@ -68,9 +76,9 @@ config = {
     'unfollow_reply_message': '很遗憾看到您取消了关注，希望我们还有机会再见！',  # 取消关注回复消息
     'unfollow_reply_type': 'text',  # 取消关注回复类型：'text' 或 'image'
     'unfollow_reply_image': '',  # 取消关注回复图片路径
-    'only_reply_new_messages': False,  # 是否仅回复新消息（程序启动后的消息）
+    'only_reply_new_messages': True,  # 是否仅回复新消息（程序启动后的消息）
     'max_replies_per_user': 3,  # 单用户最大回复次数
-    'unlimited_replies_per_user': False,  # 不限制单用户回复次数
+    'unlimited_replies_per_user': True,  # 不限制单用户回复次数
     'follow_check_interval': 1800,  # 检查关注者的间隔（秒），默认30分钟避免触发风控
     'follow_scan_pages': 3,  # 关注检测扫描页数（每页最多50）
     'follow_new_window_seconds': 90,  # 新关注检测时间窗口（秒）
@@ -989,7 +997,7 @@ def send_email_notification(subject, body, receiver_email=None, platform='bili_m
 def send_platform_error_notification(platform, message, receiver_email=None):
     """Send an error alert for a non-Bilibili platform using shared SMTP settings."""
     try:
-        platform_names = {'bili_comment': 'B站评论', 'douyin': '抖音', 'xiaohongshu': '小红书', 'weibo': '微博'}
+        platform_names = {'bili_comment': 'B站评论', 'douyin': '抖音', 'xiaohongshu': '小红书', 'weibo': '微博', 'channels': '视频号'}
         name = platform_names.get(platform, platform)
         settings = config.setdefault('email_notifications', {}).get(platform, {})
         if not settings.get('enabled', False):
@@ -1863,7 +1871,7 @@ def process_single_session(api, my_uid, session):
         sender_uid = latest_msg.get('sender_uid')
         
         # 检查是否启用了“仅回复新消息”功能
-        if config.get('only_reply_new_messages', False):
+        if config.get('only_reply_new_messages', True):
             # 如果消息时间早于程序启动时间，跳过处理
             if msg_timestamp < program_start_time:
                 add_log(f"用户{talker_id} 消息时间早于程序启动时间，跳过回复（仅回复新消息模式）", 'debug', system='message')
@@ -2542,7 +2550,7 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
         sender_uid = latest_msg.get('sender_uid')
         
         # 检查是否仅回复新消息
-        if config.get('only_reply_new_messages', False):
+        if config.get('only_reply_new_messages', True):
             if msg_timestamp < program_start_time:
                 last_message_times[talker_id] = msg_timestamp
                 return []
@@ -3355,7 +3363,10 @@ def dashboard_page():
 def _dashboard_platform_statuses():
     """Collect live status without allowing one platform failure to break the dashboard."""
     statuses = {}
-    names = {'bili_message': 'B站私信', 'bili_comment': 'B站评论', 'douyin': '抖音私信', 'xiaohongshu': '小红书私信', 'weibo': '微博私信'}
+    names = {
+        'bili_message': 'B站私信', 'bili_comment': 'B站评论', 'douyin': '抖音私信',
+        'xiaohongshu': '小红书私信', 'weibo': '微博私信', 'channels': '视频号私信', 'xianyu': '闲鱼消息',
+    }
 
     def assign(platform, monitoring_value, configured, rules_count, account_count=0, starting=False, expired=False):
         if expired:
@@ -3387,7 +3398,7 @@ def _dashboard_platform_statuses():
     except Exception as exc:
         statuses['bili_comment'] = {'state': 'unknown', 'state_label': '状态未知', 'message': str(exc), 'rules_count': 0, 'account_count': 0}
 
-    for key in ('douyin', 'xiaohongshu', 'weibo', 'xianyu'):
+    for key in ('douyin', 'xiaohongshu', 'weibo', 'xianyu', 'channels'):
         try:
             if key == 'douyin':
                 from douyin_reply_system import douyin_system as system
@@ -3395,6 +3406,8 @@ def _dashboard_platform_statuses():
                 from xiaohongshu_reply_system import xiaohongshu_system as system
             elif key == 'weibo':
                 from weibo_reply_system import weibo_system as system
+            elif key == 'channels':
+                from channels_reply_system import channels_system as system
             else:
                 from xianyu_reply_system import xianyu_system as system
             live = system.get_status()
@@ -3685,7 +3698,7 @@ def save_ai_knowledge_settings():
     current['enabled'] = bool(data.get('enabled', current['enabled']))
     current['platform_assignments'] = {
         key: list(dict.fromkeys(str(item) for item in (requested.get(key) or []) if str(item) in valid_ids))
-        for key in ('bili_message', 'bili_comment', 'xiaohongshu', 'weibo', 'douyin', 'xianyu')
+        for key in ('bili_message', 'bili_comment', 'xiaohongshu', 'weibo', 'douyin', 'xianyu', 'channels')
     }
     config['ai_knowledge_base'] = current
     save_config()
@@ -3864,11 +3877,13 @@ def _send_ai_handoff_reply(item, text):
     from xiaohongshu_reply_system import xiaohongshu_system
     from weibo_reply_system import weibo_system
     from xianyu_reply_system import xianyu_system
+    from channels_reply_system import channels_system
     system = {
         'douyin': douyin_system,
         'xiaohongshu': xiaohongshu_system,
         'weibo': weibo_system,
         'xianyu': xianyu_system,
+        'channels': channels_system,
     }.get(platform)
     if not system:
         return False, '不支持的平台'
@@ -4011,7 +4026,7 @@ def start_monitoring():
     if config.get('multi_account_mode', False):
         enabled_count = len([acc for acc in config.get('accounts', []) if acc.get('enabled', True) and acc.get('sessdata') and acc.get('bili_jct')])
         add_log(f"开始监控私信（多账号并行模式，账号数: {enabled_count}）", 'success', system='message')
-    elif config.get('only_reply_new_messages', False):
+    elif config.get('only_reply_new_messages', True):
         add_log("开始监控私信（仅回复新消息模式）", 'success', system='message')
     else:
         add_log("开始监控私信", 'success', system='message')
@@ -4430,7 +4445,7 @@ def handle_new_message_config():
         
         # 更新仅回复新消息配置
         if 'only_reply_new_messages' in data:
-            old_value = config.get('only_reply_new_messages', False)
+            old_value = config.get('only_reply_new_messages', True)
             new_value = data['only_reply_new_messages']
             config['only_reply_new_messages'] = new_value
             
@@ -4481,9 +4496,9 @@ def handle_new_message_config():
     else:
         # GET请求，返回当前配置
         return jsonify({
-            'only_reply_new_messages': config.get('only_reply_new_messages', False),
+            'only_reply_new_messages': config.get('only_reply_new_messages', True),
             'max_replies_per_user': config.get('max_replies_per_user', 3),
-            'unlimited_replies_per_user': config.get('unlimited_replies_per_user', False),
+            'unlimited_replies_per_user': config.get('unlimited_replies_per_user', True),
         })
 
 @app.route('/api/follow-check-interval-config', methods=['GET', 'POST'])
@@ -5815,6 +5830,7 @@ PLATFORM_IMPORT_LABELS = {
     'xiaohongshu': '小红书私信',
     'weibo': '微博私信',
     'xianyu': '闲鱼消息',
+    'channels': '视频号私信',
 }
 
 
@@ -5849,11 +5865,13 @@ def _platform_import_data(platform):
         from xiaohongshu_reply_system import xiaohongshu_system
         from weibo_reply_system import weibo_system
         from xianyu_reply_system import xianyu_system
+        from channels_reply_system import channels_system
         system = {
             'douyin': douyin_system,
             'xiaohongshu': xiaohongshu_system,
             'weibo': weibo_system,
             'xianyu': xianyu_system,
+            'channels': channels_system,
         }[platform]
         system.load_config()
         system.load_rules()
@@ -5912,7 +5930,11 @@ def _apply_platform_import(platform, portable, imported_rules, mode):
         from xiaohongshu_reply_system import xiaohongshu_system
         from weibo_reply_system import weibo_system
         from xianyu_reply_system import xianyu_system
-        system = {'douyin': douyin_system, 'xiaohongshu': xiaohongshu_system, 'weibo': weibo_system, 'xianyu': xianyu_system}[platform]
+        from channels_reply_system import channels_system
+        system = {
+            'douyin': douyin_system, 'xiaohongshu': xiaohongshu_system,
+            'weibo': weibo_system, 'xianyu': xianyu_system, 'channels': channels_system,
+        }[platform]
         system.load_config()
         system.load_rules()
         target_config, target_rules = system.config, system.rules
@@ -5927,7 +5949,7 @@ def _apply_platform_import(platform, portable, imported_rules, mode):
     for portable_key, target_key in key_map.items():
         if portable_key in portable:
             target_config[target_key] = portable[portable_key]
-    if platform in ('douyin', 'xiaohongshu', 'weibo', 'xianyu'):
+    if platform in ('douyin', 'xiaohongshu', 'weibo', 'xianyu', 'channels'):
         target_config['message_check_interval'] = max(0.5, float(target_config.get('message_check_interval') or 0.5))
         target_config['send_delay_interval'] = max(0.5, float(target_config.get('send_delay_interval') or 0.5))
     if mode == 'replace':
@@ -6229,7 +6251,7 @@ def save_email_config():
         data = request.get_json()
         
         platform = str(data.get('platform') or 'bili_message')
-        if platform not in ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu'):
+        if platform not in ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu', 'channels'):
             return jsonify({'success': False, 'error': '不支持的平台'}), 400
         email_config = {
             'enabled': data.get('enabled', False),
@@ -6278,7 +6300,7 @@ def get_email_config():
 @app.route('/api/platform-email-config/<platform>', methods=['GET', 'POST'])
 def platform_email_config(platform):
     """Read or update per-platform error email alerts."""
-    if platform not in ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu'):
+    if platform not in ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu', 'channels'):
         return jsonify({'success': False, 'error': '不支持的平台'}), 400
     global config
     configs = config.setdefault('email_notifications', {})
@@ -6445,9 +6467,9 @@ def reset_all_data():
             'unfollow_reply_message': '很遗憾看到您取消了关注，希望我们还有机会再见！',
             'unfollow_reply_type': 'text',
             'unfollow_reply_image': '',
-            'only_reply_new_messages': False,
+            'only_reply_new_messages': True,
             'max_replies_per_user': 3,
-            'unlimited_replies_per_user': False,
+            'unlimited_replies_per_user': True,
             'follow_check_interval': 1800,
             'follow_scan_pages': 3,
             'follow_new_window_seconds': 90,
@@ -6591,9 +6613,11 @@ def poll_qrcode():
         logger.error(error_msg)
         return jsonify({'success': False, 'error': error_msg})
 
-def run_server():
+def run_server(open_browser: bool = False):
     """启动 Flask Web 服务（供 launcher.py 与直接运行 app.py 共用）"""
     global message_logs, comment_logs
+    if not ensure_playwright_ready():
+        logger.warning('Playwright Chromium 未就绪，浏览器自动化功能可能不可用')
     if 'message_logs' not in globals() or message_logs is None:
         message_logs = []
     if 'comment_logs' not in globals() or comment_logs is None:
@@ -6602,21 +6626,26 @@ def run_server():
     os.makedirs(get_app_root(), exist_ok=True)
     ensure_data_files()
 
+    load_config()
     load_rules()
     load_comment_config()
     load_comment_rules()
+    logger.info('用户数据目录: %s', get_app_root())
 
     port = int(os.environ.get('PORT', 4999))
+    ensure_runtime_token()
+    access_url = build_access_url(port)
 
     add_log(f"BiliGo {APP_VERSION} - B站私信自动回复系统启动中...", 'info', system='message')
     add_log("系统初始化完成", 'success', system='message')
     add_log(f"Web服务器启动在端口 {port}", 'info', system='message')
-    add_log(f"请在浏览器中访问: http://localhost:{port}", 'info', system='message')
-    add_log(f"评论回复系统: http://localhost:{port}/comment", 'info', system='message')
-    add_log(f"抖音私信系统: http://localhost:{port}/douyin", 'info', system='message')
-    add_log(f"小红书私信系统: http://localhost:{port}/xiaohongshu", 'info', system='message')
-    add_log(f"微博私信系统: http://localhost:{port}/weibo", 'info', system='message')
-    add_log(f"闲鱼消息系统: http://localhost:{port}/xianyu", 'info', system='message')
+    add_log(f"Web UI 访问地址: {access_url}", 'info', system='message')
+    add_log(f"评论回复系统: {build_access_url(port, '/comment')}", 'info', system='message')
+    add_log(f"抖音私信系统: {build_access_url(port, '/douyin')}", 'info', system='message')
+    add_log(f"小红书私信系统: {build_access_url(port, '/xiaohongshu')}", 'info', system='message')
+    add_log(f"微博私信系统: {build_access_url(port, '/weibo')}", 'info', system='message')
+    add_log(f"闲鱼消息系统: {build_access_url(port, '/xianyu')}", 'info', system='message')
+    add_log(f"视频号私信系统: {build_access_url(port, '/channels')}", 'info', system='message')
     add_log("日志系统已就绪", 'success', system='message')
 
     add_log("评论回复系统已初始化", 'info', system='comment')
@@ -6624,12 +6653,13 @@ def run_server():
     add_log("评论日志系统已就绪", 'success', system='comment')
 
     print(f"BiliGo {APP_VERSION} - B站私信自动回复系统启动中...")
-    print(f"请在浏览器中访问: http://localhost:{port}")
-    print(f"评论回复系统: http://localhost:{port}/comment")
-    print(f"抖音私信系统: http://localhost:{port}/douyin")
-    print(f"小红书私信系统: http://localhost:{port}/xiaohongshu")
-    print(f"微博私信系统: http://localhost:{port}/weibo")
-    print(f"闲鱼消息系统: http://localhost:{port}/xianyu")
+    print(f"Web UI: {access_url}")
+    print(f"评论回复系统: {build_access_url(port, '/comment')}")
+    print(f"抖音私信系统: {build_access_url(port, '/douyin')}")
+    print(f"小红书私信系统: {build_access_url(port, '/xiaohongshu')}")
+    print(f"微博私信系统: {build_access_url(port, '/weibo')}")
+    print(f"闲鱼消息系统: {build_access_url(port, '/xianyu')}")
+    print(f"视频号私信系统: {build_access_url(port, '/channels')}")
 
     from douyin_reply_system import douyin_system
     douyin_system.init_on_startup()
@@ -6639,9 +6669,16 @@ def run_server():
     weibo_system.init_on_startup()
     from xianyu_reply_system import xianyu_system
     xianyu_system.init_on_startup()
+    from channels_reply_system import channels_system
+    channels_system.init_on_startup()
+
+    should_open_browser = open_browser or os.environ.get('BILIGO_OPEN_BROWSER', '').strip().lower() in ('1', 'true', 'yes')
+    if should_open_browser:
+        threading.Thread(target=open_browser_when_ready, args=(port,), daemon=True).start()
 
     app.run(host='0.0.0.0', port=port, debug=False)
 
 
 if __name__ == '__main__':
-    run_server()
+    auto_open = os.environ.get('BILIGO_OPEN_BROWSER', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+    run_server(open_browser=auto_open)

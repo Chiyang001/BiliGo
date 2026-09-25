@@ -15,7 +15,7 @@
             <div class="logo"><h1>BiliGo</h1><div class="subtitle">闲鱼买家消息自动回复工具</div></div>
             <div class="header-actions">
                 <div style="display:flex;align-items:center;gap:8px">
-                    <span class="version-badge">V3 Ultra</span>
+                    <span class="version-badge">V3.2 Ultra</span>
                     <button class="btn-switch btn-secondary dashboard-nav" onclick="location.href='/dashboard?from=xianyu'">仪表盘</button>
                     <button class="btn-switch ai-reply-nav" onclick="location.href='/ai-reply?from=xianyu'">AI回复</button>
                     <button class="btn-switch btn-secondary" onclick="openDocsPage()">教程文档</button>
@@ -30,6 +30,7 @@
                         <button class="platform-switcher-item" onclick="location.href='/xiaohongshu'">小红书私信</button>
                         <button class="platform-switcher-item" onclick="location.href='/weibo'">微博私信</button>
                         <button class="platform-switcher-item active" disabled>闲鱼消息 <span class="check">✓</span></button>
+                        <button class="platform-switcher-item" onclick="location.href='/channels'">视频号私信</button>
                     </div>
                 </div>
                 <button class="btn-switch btn-danger" onclick="resetXhsData()">清除所有数据</button>
@@ -49,7 +50,7 @@
                 <div class="form-row"><label for="send-delay-interval">发送间隔（秒）:</label><input type="number" id="send-delay-interval" min="0.5" max="30" step="0.5" value="2"></div>
                 <div class="form-row"><div class="checkbox-wrapper"><input type="checkbox" id="only-reply-new-messages" checked><label for="only-reply-new-messages">仅回复启动后收到的新消息</label></div></div>
                 <div class="form-row"><label for="max-replies-per-user">单用户最大回复次数:</label><input type="number" id="max-replies-per-user" min="1" max="100" value="3"></div>
-                <div class="checkbox-wrapper"><input type="checkbox" id="unlimited-replies-per-user" onchange="updateXhsReplyLimitState()"><label for="unlimited-replies-per-user">不限制单用户回复次数</label></div>
+                <div class="checkbox-wrapper"><input type="checkbox" id="unlimited-replies-per-user" onchange="updateXhsReplyLimitState()" checked><label for="unlimited-replies-per-user">不限制单用户回复次数</label></div>
                 <button class="btn-secondary" onclick="saveXhsConfig()">保存消息设置</button>
                 <div class="button-group" style="margin-top:20px"><button class="btn-secondary" onclick="exportPlatformConfig()">导出配置</button><button class="btn-primary" onclick="openPlatformConfigImport()">导入配置</button></div>
             </section>
@@ -80,6 +81,7 @@
     </div>
 
     <div id="platform-config-import-modal" class="modal"><div class="modal-content" style="max-width:460px"><div class="modal-header"><h3>导入配置</h3><button class="close-btn" onclick="closePlatformConfigImport()" aria-label="关闭"></button></div><div class="modal-body"><div class="form-row"><label for="platform-config-file">配置文件:</label><input id="platform-config-file" type="file" accept=".json,application/json"></div><div class="form-row"><label>导入模式:</label><div class="radio-group"><div class="radio-wrapper"><input type="radio" id="platform-config-replace" name="platform-config-import-mode" value="replace" checked><label for="platform-config-replace">替换现有规则</label></div><div class="radio-wrapper"><input type="radio" id="platform-config-append" name="platform-config-import-mode" value="append"><label for="platform-config-append">追加新规则</label></div></div></div><p class="help-text">配置包不包含账号登录会话。导入前建议先导出当前配置备份。</p></div><div class="modal-footer"><button class="btn-primary" id="platform-config-import-submit" onclick="importPlatformConfig()">导入</button><button class="btn-secondary" onclick="closePlatformConfigImport()">取消</button></div></div></div>
+    <script src="web_auth.js"></script>
     <script src="platform_log_view.js"></script>
     <script src="platform_import.js"></script>
     <script src="ai_mode.js"></script>

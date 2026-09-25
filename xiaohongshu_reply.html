@@ -18,7 +18,7 @@
             </div>
             <div class="header-actions">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span class="version-badge">V3 Ultra</span>
+                    <span class="version-badge">V3.2 Ultra</span>
                     <button class="btn-switch btn-secondary dashboard-nav" onclick="location.href='/dashboard?from=xiaohongshu'">仪表盘</button>
                     <button class="btn-switch ai-reply-nav" onclick="location.href='/ai-reply?from=xiaohongshu'">AI回复</button>
                     <button class="btn-switch btn-secondary" onclick="openDocsPage()" title="教程文档">教程文档</button>
@@ -33,6 +33,7 @@
                         <button class="platform-switcher-item active" disabled>小红书私信 <span class="check">✓</span></button>
                         <button class="platform-switcher-item" onclick="location.href='/weibo'">微博私信</button>
                         <button class="platform-switcher-item" onclick="location.href='/xianyu'">闲鱼消息</button>
+                        <button class="platform-switcher-item" onclick="location.href='/channels'">视频号私信</button>
                     </div>
                 </div>
                 <button class="btn-switch btn-danger" onclick="resetXhsData()">清除所有数据</button>
@@ -70,7 +71,7 @@
                     <input type="number" id="max-replies-per-user" min="1" max="100" value="3">
                 </div>
                 <div class="checkbox-wrapper">
-                    <input type="checkbox" id="unlimited-replies-per-user" onchange="updateXhsReplyLimitState()">
+                    <input type="checkbox" id="unlimited-replies-per-user" onchange="updateXhsReplyLimitState()" checked>
                     <label for="unlimited-replies-per-user">不限制单用户回复次数</label>
                 </div>
                 <button class="btn-secondary" onclick="saveXhsConfig()">保存消息设置</button>
@@ -170,6 +171,7 @@
             </div>
         </div>
     </div>
+    <script src="web_auth.js"></script>
     <script src="platform_log_view.js"></script>
     <script src="platform_import.js"></script>
     <script src="ai_mode.js"></script>

@@ -22,7 +22,7 @@
             </div>
             <div class="header-actions">
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span class="version-badge">V3 Ultra</span>
+                    <span class="version-badge">V3.2 Ultra</span>
                     <button class="btn-switch btn-secondary dashboard-nav" onclick="location.href='/dashboard?from=bili_message'">仪表盘</button>
                     <button class="btn-switch ai-reply-nav" onclick="location.href='/ai-reply?from=bili_message'">AI回复</button>
                     <button class="btn-switch btn-secondary" onclick="openDocsPage()" title="教程文档">
@@ -43,6 +43,7 @@
                         <button class="platform-switcher-item" onclick="location.href='/xiaohongshu'" title="小红书私信（浏览器自动化）">小红书私信</button>
                         <button class="platform-switcher-item" onclick="location.href='/weibo'" title="微博私信（浏览器自动化）">微博私信</button>
                         <button class="platform-switcher-item" onclick="location.href='/xianyu'" title="闲鱼消息（浏览器自动化）">闲鱼消息</button>
+                        <button class="platform-switcher-item" onclick="location.href='/channels'" title="视频号私信（浏览器自动化）">视频号私信</button>
                     </div>
                 </div>
                 <button class="btn-switch btn-danger" onclick="confirmResetAllData()" title="清除所有配置和数据">
@@ -107,7 +108,7 @@
                 
                 <div class="form-row" style="margin-top: 20px;">
                     <div class="checkbox-wrapper">
-                        <input type="checkbox" id="only-reply-new-messages">
+                        <input type="checkbox" id="only-reply-new-messages" checked>
                         <label for="only-reply-new-messages">仅回复新消息</label>
                     </div>
                     <p class="help-text">启用后，只会回复程序启动之后收到的消息，不会回复启动前的历史消息</p>
@@ -125,7 +126,7 @@
 
                 <div class="form-row" style="margin-top: 10px;">
                     <div class="checkbox-wrapper">
-                        <input type="checkbox" id="unlimited-replies-per-user" onchange="updateReplyLimitState()">
+                        <input type="checkbox" id="unlimited-replies-per-user" onchange="updateReplyLimitState()" checked>
                         <label for="unlimited-replies-per-user">不限制单用户回复次数</label>
                     </div>
                     <p class="help-text">启用后忽略上方次数限制，停用后继续使用已填写的上限</p>
@@ -1007,6 +1008,7 @@
         </div>
     </div>
 
+    <script src="web_auth.js"></script>
     <script src="platform_log_view.js"></script>
     <script src="platform_import.js"></script>
     <script src="ai_mode.js"></script>

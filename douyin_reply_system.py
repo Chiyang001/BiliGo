@@ -41,6 +41,7 @@ BROWSER_PROFILE_DIRS = {
     'xiaohongshu': 'xiaohongshu_browser_profile',
     'weibo': 'weibo_browser_profile',
     'xianyu': 'xianyu_browser_profile',
+    'channels': 'channels_browser_profile',
 }
 DEFAULT_CONFIG = {
     'default_reply_enabled': False,
@@ -51,7 +52,7 @@ DEFAULT_CONFIG = {
     'send_delay_interval': 0.3,
     'only_reply_new_messages': True,
     'max_replies_per_user': 3,
-    'unlimited_replies_per_user': False,
+    'unlimited_replies_per_user': True,
     'headless': True,
     # 监控状态只属于当前进程；后端重启后必须由用户重新手动启动。
     'auto_start_monitoring': False,
@@ -90,7 +91,7 @@ def _get_app_version() -> str:
         from app import APP_VERSION
         return APP_VERSION
     except Exception:
-        return 'V3 Ultra'
+        return 'V3.2 Ultra'
 
 
 class DouyinReplySystem:

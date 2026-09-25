@@ -1,37 +1,33 @@
 """BiliGo single-file launcher: opens browser and runs the Flask app."""
 import os
-import threading
-import time
-import webbrowser
 
 from app_paths import ensure_data_files, get_data_dir
+from playwright_runtime import configure_playwright_env, ensure_playwright_ready
 
-
-def open_browser():
-    time.sleep(1.5)
-    webbrowser.open('http://localhost:4999')
+configure_playwright_env()
 
 
 def main():
-    os.chdir(get_data_dir())
+    data_dir = get_data_dir()
+    os.makedirs(data_dir, exist_ok=True)
+    os.chdir(data_dir)
     ensure_data_files()
+    if not ensure_playwright_ready():
+        print('[WARN] Playwright Chromium 未就绪，抖音/小红书等浏览器功能可能不可用')
 
     print('========================================')
     print('  BiliGo - One-Click Launcher')
     print('========================================')
+    print(f'[INFO] 用户数据目录: {data_dir}')
     print()
     print('[OK] Starting Flask application...')
-    print('Access at: http://localhost:4999')
-    print('Comment system: http://localhost:4999/comment')
-    print('Douyin DM: http://localhost:4999/douyin')
+    print('The browser will open automatically after the server is ready.')
     print('Press Ctrl+C to stop')
     print('========================================')
     print()
 
-    threading.Thread(target=open_browser, daemon=True).start()
-
     from app import run_server
-    run_server()
+    run_server(open_browser=True)
 
 
 if __name__ == '__main__':
