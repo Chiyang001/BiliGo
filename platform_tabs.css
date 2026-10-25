@@ -11,6 +11,7 @@
 .platform-console-page .container {
     width: min(1680px, calc(100% - 30px));
     max-width: none;
+    margin-inline: auto;
 }
 
 .platform-settings-workspace,

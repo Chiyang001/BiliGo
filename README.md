@@ -1,8 +1,8 @@
-# BiliGo V3.2.2 Ultra
+# BiliGo V3.2.1 Ultra
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-V3.2.2_Ultra-blue.svg)
+![Version](https://img.shields.io/badge/version-V3.2.1_Ultra-blue.svg)
 ![Status](https://img.shields.io/badge/status-released-brightgreen.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB.svg)
 ![Docker](https://img.shields.io/badge/Docker-supported-2496ED.svg)
@@ -18,7 +18,7 @@
 
 ## 功能概览
 
-BiliGo V3.2.2 Ultra 将五个平台、六类消息入口整合到同一个 Web 管理界面：
+BiliGo V3.2.1 Ultra 将五个平台、六类消息入口整合到同一个 Web 管理界面：
 
 | 平台/入口 | 登录方式 | 传统规则回复 | AI 回复 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -129,7 +129,7 @@ PORT=5000 python app.py
 - 默认登录使用浏览器会话 Cookie，关闭浏览器后需要重新登录，服务端最长有效期为 12 小时。勾选“记住密码并自动登录”后，此浏览器可自动登录 30 天；其他设备或浏览器仍需输入密码。浏览器恢复会话功能可能保留会话 Cookie，共用设备请主动点击“退出面板”。
 - 页面顶部的“面板安全”可修改密码，修改后立即撤销所有设备的登录。退出面板会撤销当前浏览器的会话；不会停止正在运行的回复任务。
 - 自定义密码仅保存加盐 PBKDF2 哈希，设备会话仅保存令牌哈希，保存在数据目录的 `.biligo_web_auth.sqlite3` 中。初始密码在尚未完成设置时临时保存在这个受限数据库内，用于下次启动显示；设置自定义密码时会清除临时值，并开启 SQLite 安全删除。旧版 URL token、`BILIGO_WEB_TOKEN` 和 `BILIGO_WEB_AUTH=0` 不再提供访问权限。
-- 旧版仅保存密码哈希，无法还原初始密码，也无法判断当时是否已自定义。升级时保留原密码，首次登录后要求设置新的自定义密码；如旧密码已经丢失，在相同 `BILIGO_DATA_DIR` 下执行 `python web_access.py --reset-initial-password`，终端会显示新的初始密码，所有旧会话立即失效。新版 EXE 可运行 `BiliGo_V3.2.2_Ultra.exe --reset-panel-password`。重置只影响面板密码，平台账号和配置不变。
+- 旧版仅保存密码哈希，无法还原初始密码，也无法判断当时是否已自定义。升级时保留原密码，首次登录后要求设置新的自定义密码；如旧密码已经丢失，在相同 `BILIGO_DATA_DIR` 下执行 `python web_access.py --reset-initial-password`，终端会显示新的初始密码，所有旧会话立即失效。新版 EXE 可运行 `BiliGo_V3.2.1_Ultra.exe --reset-panel-password`。重置只影响面板密码，平台账号和配置不变。
 - 如忘记密码，在使用相同 `BILIGO_DATA_DIR` 的服务器终端执行 `python web_access.py --reset-password`，按提示输入新密码。EXE 或 Docker 也可设置 `BILIGO_PANEL_PASSWORD` 后重启来重置。该变量如一直保留，**每次启动都会以其值为准**，覆盖网页内后续修改的密码；重置后建议移除此环境变量。
 - 静态文件只允许访问明确列出的界面资源；配置 JSON、源码、数据库、浏览器资料、隐藏文件和目录均不能通过静态 URL 下载，即使已经登录。
 - 图片选择、预览和发送限制在数据目录的 `images/` 中。请将旧图片移到此目录后重新选择；如需其他目录，请由服务器管理员设置 `BILIGO_IMAGE_ROOT`，不能在网页中扩大目录边界。跨目录路径、Windows 特殊路径和指向目录外的软链接/联接均被拒绝。Markdown 知识库读取与删除同样检查真实路径边界。
@@ -150,7 +150,7 @@ build_exe.bat
 构建结果位于：
 
 ```text
-dist/BiliGo_V3.2.2_Ultra.exe
+dist/BiliGo_V3.2.1_Ultra.exe
 ```
 
 EXE 首次运行时会在数据目录生成无凭据的默认配置。浏览器自动化平台仍需要系统 Chrome 或可用的 Playwright Chromium 运行时。
@@ -314,14 +314,14 @@ V3 Ultra 已移除 B 站评论图片回复，评论默认回复和关键词规�
 
 ## 更新日志
 
-### V3.2.2 Ultra（2026-10-25）
+### V3.2.1 Ultra（2026-10-25）
+
+- 修复平台面板在宽屏下靠左、左右留白不一致的问题，保持各窗口宽度下水平居中。
 
 - 完善初始密码显示、首次强制改密与 8 位密码设置，增加本机密码重置入口。
 - 重做登录和密码设置页，统一明暗模式、手机布局、密码显隐和提交反馈；顶部工具栏仅保留紧凑的“面板安全”入口。
 - 修复 Playwright 与 Chromium / Headless Shell 版本不匹配，以及浏览器异常被误判为登录失效的问题。
 - 运行配置不再纳入代码仓库；首次运行从无凭据模板生成配置，升级保留已有账号和用户数据。
-
-### V3.2.1 Ultra（2026-10-25）
 
 - 修复任意文件下载与目录越界，静态资源改为白名单，图片及知识库操作检查真实路径边界。
 - 增加面板密码、设备独立会话、30 天自动登录、密码修改和退出撤销，以及登录重试限制与 CSRF 校验。
