@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>面板安全 · BiliGo</title>
+    <script src="/auth-assets/panel_theme.js"></script>
+    <link rel="stylesheet" href="/auth-assets/panel_auth.css">
+    <script src="/web_auth.js" defer></script>
+    <script src="/panel_security.js" defer></script>
+</head>
+<body class="auth-page security-page">
+    <div class="auth-backdrop" aria-hidden="true"><span class="ambient-orb ambient-orb-blue"></span><span class="ambient-orb ambient-orb-pearl"></span><span class="backdrop-grid"></span></div>
+    <header class="login-header">
+        <a class="product-brand" href="/login" aria-label="BiliGo 管理面板"><img class="product-avatar" src="/auth-assets/developer-avatar.png" width="46" height="46" alt="炽阳001 的 GitHub 头像"><span>BiliGo<small>多平台私信自动回复工具</small></span></a>
+            <div class="theme-switch" role="group" aria-label="外观模式">
+                <button type="button" data-theme-choice="system" aria-label="跟随系统" aria-pressed="true" title="跟随系统"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg></button>
+                <button type="button" data-theme-choice="light" aria-label="明亮模式" aria-pressed="false" title="明亮模式"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg></button>
+                <button type="button" data-theme-choice="dark" aria-label="黑暗模式" aria-pressed="false" title="黑暗模式"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 14a8.5 8.5 0 0 1-10-10 8.5 8.5 0 1 0 10 10Z"/></svg></button>
+            </div>
+    </header>
+    <main class="auth-layout security-layout">
+        <section class="auth-story security-story" aria-label="面板密码设置">
+            <span class="story-decoration" aria-hidden="true"><i></i><i></i><i></i></span>
+            <h2>新的密码，<br><span class="headline-accent">新的开始。</span></h2>
+            <div class="security-scene" aria-hidden="true">
+                <div class="security-halo halo-outer"></div><div class="security-halo halo-inner"></div>
+                <span class="security-spark security-spark-one">✧</span><span class="security-spark security-spark-two">✦</span>
+                <div class="shield-sculpture"><svg viewBox="0 0 160 190" fill="none"><path class="shield-face" d="m80 12 62 24v51c0 49-62 89-62 89S18 136 18 87V36l62-24Z"/><path class="shield-inset" d="m80 26 49 19v42c0 35-37 66-49 75-12-9-49-40-49-75V45l49-19Z"/><path class="shield-shackle" d="M61 83V71a19 19 0 1 1 38 0v12"/><rect class="shield-lock" x="50" y="80" width="60" height="47" rx="12"/><path class="shield-keyhole" d="M80 99v10"/></svg></div>
+                <div class="password-sculpture"><span class="password-symbol"><svg viewBox="0 0 24 24" fill="none"><circle cx="8" cy="9" r="4"/><path d="m11 12 9 9m-5-5 2-2m0 4 2-2"/></svg></span><span class="password-dots"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="password-check"><svg viewBox="0 0 20 20" fill="none"><path d="m5 10 3 3 7-7"/></svg></span></div>
+            </div>
+            <div class="story-bottom" aria-hidden="true"><span class="story-line"></span><span class="story-star">✧</span></div>
+        </section>
+        <section class="auth-card security-card" aria-labelledby="security-heading">
+        <div class="card-topline"><span class="access-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m12 3 7 3v5c0 5-7 10-7 10S5 16 5 11V6l7-3Z"/><path d="m9 11 2 2 4-4"/></svg></span></div>
+        <h1 id="security-heading">修改面板密码</h1>
+        <p class="intro" id="security-description">更新后，请使用新密码登录。</p>
+        <form id="panel-password-form">
+            <div class="field-group">
+            <label for="current-password" id="current-password-label">当前密码</label>
+            <div class="password-field"><svg class="field-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="8" cy="10" r="4"/><path d="m11 13 8 8m-4-4 2-2m0 4 2-2"/></svg><input id="current-password" type="password" autocomplete="current-password" placeholder="输入当前密码" maxlength="256" required>
+                <button class="visibility-toggle" type="button" data-toggle-password="current-password" data-password-label="当前密码" aria-label="显示当前密码" aria-pressed="false" aria-controls="current-password"><svg class="eye-open" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m3 3 18 18M10.5 6.1 12 6c6 0 9 6 9 6a18 18 0 0 1-3 3.5M6.2 7.2A18 18 0 0 0 3 12s3 6 9 6c1.6 0 3-.4 4.2-1M10.2 10.2a2.5 2.5 0 0 0 3.6 3.6"/></svg></button>
+            </div></div>
+            <div class="field-group">
+            <div class="field-label"><label for="new-password">新密码</label><span class="field-meta">至少 8 位</span></div>
+            <div class="password-field"><svg class="field-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/></svg><input id="new-password" type="password" autocomplete="new-password" placeholder="设置一个新密码" minlength="8" maxlength="256" required>
+                <button class="visibility-toggle" type="button" data-toggle-password="new-password" data-password-label="新密码" aria-label="显示新密码" aria-pressed="false" aria-controls="new-password"><svg class="eye-open" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m3 3 18 18M10.5 6.1 12 6c6 0 9 6 9 6a18 18 0 0 1-3 3.5M6.2 7.2A18 18 0 0 0 3 12s3 6 9 6c1.6 0 3-.4 4.2-1M10.2 10.2a2.5 2.5 0 0 0 3.6 3.6"/></svg></button>
+            </div></div>
+            <div class="field-group">
+            <div class="field-label">
+            <label for="confirm-password">确认新密码</label>
+            <span id="password-match" class="match-caption" role="status" aria-live="polite"></span></div>
+            <div class="password-field"><svg class="field-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m12 3 7 3v5c0 5-7 10-7 10S5 16 5 11V6l7-3Z"/><path d="m9 11 2 2 4-4"/></svg><input id="confirm-password" type="password" autocomplete="new-password" placeholder="再次输入新密码" minlength="8" maxlength="256" required>
+                <button class="visibility-toggle" type="button" data-toggle-password="confirm-password" data-password-label="确认密码" aria-label="显示确认密码" aria-pressed="false" aria-controls="confirm-password"><svg class="eye-open" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12s3-6 9-6 9 6 9 6-3 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg><svg class="eye-closed" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m3 3 18 18M10.5 6.1 12 6c6 0 9 6 9 6a18 18 0 0 1-3 3.5M6.2 7.2A18 18 0 0 0 3 12s3 6 9 6c1.6 0 3-.4 4.2-1M10.2 10.2a2.5 2.5 0 0 0 3.6 3.6"/></svg></button>
+            </div></div>
+            <p id="auth-error" class="message" role="alert" aria-live="polite"></p>
+            <button id="password-submit" type="submit"><span class="submit-label">更新密码</span><svg class="submit-arrow" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg><span class="submit-spinner" aria-hidden="true"></span></button>
+        </form>
+        <div class="secondary-actions"><a href="/" id="security-back">返回面板</a><button id="panel-logout" type="button" class="text-button">退出面板</button></div>
+        </section>
+    </main>
+    <footer class="login-footer"><p>© 2026 BiliGo</p><nav aria-label="开发者链接"><a href="https://space.bilibili.com/404891612" target="_blank" rel="noopener noreferrer">Bilibili</a><span>·</span><a href="https://github.com/Chiyang001?tab=repositories" target="_blank" rel="noopener noreferrer">GitHub ↗</a></nav></footer>
+</body>
+</html>

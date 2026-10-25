@@ -1,8 +1,8 @@
-# BiliGo V3.2 Ultra
+# BiliGo V3.2.2 Ultra
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-V3.2_Ultra-blue.svg)
+![Version](https://img.shields.io/badge/version-V3.2.2_Ultra-blue.svg)
 ![Status](https://img.shields.io/badge/status-released-brightgreen.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB.svg)
 ![Docker](https://img.shields.io/badge/Docker-supported-2496ED.svg)
@@ -18,7 +18,7 @@
 
 ## 功能概览
 
-BiliGo V3.2 Ultra 将五个平台、六类消息入口整合到同一个 Web 管理界面：
+BiliGo V3.2.2 Ultra 将五个平台、六类消息入口整合到同一个 Web 管理界面：
 
 | 平台/入口 | 登录方式 | 传统规则回复 | AI 回复 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -119,6 +119,26 @@ python app.py
 PORT=5000 python app.py
 ```
 
+## 面板密码与文件访问安全
+
+启动后，所有平台页面、账号 Cookie、配置、日志、导入导出与管理接口都需要先登录面板。B 站账号登录与面板密码相互独立。
+
+- 首次启动自动生成随机初始密码；**尚未设置自定义密码时，每次启动都会在本机终端显示同一个初始密码**，不会写入网页日志或访问链接。显示发生在浏览器运行时检查之前。
+- 使用初始密码登录后，必须在“设置你的面板密码”页设置至少 8 个字符且与原密码不同的新密码，才能访问工作台或任何业务接口。设置成功后，初始密码立即失效、所有登录会话被撤销，此后终端不再显示初始密码。初始登录只发放 15 分钟的浏览器会话，不提供记住登录。
+- 右上角可选择“跟随系统 / 明亮模式 / 黑暗模式”。默认跟随系统，手动选择仅作为此浏览器的外观偏好保存。
+- 默认登录使用浏览器会话 Cookie，关闭浏览器后需要重新登录，服务端最长有效期为 12 小时。勾选“记住密码并自动登录”后，此浏览器可自动登录 30 天；其他设备或浏览器仍需输入密码。浏览器恢复会话功能可能保留会话 Cookie，共用设备请主动点击“退出面板”。
+- 页面顶部的“面板安全”可修改密码，修改后立即撤销所有设备的登录。退出面板会撤销当前浏览器的会话；不会停止正在运行的回复任务。
+- 自定义密码仅保存加盐 PBKDF2 哈希，设备会话仅保存令牌哈希，保存在数据目录的 `.biligo_web_auth.sqlite3` 中。初始密码在尚未完成设置时临时保存在这个受限数据库内，用于下次启动显示；设置自定义密码时会清除临时值，并开启 SQLite 安全删除。旧版 URL token、`BILIGO_WEB_TOKEN` 和 `BILIGO_WEB_AUTH=0` 不再提供访问权限。
+- 旧版仅保存密码哈希，无法还原初始密码，也无法判断当时是否已自定义。升级时保留原密码，首次登录后要求设置新的自定义密码；如旧密码已经丢失，在相同 `BILIGO_DATA_DIR` 下执行 `python web_access.py --reset-initial-password`，终端会显示新的初始密码，所有旧会话立即失效。新版 EXE 可运行 `BiliGo_V3.2.2_Ultra.exe --reset-panel-password`。重置只影响面板密码，平台账号和配置不变。
+- 如忘记密码，在使用相同 `BILIGO_DATA_DIR` 的服务器终端执行 `python web_access.py --reset-password`，按提示输入新密码。EXE 或 Docker 也可设置 `BILIGO_PANEL_PASSWORD` 后重启来重置。该变量如一直保留，**每次启动都会以其值为准**，覆盖网页内后续修改的密码；重置后建议移除此环境变量。
+- 静态文件只允许访问明确列出的界面资源；配置 JSON、源码、数据库、浏览器资料、隐藏文件和目录均不能通过静态 URL 下载，即使已经登录。
+- 图片选择、预览和发送限制在数据目录的 `images/` 中。请将旧图片移到此目录后重新选择；如需其他目录，请由服务器管理员设置 `BILIGO_IMAGE_ROOT`，不能在网页中扩大目录边界。跨目录路径、Windows 特殊路径和指向目录外的软链接/联接均被拒绝。Markdown 知识库读取与删除同样检查真实路径边界。
+- 非只读管理接口检查会话 CSRF 令牌与请求来源；连续输错密码会暂时限制登录。`/health` 仅返回 `ok`，供容器健康检查使用。
+
+对外提供服务时，请通过 HTTPS 反向代理访问，并设置 `BILIGO_COOKIE_SECURE=1`，确保浏览器只通过 HTTPS 发送会话凭证。使用反向代理时保留原始 `Host`，或将转发的 `Origin` 与应用收到的主机地址保持一致。代理应只转发应用端口，不要把项目目录或数据目录配置成可直接访问的静态站点目录。
+
+这里的保护针对网页访问。平台 Cookies 仍作为运行凭据保存在服务器数据目录，应限制该目录的系统访问权限。如果旧服务曾对外开放并暴露配置文件，请在对应平台的账号安全设置中撤销旧登录会话，再重新登录；同时轮换可能泄露的 AI API Key 和邮件授权码。
+
 ## Windows 单文件 EXE
 
 项目提供 PyInstaller 构建配置：
@@ -130,7 +150,7 @@ build_exe.bat
 构建结果位于：
 
 ```text
-dist/BiliGo.exe
+dist/BiliGo_V3.2.2_Ultra.exe
 ```
 
 EXE 首次运行时会在数据目录生成无凭据的默认配置。浏览器自动化平台仍需要系统 Chrome 或可用的 Playwright Chromium 运行时。
@@ -259,6 +279,7 @@ python scripts/smoke_test_regressions.py
 python scripts/smoke_test_platform_login_guards.py
 python scripts/smoke_test_xianyu.py
 python scripts/smoke_test_comment_ui.py
+python scripts/test_playwright_runtime.py
 ```
 
 提交代码前，请确认没有加入本地配置、浏览器资料、数据库、日志或打包产物。
@@ -268,6 +289,12 @@ python scripts/smoke_test_comment_ui.py
 ### 浏览器平台提示未登录
 
 先以非无头模式打开登录窗口并完成登录。如果平台验证页面有变化，清理该平台浏览器资料目录后重新登录；清理前请先备份需要保留的数据。
+
+### 提示 `Executable doesn't exist` 或找不到 `chromium_headless_shell`
+
+这是 Playwright 与浏览器版本不匹配，不能据此认定平台登录失效。新版会按当前 Python 环境所需的版本校验 Chromium 和 Headless Shell，优先使用匹配的项目目录或系统缓存；缺失时安装到当前配置的浏览器目录。浏览器运行异常会保留账号登录信息。
+
+Windows 源码运行推荐使用 `start.bat`，或明确使用项目环境：`.\.venv\Scripts\python.exe app.py`。若手动安装浏览器，请使用同一个 Python 执行 `.\.venv\Scripts\python.exe -m playwright install chromium`，避免全局 Python 和项目环境使用不同版本。EXE 缺少内置浏览器时会提示重新打包，不会把 EXE 当成 Python 反复调用安装命令。
 
 ### B 站出现 HTTP 412
 
@@ -286,6 +313,20 @@ python scripts/smoke_test_comment_ui.py
 V3 Ultra 已移除 B 站评论图片回复，评论默认回复和关键词规则统一为文字，减少上传失败和平台兼容问题。B 站私信仍可使用图片回复。
 
 ## 更新日志
+
+### V3.2.2 Ultra（2026-10-25）
+
+- 完善初始密码显示、首次强制改密与 8 位密码设置，增加本机密码重置入口。
+- 重做登录和密码设置页，统一明暗模式、手机布局、密码显隐和提交反馈；顶部工具栏仅保留紧凑的“面板安全”入口。
+- 修复 Playwright 与 Chromium / Headless Shell 版本不匹配，以及浏览器异常被误判为登录失效的问题。
+- 运行配置不再纳入代码仓库；首次运行从无凭据模板生成配置，升级保留已有账号和用户数据。
+
+### V3.2.1 Ultra（2026-10-25）
+
+- 修复任意文件下载与目录越界，静态资源改为白名单，图片及知识库操作检查真实路径边界。
+- 增加面板密码、设备独立会话、30 天自动登录、密码修改和退出撤销，以及登录重试限制与 CSRF 校验。
+- 单文件 EXE 包含登录页及内置 Chromium；更新界面、配置导出与 Windows 文件属性中的版本信息。
+- 安装包仅包含无凭据默认配置，不打包本机平台 Cookies、账号配置或登录会话。
 
 ### V3.2 Ultra（2026-09-25）
 

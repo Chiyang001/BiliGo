@@ -18,6 +18,7 @@ from playwright.sync_api import sync_playwright
 _data_dir = tempfile.TemporaryDirectory()
 atexit.register(_data_dir.cleanup)
 os.environ["BILIGO_DATA_DIR"] = _data_dir.name
+os.environ["BILIGO_PANEL_PASSWORD"] = "BiliGo-smoke-test-password"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import app
 
@@ -26,11 +27,6 @@ def _free_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         return int(listener.getsockname()[1])
-
-
-def _read_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=3) as response:
-        return json.load(response)
 
 
 def main() -> None:
@@ -57,6 +53,9 @@ def main() -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        assert page.request.post(origin + '/api/auth/login',
+                                 data={'password': os.environ.get('BILIGO_TEST_PASSWORD', os.environ['BILIGO_PANEL_PASSWORD'])},
+                                 headers={'X-BiliGo-Login': '1'}).ok
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         response = page.goto(origin + "/comment", wait_until="networkidle")
         assert response and response.ok, "comment page request failed"
@@ -75,7 +74,7 @@ def main() -> None:
         assert save_response.json().get("success") is True
         page.locator(".toast.success", has_text="默认评论回复设置已保存").wait_for()
 
-        saved_config = _read_json(origin + "/api/comment-config")
+        saved_config = page.request.get(origin + '/api/comment-config').json()
         assert saved_config["default_comment_reply_enabled"] is True
         assert saved_config["default_comment_reply_message"] == default_message
 

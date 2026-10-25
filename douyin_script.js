@@ -255,7 +255,7 @@ async function loadDouyinConfig() {
         document.getElementById('message-check-interval').value = cfg.message_check_interval ?? 0.5;
         document.getElementById('send-delay-interval').value = cfg.send_delay_interval ?? 0.5;
         document.getElementById('max-replies-per-user').value = cfg.max_replies_per_user ?? 3;
-        document.getElementById('unlimited-replies-per-user').checked = !!cfg.unlimited_replies_per_user;
+        document.getElementById('unlimited-replies-per-user').checked = cfg.unlimited_replies_per_user !== false;
         updateDouyinReplyLimitState();
         document.getElementById('only-reply-new-messages').checked = cfg.only_reply_new_messages !== false;
         document.getElementById('default-reply-enabled').checked = !!cfg.default_reply_enabled;

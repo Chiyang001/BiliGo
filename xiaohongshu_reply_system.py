@@ -7,9 +7,10 @@ import shutil
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from flask import jsonify, request, send_from_directory
+from flask import jsonify, request
 
-from app_paths import get_app_root, get_static_root
+from app_paths import get_app_root
+from web_files import serve_public_asset
 from ai_conversation_store import ai_conversation_store
 from ai_reply_service import platform_enabled
 from ai_handoff_store import ai_handoff_store
@@ -221,7 +222,7 @@ def register_xiaohongshu_routes(app) -> None:
     register_platform_config_transfer_routes(app, 'xiaohongshu', '小红书', xiaohongshu_system)
     @app.route('/xiaohongshu')
     def xiaohongshu_page():
-        return send_from_directory(get_static_root(), 'xiaohongshu_reply.html')
+        return serve_public_asset('xiaohongshu_reply.html')
 
     @app.route('/api/xiaohongshu-config', methods=['GET', 'POST'])
     def xiaohongshu_config_api():

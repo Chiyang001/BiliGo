@@ -8,6 +8,7 @@
         xiaohongshu: {name: '小红书私信', eyebrow: 'XIAOHONGSHU MESSAGE', icon: 'xiaohongshu-seeklogo.png', accent: '#e43b4f', deep: '#b92539', soft: '#fff2f4', border: '#f0a4ae'},
         weibo: {name: '微博私信', eyebrow: 'WEIBO MESSAGE', icon: 'sina-weibo-seeklogo.png', accent: '#f27b22', deep: '#b95615', soft: '#fff5ec', border: '#efb586'},
         xianyu: {name: '闲鱼消息', eyebrow: 'XIANYU MESSAGE', icon: 'xianyu.jpg', accent: '#f6c900', deep: '#8d7600', soft: '#fffbea', border: '#ead36b'},
+        channels: {name: '视频号私信', eyebrow: 'WECHAT CHANNELS', icon: 'weixin_channels.png', accent: '#fa8c16', deep: '#ad4e00', soft: '#fff7e6', border: '#ffd591'},
     };
 
     const SECTION_META = {

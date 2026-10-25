@@ -20,6 +20,7 @@ PLATFORM_NAMES = {
     'xiaohongshu': '小红书私信',
     'weibo': '微博私信',
     'xianyu': '闲鱼消息',
+    'channels': '视频号私信',
 }
 
 

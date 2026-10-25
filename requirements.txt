@@ -1,4 +1,3 @@
 Flask==2.3.3
 requests==2.31.0
-# 抖音私信浏览器自动化 — pip install playwright && playwright install chromium
-# optional: comment_fetch_mode=browser — 同上
+playwright>=1.49.0

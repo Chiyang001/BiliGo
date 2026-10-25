@@ -152,8 +152,11 @@ def ensure_data_files():
     migrate_legacy_data_dir()
     data_dir = get_data_dir()
     resource_dir = get_resource_dir()
+    os.makedirs(data_dir, exist_ok=True)
+    # Source-tree root JSON files are user data, never default templates.
+    template_dir = resource_dir if is_frozen() else os.path.join(resource_dir, 'docker', 'defaults')
     for name in DEFAULT_CONFIG_FILES:
         dest = os.path.join(data_dir, name)
-        src = os.path.join(resource_dir, name)
+        src = os.path.join(template_dir, name)
         if not os.path.exists(dest) and os.path.exists(src):
             shutil.copy2(src, dest)

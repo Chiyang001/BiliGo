@@ -5,7 +5,8 @@
         xiaohongshu: '小红书私信',
         weibo: '微博私信',
         douyin: '抖音私信',
-        xianyu: '闲鱼消息'
+        xianyu: '闲鱼消息',
+        channels: '视频号私信',
     };
 
     function currentPlatform() {
@@ -16,6 +17,7 @@
         if (location.pathname.startsWith('/weibo')) return 'weibo';
         if (location.pathname.startsWith('/xiaohongshu')) return 'xiaohongshu';
         if (location.pathname.startsWith('/xianyu')) return 'xianyu';
+        if (location.pathname.startsWith('/channels')) return 'channels';
         return 'bili_message';
     }
 

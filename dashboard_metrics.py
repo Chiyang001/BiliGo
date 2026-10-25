@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 from app_paths import get_app_root
 
 
-PLATFORMS = ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu')
+PLATFORMS = ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu', 'channels')
 EVENT_TYPES = ('inbound', 'reply_success', 'reply_failure')
 PLATFORM_NAMES = {
     'bili_message': 'B站私信',
@@ -24,6 +24,7 @@ PLATFORM_NAMES = {
     'xiaohongshu': '小红书私信',
     'weibo': '微博私信',
     'xianyu': '闲鱼消息',
+    'channels': '视频号私信',
 }
 
 
@@ -102,6 +103,7 @@ class DashboardMetrics:
             'xiaohongshu': 'xiaohongshu_user_reply_stats.json',
             'weibo': 'weibo_user_reply_stats.json',
             'xianyu': 'xianyu_user_reply_stats.json',
+            'channels': 'channels_user_reply_stats.json',
         }
         for platform in PLATFORMS:
             records: Dict[str, Any] = {}

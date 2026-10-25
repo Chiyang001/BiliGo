@@ -13,11 +13,16 @@ const PLATFORM_DEFAULT_AVATARS = {
     xiaohongshu: '/xiaohongshu-seeklogo.png',
     weibo: '/sina-weibo-seeklogo.png',
     xianyu: '/xianyu.jpg',
+    channels: '/weixin_channels.png',
 };
 const PLATFORM_DEFAULT_AVATAR = PLATFORM_DEFAULT_AVATARS[PLATFORM_API] || '/bilibili.png';
 const PLATFORM_MONITOR_START_LABEL = '开始监控';
 const PLATFORM_MONITOR_STARTING_LABEL = '正在启动中，请稍后';
 const platformApi = suffix => `/api/${PLATFORM_API}${suffix}`;
+const PLATFORM_INTERVAL_DEFAULTS = {
+    channels: {check: 0.5, send: 0.5},
+};
+const platformIntervalDefaults = PLATFORM_INTERVAL_DEFAULTS[PLATFORM_API] || {check: 1, send: 1};
 
 function checkUpdate() {
     window.open('https://github.com/Chiyang001/BiliGo/releases/', '_blank');
@@ -178,11 +183,11 @@ function resolveXhsLoggedIn(cfg) {
 async function loadXhsConfig() {
     try {
         const cfg = await (await fetch(platformApi('-config'))).json();
-        document.getElementById('message-check-interval').value = cfg.message_check_interval ?? 1;
-        document.getElementById('send-delay-interval').value = cfg.send_delay_interval ?? 1;
+        document.getElementById('message-check-interval').value = cfg.message_check_interval ?? platformIntervalDefaults.check;
+        document.getElementById('send-delay-interval').value = cfg.send_delay_interval ?? platformIntervalDefaults.send;
         document.getElementById('only-reply-new-messages').checked = cfg.only_reply_new_messages !== false;
         document.getElementById('max-replies-per-user').value = cfg.max_replies_per_user ?? 3;
-        document.getElementById('unlimited-replies-per-user').checked = !!cfg.unlimited_replies_per_user;
+        document.getElementById('unlimited-replies-per-user').checked = cfg.unlimited_replies_per_user !== false;
         document.getElementById('default-reply-enabled').checked = !!cfg.default_reply_enabled;
         document.getElementById('default-reply-message').value = cfg.default_reply_message || '';
         updateXhsReplyLimitState();
@@ -301,7 +306,7 @@ function updateXhsAccount(account, loggedIn, loginTime, expired = false) {
     document.getElementById('account-login-time').textContent = loginTime ? new Date(loginTime).toLocaleString('zh-CN',{hour12:false}) : '-';
     const status = document.getElementById('login-status-text'); status.textContent = expired ? '已失效' : (valid ? '已登录':'未登录'); status.className = `value ${valid ? 'ok':'warn'}`;
     const avatar = document.getElementById('account-avatar');
-    const avatarUrl = ['weibo', 'xianyu'].includes(PLATFORM_API) && account.avatar
+    const avatarUrl = ['weibo', 'xianyu', 'channels'].includes(PLATFORM_API) && account.avatar
         ? `${platformApi('-account/avatar')}?v=${encodeURIComponent(account.avatar)}`
         : account.avatar;
     avatar.innerHTML = valid && avatarUrl

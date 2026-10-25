@@ -13,7 +13,7 @@ from typing import Optional
 from app_paths import get_app_root
 
 
-PLATFORMS = ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu')
+PLATFORMS = ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu', 'channels')
 
 
 class AiConversationStore:

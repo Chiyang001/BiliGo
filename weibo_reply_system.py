@@ -12,7 +12,8 @@ from urllib.parse import urlparse
 import requests
 from flask import Response, jsonify, request
 
-from app_paths import get_app_root, get_static_root
+from app_paths import get_app_root
+from web_files import public_asset_path
 from ai_conversation_store import ai_conversation_store
 from ai_reply_service import platform_enabled
 from dashboard_metrics import dashboard_metrics
@@ -359,7 +360,7 @@ def register_weibo_routes(app) -> None:
     register_platform_config_transfer_routes(app, 'weibo', '微博', weibo_system)
     @app.route('/weibo')
     def weibo_page():
-        path = os.path.join(get_static_root(), 'xiaohongshu_reply.html')
+        path = public_asset_path('xiaohongshu_reply.html')
         with open(path, 'r', encoding='utf-8') as f:
             html = f.read()
         html = html.replace(

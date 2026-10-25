@@ -1,4 +1,7 @@
-const PLATFORM_ROUTES = { bili_message: '/', bili_comment: '/comment', xiaohongshu: '/xiaohongshu', weibo: '/weibo', douyin: '/douyin', xianyu: '/xianyu' };
+const PLATFORM_ROUTES = {
+    bili_message: '/', bili_comment: '/comment', xiaohongshu: '/xiaohongshu',
+    weibo: '/weibo', douyin: '/douyin', xianyu: '/xianyu', channels: '/channels',
+};
 const MASKED_API_KEY = '************';
 let apiKeyConfigured = false;
 let showingMaskedApiKey = false;
@@ -120,8 +123,9 @@ function selectedPlatforms() {
 }
 
 function updatePlatformCount() {
-    const count = Array.from(document.querySelectorAll('[data-platform]:checked')).length;
-    document.getElementById('ai-platform-count').textContent = `${count} / 5`;
+    const inputs = Array.from(document.querySelectorAll('[data-platform]'));
+    const count = inputs.filter(input => input.checked).length;
+    document.getElementById('ai-platform-count').textContent = `${count} / ${inputs.length}`;
     document.querySelectorAll('.ai-tab-button[data-tab]').forEach(button => {
         const input = document.querySelector(`[data-platform="${button.dataset.tab}"]`);
         button.classList.toggle('enabled', Boolean(input && input.checked));

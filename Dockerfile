@@ -5,11 +5,13 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     BILIGO_DATA_DIR=/data \
+    BILIGO_OPEN_BROWSER=0 \
     PORT=4999 \
     TZ=Asia/Shanghai
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && playwright install --with-deps chromium
 
 COPY . .
 # Root-level runtime configuration is excluded from the build context because
@@ -26,7 +28,7 @@ EXPOSE 4999
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", \"4999\")}/', timeout=3)" || exit 1
+    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", \"4999\")}/health', timeout=3)" || exit 1
 
 ENTRYPOINT ["/app/docker/entrypoint.sh"]
 CMD ["python", "app.py"]

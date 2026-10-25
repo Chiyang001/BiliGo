@@ -1,3 +1,6 @@
+.venv/
+playwright-browsers/
+
 __pycache__/
 *.py[cod]
 *.log
@@ -14,8 +17,17 @@ dist/
 *_media/
 ai_knowledge/
 .biligo-data/
+.biligo_web_token
+.biligo_web_auth.sqlite3*
+/images/
 
 # Local runtime state. Credential-free templates live in docker/defaults/.
+/config.json
+/*_config.json
+/keywords.json
+/*_keywords.json
+/comment_rules.json
+/user_reply_stats.json
 *_user_reply_stats.json
 
 .codex-*

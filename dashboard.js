@@ -2,11 +2,13 @@ const PLATFORM_ASSETS = {
     bili_message: 'bilibili.png', bili_comment: 'bilibili.png', douyin: 'tik-tok.png',
     xiaohongshu: 'xiaohongshu-seeklogo.png', weibo: 'sina-weibo-seeklogo.png',
     xianyu: 'xianyu.jpg',
+    channels: 'weixin_channels.png',
 };
 const RETURN_TARGETS = {
     bili_message: '/', bili_comment: '/comment', douyin: '/douyin',
     xiaohongshu: '/xiaohongshu', weibo: '/weibo',
     xianyu: '/xianyu',
+    channels: '/channels',
 };
 let selectedRange = '30d';
 let dashboardData = null;

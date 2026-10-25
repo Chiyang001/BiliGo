@@ -12,6 +12,7 @@ from pathlib import Path
 
 DATA_DIR = tempfile.TemporaryDirectory()
 os.environ["BILIGO_DATA_DIR"] = DATA_DIR.name
+os.environ["BILIGO_PANEL_PASSWORD"] = "BiliGo-smoke-test-password"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import app  # noqa: E402
@@ -21,6 +22,9 @@ import playwright.sync_api as playwright_sync_api  # noqa: E402
 
 def check_ai_and_comment_apis() -> None:
     client = app.test_client()
+    assert client.post('/api/auth/login', json={'password': os.environ['BILIGO_PANEL_PASSWORD']},
+                       headers={'X-BiliGo-Login': '1'}).status_code == 200
+    client.environ_base['HTTP_X_BILIGO_CSRF'] = client.get('/api/auth/status').json['csrf_token']
 
     comment_page = client.get("/comment").get_data(as_text=True)
     assert "default-comment-reply-image" not in comment_page

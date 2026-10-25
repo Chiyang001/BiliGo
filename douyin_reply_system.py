@@ -18,7 +18,8 @@ from typing import Any, Dict, List, Optional
 
 from flask import jsonify, request, send_from_directory, Response
 
-from app_paths import get_app_root, get_static_root
+from app_paths import get_app_root
+from web_files import serve_public_asset
 from ai_conversation_store import ai_conversation_store
 from ai_handoff_store import ai_handoff_store
 from ai_reply_service import (
@@ -91,7 +92,8 @@ def _get_app_version() -> str:
         from app import APP_VERSION
         return APP_VERSION
     except Exception:
-        return 'V3.2 Ultra'
+        from app_version import APP_VERSION
+        return APP_VERSION
 
 
 class DouyinReplySystem:
@@ -306,11 +308,10 @@ class DouyinReplySystem:
                     self._mark_session_expired()
                     return False
                 except Exception as exc:
-                    logger.warning('会话验证失败: %s', exc)
+                    logger.warning('会话暂时无法验证（保留登录状态）: %s', exc)
                     if self._storage_has_session_cookies():
                         self._mark_session_valid(self.config.get('account'))
                         return True
-                    self._mark_session_expired()
                     return False
 
         def _verify():
@@ -1613,7 +1614,7 @@ def register_douyin_routes(app) -> None:
 
     @app.route('/douyin')
     def douyin_page():
-        return send_from_directory(get_static_root(), 'douyin_reply.html')
+        return serve_public_asset('douyin_reply.html')
 
     @app.route('/api/douyin-config', methods=['GET', 'POST'])
     def douyin_config_api():

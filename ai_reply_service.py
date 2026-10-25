@@ -9,10 +9,11 @@ from typing import Any, Dict, Optional
 import requests
 
 from app_paths import get_app_root
+from web_files import is_path_within
 from ai_conversation_store import ai_conversation_store
 
 
-AI_PLATFORM_KEYS = ('bili_message', 'bili_comment', 'xiaohongshu', 'weibo', 'douyin', 'xianyu')
+AI_PLATFORM_KEYS = ('bili_message', 'bili_comment', 'xiaohongshu', 'weibo', 'douyin', 'xianyu', 'channels')
 DEFAULT_MODEL_SETTINGS = {'context_enabled': True, 'context_window': 6000, 'auto_compress': True, 'prohibited_words': []}
 DEFAULT_HANDOFF_SETTINGS = {'enabled': False}
 PROHIBITED_MESSAGE_REPLY = '您发送的消息含有敏感或违禁词'
@@ -120,7 +121,7 @@ def build_knowledge_context(knowledge: Optional[Dict[str, Any]] = None, platform
                 continue
             path = os.path.abspath(str(document.get('path') or ''))
             try:
-                if os.path.commonpath([knowledge_root, path]) != knowledge_root:
+                if not is_path_within(knowledge_root, path):
                     continue
                 with open(path, 'r', encoding='utf-8') as handle:
                     content = handle.read(20000).strip()

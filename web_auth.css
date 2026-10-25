@@ -1,0 +1,66 @@
+/* Keep the panel security entry compact across the existing page toolbars. */
+.biligo-header-actions,
+.header-actions.biligo-header-actions,
+.topbar-actions.biligo-header-actions {
+    display: flex;
+    flex: 0 1 auto;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-width: 0;
+}
+.biligo-header-actions > * {
+    flex-grow: 0;
+    margin-inline: 0;
+}
+.biligo-header-actions > .panel-security-link {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    width: auto;
+    min-height: 39px;
+    padding: 9px 14px;
+    border: 1px solid var(--border-color, #dfe5ee);
+    border-radius: 22px;
+    background: var(--card-bg, #fff);
+    color: var(--text-color, #40516a);
+    box-shadow: 0 2px 6px #243b5906, inset 0 1px 0 #ffffff80;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 20px;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color .18s, border-color .18s, background .18s, box-shadow .18s, transform .18s;
+}
+.panel-security-link svg {
+    display: block;
+    flex: none;
+    width: 17px;
+    height: 17px;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: .8;
+}
+.biligo-header-actions > .panel-security-link:hover {
+    border-color: var(--workspace-accent-border, #bdd0ed);
+    background: var(--workspace-accent-soft, #f2f6fd);
+    color: var(--workspace-accent-deep, #3766a9);
+    box-shadow: 0 4px 12px #304e7810;
+    transform: translateY(-1px);
+}
+.panel-security-link:focus-visible { outline: 3px solid #93b8ef; outline-offset: 3px; }
+.biligo-header-actions > #docs-back-link { white-space: nowrap; }
+@media (max-width: 768px) {
+    .header-actions.biligo-header-actions { flex-direction: column; align-items: stretch; gap: 9px; }
+    .biligo-header-actions > .panel-security-link { align-self: flex-end; min-height: 37px; padding: 8px 13px; font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .biligo-header-actions > .panel-security-link { transition: none; }
+}

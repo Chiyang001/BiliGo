@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory
 import json
 import os
 import threading
@@ -14,7 +14,11 @@ import mimetypes
 from werkzeug.utils import secure_filename
 import bili_wbi
 import comment_monitor_helpers
-from app_paths import ensure_data_files, get_app_root, get_static_root
+from app_paths import ensure_data_files, get_app_root
+from web_files import (
+    IMAGE_EXTENSIONS, get_image_root, image_mime, is_path_within,
+    resolve_image_path, serve_public_asset,
+)
 from playwright_runtime import configure_playwright_env, ensure_playwright_ready
 
 configure_playwright_env()
@@ -27,10 +31,9 @@ from ai_reply_service import (
     normalize_handoff_settings, normalize_knowledge_config, normalize_model_settings,
     normalize_platforms, platform_enabled, record_conversation_exchange,
 )
-APP_VERSION = 'V3.2 Ultra'
-APP_VERSION_DATE = '2026-09-25'
+from app_version import APP_VERSION, APP_VERSION_DATE
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
 
 from douyin_reply_system import register_douyin_routes
 register_douyin_routes(app)
@@ -42,7 +45,7 @@ from xianyu_reply_system import register_xianyu_routes
 register_xianyu_routes(app)
 from channels_reply_system import register_channels_routes
 register_channels_routes(app)
-from web_access import build_access_url, ensure_runtime_token, open_browser_when_ready, register_web_auth
+from web_access import build_access_url, open_browser_when_ready, register_web_auth
 
 register_web_auth(app)
 
@@ -572,6 +575,8 @@ class BilibiliAPI:
     def upload_image(self, image_path):
         """模拟浏览器上传图片到B站"""
         try:
+            image_path = resolve_image_path(image_path)
+            image_mime(image_path)
             if not os.path.exists(image_path):
                 add_log(f"图片文件不存在: {image_path}", 'error')
                 return None
@@ -1465,6 +1470,7 @@ def check_keywords_fast(message):
 def get_random_image_from_folder(folder_path):
     """从指定文件夹随机获取一张图片"""
     try:
+        folder_path = resolve_image_path(folder_path, directory=True)
         if not os.path.exists(folder_path):
             add_log(f"图片文件夹不存在: {folder_path}", 'error')
             return None
@@ -3324,41 +3330,17 @@ def monitor_messages():
 @app.route('/')
 def index():
     """主页路由"""
-    try:
-        static_root = get_static_root()
-        index_path = os.path.join(static_root, 'index.html')
-        
-        logger.info(f"尝试访问主页，静态目录: {static_root}")
-        logger.info(f"index.html路径: {index_path}")
-        logger.info(f"文件是否存在: {os.path.exists(index_path)}")
-        
-        if os.path.exists(index_path) and os.path.isfile(index_path):
-            return send_from_directory(static_root, 'index.html')
-        else:
-            error_msg = f"index.html not found in {static_root}"
-            logger.error(error_msg)
-            # 列出目录内容用于调试
-            try:
-                files = os.listdir(static_root)
-                logger.info(f"目录内容: {files}")
-                return f"{error_msg}<br>目录内容: {', '.join(files)}", 404
-            except Exception as list_e:
-                logger.error(f"无法列出目录内容: {list_e}")
-                return error_msg, 404
-                
-    except Exception as e:
-        logger.error(f"访问主页失败: {e}")
-        return f"Error loading index.html: {str(e)}", 500
+    return serve_public_asset('index.html')
 
 @app.route('/ai-reply')
 def ai_reply_page():
     """所有平台共用的 AI 回复设置面板。"""
-    return send_from_directory(get_static_root(), 'ai_reply.html')
+    return serve_public_asset('ai_reply.html')
 
 @app.route('/dashboard')
 def dashboard_page():
     """五个平台共用的运行数据仪表盘。"""
-    return send_from_directory(get_static_root(), 'dashboard.html')
+    return serve_public_asset('dashboard.html')
 
 def _dashboard_platform_statuses():
     """Collect live status without allowing one platform failure to break the dashboard."""
@@ -3429,36 +3411,8 @@ def dashboard_api():
 
 @app.route('/<path:filename>')
 def static_files(filename):
-    """静态文件服务路由"""
-    try:
-        # 安全检查
-        if '..' in filename or filename.startswith('/') or filename.startswith('\\'):
-            logger.warning(f"拒绝访问不安全路径: {filename}")
-            return "Access denied", 403
-        
-        static_root = get_static_root()
-        # 规范化文件名，兼容Linux和Windows
-        safe_filename = os.path.normpath(filename)
-        file_path = os.path.join(static_root, safe_filename)
-        
-        logger.debug(f"请求文件: {filename}, 完整路径: {file_path}")
-        
-        # 检查文件是否存在
-        if not os.path.exists(file_path):
-            logger.warning(f"文件不存在: {file_path}")
-            return f"File not found: {filename}", 404
-        
-        # 检查是否为文件
-        if not os.path.isfile(file_path):
-            logger.warning(f"路径不是文件: {file_path}")
-            return f"Not a file: {filename}", 404
-        
-        # 发送文件
-        return send_from_directory(static_root, safe_filename)
-        
-    except Exception as e:
-        logger.error(f"静态文件服务错误 {filename}: {e}")
-        return f"Error serving file: {str(e)}", 500
+    """只提供明确列出的前端资源，配置、源码、数据库及目录一律不可下载。"""
+    return serve_public_asset(filename)
 
 @app.route('/api/config', methods=['GET', 'POST'])
 def handle_config():
@@ -3643,7 +3597,7 @@ def _safe_ai_knowledge_response(knowledge):
         for document in base['documents']:
             path = os.path.abspath(str(document.get('path') or ''))
             try:
-                if os.path.commonpath([knowledge_root, path]) == knowledge_root:
+                if is_path_within(knowledge_root, path):
                     with open(path, 'r', encoding='utf-8') as handle:
                         return handle.read(2 * 1024 * 1024)
             except (OSError, ValueError, UnicodeDecodeError):
@@ -3768,7 +3722,7 @@ def delete_ai_knowledge_document(document_id):
     knowledge_root = os.path.abspath(os.path.join(get_app_root(), 'ai_knowledge'))
     target_path = os.path.abspath(str(target.get('path') or ''))
     try:
-        if os.path.commonpath([knowledge_root, target_path]) == knowledge_root and os.path.isfile(target_path):
+        if is_path_within(knowledge_root, target_path) and os.path.isfile(target_path):
             os.remove(target_path)
     except (OSError, ValueError):
         pass
@@ -3788,7 +3742,7 @@ def delete_ai_knowledge_base(base_id):
     for document in target['documents']:
         path = os.path.abspath(str(document.get('path') or ''))
         try:
-            if os.path.commonpath([knowledge_root, path]) == knowledge_root and os.path.isfile(path):
+            if is_path_within(knowledge_root, path) and os.path.isfile(path):
                 os.remove(path)
         except (OSError, ValueError):
             pass
@@ -4176,8 +4130,11 @@ def handle_image_config():
         
         if 'image_folder_path' in data:
             folder_path = data['image_folder_path'].strip()
-            if folder_path and not os.path.exists(folder_path):
-                return jsonify({'success': False, 'error': '指定的图片文件夹不存在'})
+            if folder_path:
+                try:
+                    folder_path = resolve_image_path(folder_path, directory=True)
+                except ValueError as exc:
+                    return jsonify(success=False, error=str(exc)), 403
             config['image_folder_path'] = folder_path
         
         save_config()
@@ -4191,85 +4148,35 @@ def handle_image_config():
 
 @app.route('/api/browse-images', methods=['POST'])
 def browse_images():
-    """浏览指定目录下的图片文件"""
-    data = request.get_json()
-    folder_path = data.get('folder_path', '').strip()
-    
-    # 如果没有提供路径，使用用户主目录
-    if not folder_path:
-        folder_path = os.path.expanduser('~')
-    
-    # 规范化路径，兼容Windows和Linux
-    folder_path = os.path.normpath(os.path.abspath(folder_path))
-    
-    # 调试日志
-    add_log(f"浏览路径: {folder_path}", 'debug')
-    
-    if not os.path.exists(folder_path):
-        add_log(f"路径不存在: {folder_path}", 'error')
-        return jsonify({'success': False, 'error': f'文件夹不存在: {folder_path}'})
-    
-    if not os.path.isdir(folder_path):
-        add_log(f"路径不是文件夹: {folder_path}", 'error')
-        return jsonify({'success': False, 'error': '路径不是文件夹'})
-    
+    """图片选择器只能在管理员指定的图片目录中浏览。"""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(success=False, error='无效的请求'), 400
     try:
-        # 支持的图片格式
-        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
-        
+        folder_path = resolve_image_path(data.get('folder_path', ''), directory=True)
+        root = get_image_root()
         items = []
-        
-        # 添加上级目录选项（除非是根目录）
         parent_dir = os.path.dirname(folder_path)
-        if parent_dir != folder_path:  # 不是根目录
-            items.append({
-                'name': '..',
-                'type': 'directory',
-                'path': os.path.normpath(parent_dir)
-            })
-        
-        # 列出当前目录内容
-        try:
-            for item in sorted(os.listdir(folder_path)):
-                item_path = os.path.normpath(os.path.join(folder_path, item))
-                
-                try:
-                    if os.path.isdir(item_path):
-                        items.append({
-                            'name': item,
-                            'type': 'directory',
-                            'path': item_path
-                        })
-                    elif os.path.isfile(item_path):
-                        ext = os.path.splitext(item.lower())[1]
-                        if ext in image_extensions:
-                            # 获取文件大小
-                            size = os.path.getsize(item_path)
-                            size_str = format_file_size(size)
-                            
-                            items.append({
-                                'name': item,
-                                'type': 'image',
-                                'path': item_path,
-                                'size': size_str,
-                                'extension': ext[1:].upper()
-                            })
-                except (OSError, IOError) as e:
-                    # 跳过无法访问的文件/文件夹
-                    add_log(f"跳过无法访问的项目 {item}: {e}", 'warning')
-                    continue
-        except (OSError, IOError) as e:
-            add_log(f"读取目录内容失败 {folder_path}: {e}", 'error')
-            return jsonify({'success': False, 'error': f'读取目录失败: {str(e)}'})
-        
-        return jsonify({
-            'success': True,
-            'current_path': folder_path,
-            'items': items
-        })
-        
-    except Exception as e:
-        return jsonify({'success': False, 'error': f'读取文件夹失败: {str(e)}'})
+        if folder_path != root and is_path_within(root, parent_dir):
+            items.append({'name': '..', 'type': 'directory', 'path': parent_dir})
+        for name in sorted(os.listdir(folder_path)):
+            path = os.path.join(folder_path, name)
+            if not is_path_within(root, path):
+                continue
+            try:
+                if os.path.isdir(path):
+                    items.append({'name': name, 'type': 'directory', 'path': path})
+                elif os.path.isfile(path) and os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
+                    items.append({'name': name, 'type': 'image', 'path': path,
+                                  'size': format_file_size(os.path.getsize(path)),
+                                  'extension': os.path.splitext(name)[1][1:].upper()})
+            except OSError:
+                continue
+        return jsonify(success=True, current_path=folder_path, items=items)
+    except ValueError as exc:
+        return jsonify(success=False, error=str(exc)), 403
+    except OSError:
+        return jsonify(success=False, error='无法读取图片目录'), 400
 
 def format_file_size(size_bytes):
     """格式化文件大小"""
@@ -4286,39 +4193,10 @@ def format_file_size(size_bytes):
 
 @app.route('/api/get-home-directory', methods=['GET'])
 def get_home_directory():
-    """获取用户主目录路径"""
-    try:
-        home_dir = os.path.normpath(os.path.expanduser('~'))
-        # 常用的图片目录
-        common_dirs = []
-        
-        # Windows系统
-        if os.name == 'nt':
-            pictures_dir = os.path.normpath(os.path.join(home_dir, 'Pictures'))
-            desktop_dir = os.path.normpath(os.path.join(home_dir, 'Desktop'))
-            if os.path.exists(pictures_dir):
-                common_dirs.append({'name': '图片', 'path': pictures_dir})
-            if os.path.exists(desktop_dir):
-                common_dirs.append({'name': '桌面', 'path': desktop_dir})
-        else:
-            # Linux/Mac系统
-            pictures_dir = os.path.normpath(os.path.join(home_dir, 'Pictures'))
-            desktop_dir = os.path.normpath(os.path.join(home_dir, 'Desktop'))
-            if os.path.exists(pictures_dir):
-                common_dirs.append({'name': 'Pictures', 'path': pictures_dir})
-            if os.path.exists(desktop_dir):
-                common_dirs.append({'name': 'Desktop', 'path': desktop_dir})
-        
-        add_log(f"获取主目录成功: {home_dir}", 'debug')
-        
-        return jsonify({
-            'success': True,
-            'home_directory': home_dir,
-            'common_directories': common_dirs
-        })
-        
-    except Exception as e:
-        return jsonify({'success': False, 'error': f'获取主目录失败: {str(e)}'})
+    """保留前端接口契约，起始目录改为受限图片目录。"""
+    root = get_image_root()
+    return jsonify(success=True, home_directory=root,
+                   common_directories=[{'name': '回复图片', 'path': root}])
 
 @app.route('/api/follow-reply-config', methods=['GET', 'POST'])
 def handle_follow_reply_config():
@@ -4785,14 +4663,15 @@ if __name__ == '__main__':
 def preview_image():
     """获取图片预览数据"""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict) or not isinstance(data.get('image_path', ''), str):
+            return jsonify(success=False, error='无效的图片路径'), 400
         image_path = data.get('image_path', '').strip()
         
         if not image_path:
             return jsonify({'success': False, 'error': '图片路径为空'})
         
-        # 规范化路径
-        image_path = os.path.normpath(image_path)
+        image_path = resolve_image_path(image_path)
         
         if not os.path.exists(image_path):
             return jsonify({'success': False, 'error': '图片文件不存在'})
@@ -4809,9 +4688,7 @@ def preview_image():
             })
         
         # 检查是否为图片文件
-        mime_type = mimetypes.guess_type(image_path)[0]
-        if not mime_type or not mime_type.startswith('image/'):
-            return jsonify({'success': False, 'error': '不是有效的图片文件'})
+        mime_type = image_mime(image_path)
         
         # 读取图片数据并转换为base64
         with open(image_path, 'rb') as f:
@@ -4835,8 +4712,10 @@ def preview_image():
             'file_name': os.path.basename(image_path)
         })
     
-    except Exception as e:
-        return jsonify({'success': False, 'error': f'预览失败: {str(e)}'})
+    except ValueError as exc:
+        return jsonify(success=False, error=str(exc)), 403
+    except OSError:
+        return jsonify(success=False, error='无法读取图片'), 400
 
 @app.route('/api/import-config', methods=['POST'])
 def import_config():
@@ -5694,12 +5573,12 @@ def comment_monitor_worker():
 @app.route('/comment')
 def comment_page():
     """评论回复页面"""
-    return send_from_directory(get_static_root(), 'comment_reply.html')
+    return serve_public_asset('comment_reply.html')
 
 @app.route('/logs.html')
 def logs_page():
     """系统日志页面"""
-    return send_from_directory(get_static_root(), 'logs.html')
+    return serve_public_asset('logs.html')
 
 @app.route('/api/comment-config', methods=['GET', 'POST'])
 def handle_comment_config():
@@ -6616,15 +6495,15 @@ def poll_qrcode():
 def run_server(open_browser: bool = False):
     """启动 Flask Web 服务（供 launcher.py 与直接运行 app.py 共用）"""
     global message_logs, comment_logs
+    os.makedirs(get_app_root(), exist_ok=True)
+    ensure_data_files()
+    app.extensions['biligo_web_auth'].initialize()
     if not ensure_playwright_ready():
         logger.warning('Playwright Chromium 未就绪，浏览器自动化功能可能不可用')
     if 'message_logs' not in globals() or message_logs is None:
         message_logs = []
     if 'comment_logs' not in globals() or comment_logs is None:
         comment_logs = []
-
-    os.makedirs(get_app_root(), exist_ok=True)
-    ensure_data_files()
 
     load_config()
     load_rules()
@@ -6633,7 +6512,6 @@ def run_server(open_browser: bool = False):
     logger.info('用户数据目录: %s', get_app_root())
 
     port = int(os.environ.get('PORT', 4999))
-    ensure_runtime_token()
     access_url = build_access_url(port)
 
     add_log(f"BiliGo {APP_VERSION} - B站私信自动回复系统启动中...", 'info', system='message')

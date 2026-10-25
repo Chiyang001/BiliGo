@@ -16,6 +16,7 @@ from playwright.sync_api import sync_playwright
 _data_dir = tempfile.TemporaryDirectory()
 atexit.register(_data_dir.cleanup)
 os.environ["BILIGO_DATA_DIR"] = _data_dir.name
+os.environ["BILIGO_PANEL_PASSWORD"] = "BiliGo-smoke-test-password"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import app
 
@@ -53,8 +54,11 @@ def main() -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        assert page.request.post(origin + '/api/auth/login', data={'password': os.environ['BILIGO_PANEL_PASSWORD']},
+                                 headers={'X-BiliGo-Login': '1'}).ok
         for platform, path, simulate_logout in cases:
-            response = page.goto(origin + path, wait_until="networkidle")
+            response = page.goto(origin + path, wait_until="domcontentloaded")
+            page.locator('[data-platform-tab="account"]').wait_for(state='attached')
             assert response and response.ok, f"{platform}: page request failed"
             page.evaluate(simulate_logout)
             assert page.locator("#start-btn").is_disabled(), f"{platform}: start button is enabled"

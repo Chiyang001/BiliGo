@@ -10,7 +10,7 @@
   "unfollow_reply_enabled": false,
   "only_reply_new_messages": true,
   "max_replies_per_user": 3,
-  "unlimited_replies_per_user": false,
+  "unlimited_replies_per_user": true,
   "message_check_interval": 0.5,
   "send_delay_interval": 1.0,
   "auto_restart_interval": 300,

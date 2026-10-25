@@ -10,6 +10,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+from playwright_runtime import BrowserRuntimeError, configure_playwright_env, ensure_playwright_ready
 
 logger = logging.getLogger(__name__)
 
@@ -1286,6 +1287,8 @@ class DouyinBrowserWorker:
         if self._thread is threading.current_thread() and self._running:
             result = self._dispatch(op, **kwargs)
             if isinstance(result, dict) and result.get('error'):
+                if result.get('error_type') == 'browser_runtime':
+                    raise BrowserRuntimeError(result['error'])
                 raise RuntimeError(result['error'])
             return result
         if not self._thread or not self._thread.is_alive():
@@ -1317,6 +1320,8 @@ class DouyinBrowserWorker:
                     cancelled.set()
                     raise RuntimeError(f'抖音浏览器工作线程已退出: {op}')
         if isinstance(result, dict) and result.get('error'):
+            if result.get('error_type') == 'browser_runtime':
+                raise BrowserRuntimeError(result['error'])
             raise RuntimeError(result['error'])
         return result
 
@@ -1342,10 +1347,9 @@ class DouyinBrowserWorker:
             pass
 
     def check_session_valid(self) -> bool:
-        try:
-            return bool(self._call('check_session', timeout=45))
-        except Exception:
-            return False
+        # False is an actual authentication rejection. Operational failures must
+        # reach the caller so missing browsers do not erase the login state.
+        return bool(self._call('check_session', timeout=45))
 
     def open_login_window(self) -> Dict[str, Any]:
         self.headless = False
@@ -1473,6 +1477,7 @@ class DouyinBrowserWorker:
 
     def _worker_main(self) -> None:
         try:
+            configure_playwright_env()
             from playwright.sync_api import sync_playwright
         except ImportError:
             logger.error('未安装 playwright，请执行: pip install playwright && playwright install chromium')
@@ -1508,9 +1513,10 @@ class DouyinBrowserWorker:
                         if resp_q:
                             resp_q.put(result)
                     except Exception as exc:
-                        logger.exception('Douyin worker op=%s failed', op)
+                        logger.exception('%s op=%s failed', type(self).__name__, op)
                         if resp_q:
-                            resp_q.put({'error': str(exc)})
+                            resp_q.put({'error': str(exc), 'error_type': 'browser_runtime'
+                                        if isinstance(exc, BrowserRuntimeError) else 'operation'})
         except BaseException:
             logger.exception('Douyin browser worker terminated unexpectedly')
         finally:
@@ -1620,10 +1626,21 @@ class DouyinBrowserWorker:
                 **context_kwargs,
             )
         except Exception:
-            self._context = self._playwright.chromium.launch_persistent_context(
-                user_data_dir=user_data_dir,
-                **context_kwargs,
-            )
+            try:
+                self._context = self._playwright.chromium.launch_persistent_context(
+                    user_data_dir=user_data_dir, **context_kwargs,
+                )
+            except Exception as exc:
+                if "executable doesn't exist" not in str(exc).lower() and 'executable does not exist' not in str(exc).lower():
+                    raise
+                if not ensure_playwright_ready():
+                    raise BrowserRuntimeError('浏览器运行环境缺失或版本不匹配，自动修复未完成；请重启程序后重试，登录信息已保留') from exc
+                try:
+                    self._context = self._playwright.chromium.launch_persistent_context(
+                        user_data_dir=user_data_dir, **context_kwargs,
+                    )
+                except Exception as retry_exc:
+                    raise BrowserRuntimeError('浏览器运行环境修复后仍无法启动，请检查浏览器安装或运行权限') from retry_exc
 
         self._context.add_init_script(STEALTH_SCRIPT)
         self._current_headless = self.headless

@@ -14,6 +14,10 @@ dist/
 export/
 .env
 .env.*
+.biligo_web_token
+.biligo_web_auth.sqlite3*
+.venv/
+/images/
 docker-deploy.bat
 docker-deploy.sh
 README.md

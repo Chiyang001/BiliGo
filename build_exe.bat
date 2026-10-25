@@ -7,16 +7,27 @@ echo   BiliGo - Build Single EXE
 echo ========================================
 echo.
 
-echo [1/3] Installing build dependencies...
-python -m pip install flask==2.3.3 requests==2.31.0 pyinstaller -q
+set "PY=python"
+if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
+
+echo [1/4] Installing build dependencies...
+"%PY%" -m pip install -r requirements.txt pyinstaller -q
 if errorlevel 1 (
     echo [ERROR] Failed to install dependencies
     pause
     exit /b 1
 )
 
-echo [2/3] Building single EXE (this may take a few minutes)...
-python -m PyInstaller --noconfirm --clean BiliGo.spec
+echo [2/4] Installing Playwright Chromium browser...
+"%PY%" -m playwright install chromium
+if errorlevel 1 (
+    echo [ERROR] Failed to install Playwright Chromium
+    pause
+    exit /b 1
+)
+
+echo [3/4] Building single EXE with bundled Chromium (this may take several minutes)...
+"%PY%" -m PyInstaller --noconfirm --clean BiliGo.spec
 if errorlevel 1 (
     echo [ERROR] Build failed
     pause
@@ -24,12 +35,12 @@ if errorlevel 1 (
 )
 
 echo.
-echo [3/3] Build complete!
-echo Output: dist\BiliGo.exe
+echo [4/4] Build complete!
+"%PY%" -c "from app_version import EXE_BASENAME; print('Output: dist/' + EXE_BASENAME + '.exe')"
 echo.
 echo Usage:
-echo   1. Copy dist\BiliGo.exe to any folder
+echo   1. Copy the versioned EXE from dist to any folder
 echo   2. Double-click to run (no Python required)
-echo   3. Config files will be created next to the EXE
+echo   3. User data is stored in your Windows AppData\Roaming\BiliGo folder
 echo.
 pause

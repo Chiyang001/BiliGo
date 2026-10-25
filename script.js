@@ -598,7 +598,7 @@ function loadConfig() {
         
         // 加载仅回复新消息设置
         if (document.getElementById('only-reply-new-messages')) {
-            document.getElementById('only-reply-new-messages').checked = data.only_reply_new_messages || false;
+            document.getElementById('only-reply-new-messages').checked = data.only_reply_new_messages !== false;
         }
         
         // 加载单用户最大回复次数设置
@@ -606,7 +606,7 @@ function loadConfig() {
             document.getElementById('max-replies-per-user').value = data.max_replies_per_user || 3;
         }
         if (document.getElementById('unlimited-replies-per-user')) {
-            document.getElementById('unlimited-replies-per-user').checked = !!data.unlimited_replies_per_user;
+            document.getElementById('unlimited-replies-per-user').checked = data.unlimited_replies_per_user !== false;
             updateReplyLimitState();
         }
     })
@@ -1245,31 +1245,28 @@ function displayFileList(items) {
         return;
     }
     
-    fileList.innerHTML = items.map(item => {
-        let icon, details = '';
-        
-        if (item.type === 'directory') {
-            icon = item.name === '..' ? 'bi-arrow-up' : 'bi-folder-fill';
-        } else {
-            icon = 'bi-file-earmark-image';
-            details = `${item.extension} • ${item.size}`;
+    fileList.replaceChildren(...items.map(item => {
+        const directory = item.type === 'directory';
+        const row = document.createElement('div');
+        row.className = `file-item ${directory ? 'directory' : 'image'}`;
+        const icon = document.createElement('i');
+        icon.className = `bi ${directory ? (item.name === '..' ? 'bi-arrow-up' : 'bi-folder-fill') : 'bi-file-earmark-image'} file-icon`;
+        const info = document.createElement('div');
+        info.className = 'file-info';
+        const name = document.createElement('div');
+        name.className = 'file-name';
+        name.textContent = item.name;
+        info.append(name);
+        if (!directory) {
+            const details = document.createElement('div');
+            details.className = 'file-details';
+            details.textContent = `${item.extension} • ${item.size}`;
+            info.append(details);
         }
-        
-        // 对路径进行编码，避免特殊字符问题
-        const encodedPath = encodeURIComponent(item.path);
-        // 对显示的文件名进行HTML转义
-        const escapedName = escapeHtml(item.name);
-        
-        return `
-            <div class="file-item ${item.type}" onclick="selectFileItem('${encodedPath}', '${item.type}', this)">
-                <i class="bi ${icon} file-icon"></i>
-                <div class="file-info">
-                    <div class="file-name">${escapedName}</div>
-                    ${details ? `<div class="file-details">${details}</div>` : ''}
-                </div>
-            </div>
-        `;
-    }).join('');
+        row.append(icon, info);
+        row.addEventListener('click', () => selectFileItem(encodeURIComponent(item.path), directory ? 'directory' : 'image', row));
+        return row;
+    }));
 }
 
 // HTML转义函数
@@ -1750,13 +1747,13 @@ function loadNewMessageConfig() {
     .then(response => response.json())
     .then(data => {
         if (document.getElementById('only-reply-new-messages')) {
-            document.getElementById('only-reply-new-messages').checked = data.only_reply_new_messages || false;
+            document.getElementById('only-reply-new-messages').checked = data.only_reply_new_messages !== false;
         }
         if (document.getElementById('max-replies-per-user')) {
             document.getElementById('max-replies-per-user').value = data.max_replies_per_user || 3;
         }
         if (document.getElementById('unlimited-replies-per-user')) {
-            document.getElementById('unlimited-replies-per-user').checked = !!data.unlimited_replies_per_user;
+            document.getElementById('unlimited-replies-per-user').checked = data.unlimited_replies_per_user !== false;
             updateReplyLimitState();
         }
     })

@@ -7,9 +7,10 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import requests
-from flask import Response, jsonify, request, send_from_directory
+from flask import Response, jsonify, request
 
-from app_paths import get_app_root, get_static_root
+from app_paths import get_app_root
+from web_files import serve_public_asset
 from ai_conversation_store import ai_conversation_store
 from ai_handoff_store import ai_handoff_store
 from ai_reply_service import platform_enabled
@@ -139,7 +140,7 @@ def register_xianyu_routes(app) -> None:
     register_platform_config_transfer_routes(app, "xianyu", "闲鱼", xianyu_system)
     @app.route("/xianyu")
     def xianyu_page():
-        return send_from_directory(get_static_root(), "xianyu_reply.html")
+        return serve_public_asset('xianyu_reply.html')
 
     @app.route("/api/xianyu-config", methods=["GET", "POST"])
     def xianyu_config():

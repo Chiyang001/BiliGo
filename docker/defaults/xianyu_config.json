@@ -7,7 +7,7 @@
   "send_delay_interval": 2,
   "only_reply_new_messages": true,
   "max_replies_per_user": 3,
-  "unlimited_replies_per_user": false,
+  "unlimited_replies_per_user": true,
   "headless": true,
   "auto_start_monitoring": false,
   "account": {},

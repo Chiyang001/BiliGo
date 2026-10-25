@@ -16,6 +16,7 @@ from playwright.sync_api import sync_playwright
 _data_dir = tempfile.TemporaryDirectory()
 atexit.register(_data_dir.cleanup)
 os.environ["BILIGO_DATA_DIR"] = _data_dir.name
+os.environ["BILIGO_PANEL_PASSWORD"] = "BiliGo-smoke-test-password"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import app
 
@@ -45,9 +46,13 @@ def main() -> None:
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        assert page.request.post(f'http://127.0.0.1:{port}/api/auth/login',
+                                 data={'password': os.environ['BILIGO_PANEL_PASSWORD']},
+                                 headers={'X-BiliGo-Login': '1'}).ok
         page_errors: list[str] = []
         page.on("pageerror", lambda error: page_errors.append(str(error)))
-        response = page.goto(url, wait_until="networkidle")
+        response = page.goto(url, wait_until="domcontentloaded")
+        page.locator('.platform-tab-button').first.wait_for(state='attached')
         assert response and response.ok, f"Xianyu page returned {response.status if response else 'no response'}"
         assert page.title() == "BiliGo - 闲鱼消息自动回复"
         assert page.locator(".platform-tab-button").count() == 5
