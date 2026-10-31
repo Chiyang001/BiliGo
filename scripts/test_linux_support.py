@@ -1,4 +1,4 @@
-"""Linux entry-point isolation and optional real service startup checks."""
+"""Linux entry-point isolation and real server/desktop smoke checks."""
 from __future__ import annotations
 
 import os
@@ -184,8 +184,52 @@ def smoke_server():
         print('Linux entry point: health, password gate, isolated data and shutdown passed.')
 
 
+def smoke_desktop():
+    if not sys.platform.startswith('linux') or not os.environ.get('DISPLAY', '').strip():
+        raise SystemExit('The desktop smoke check requires Linux with an accessible DISPLAY.')
+    from playwright.sync_api import sync_playwright
+    from douyin_playwright import DouyinBrowserWorker
+    from xiaohongshu_playwright import XiaohongshuBrowserWorker
+    from weibo_playwright import WeiboBrowserWorker
+    from xianyu_playwright import XianyuBrowserWorker
+    from channels_playwright import ChannelsBrowserWorker
+
+    runtime.configure_playwright_env()
+    assert runtime.ensure_playwright_ready(), 'Browser runtime is not ready'
+    workers = (DouyinBrowserWorker, XiaohongshuBrowserWorker, WeiboBrowserWorker,
+               XianyuBrowserWorker, ChannelsBrowserWorker)
+    with tempfile.TemporaryDirectory(prefix='biligo-linux-desktop-') as directory:
+        for worker_type in workers:
+            storage = Path(directory) / worker_type.__name__ / 'storage.json'
+            storage.parent.mkdir()
+            worker = worker_type(str(storage), headless=False)
+            with sync_playwright() as api:
+                worker._playwright = api
+                try:
+                    worker._ensure_browser()
+                    worker._page.set_content('<title>BiliGo Linux desktop</title><p>Linux 图形浏览器测试</p>')
+                    assert worker._page.title() == 'BiliGo Linux desktop'
+                    worker._context.add_cookies([{
+                        'name': 'biligo_validation', 'value': 'local-test-only',
+                        'domain': 'localhost', 'path': '/', 'expires': time.time() + 3600,
+                    }])
+                    worker.set_headless(True)
+                    worker._ensure_browser()
+                    assert worker._current_headless is True
+                    assert any(cookie['name'] == 'biligo_validation'
+                               for cookie in worker._context.cookies()), 'Profile cookie was lost'
+                    worker._page.set_content('<title>BiliGo Linux headless</title>')
+                    assert worker._page.title() == 'BiliGo Linux headless'
+                    print(f'{worker_type.__name__}: headed launch, headless switch and profile persistence passed.')
+                finally:
+                    worker._cleanup_browser()
+                    worker._playwright = None
+
+
 if __name__ == '__main__':
     if '--smoke-server' in sys.argv:
         smoke_server()
+    elif '--smoke-desktop' in sys.argv:
+        smoke_desktop()
     else:
         unittest.main(verbosity=2)

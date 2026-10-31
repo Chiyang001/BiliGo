@@ -132,6 +132,14 @@ BILIGO_OPEN_BROWSER=0
 .venv-linux/bin/python scripts/test_playwright_runtime.py
 .venv-linux/bin/python scripts/test_web_security.py
 .venv-linux/bin/python scripts/test_linux_support.py --smoke-server
+
+# 浏览器测试使用安装脚本的同一个缓存目录。
+export PLAYWRIGHT_BROWSERS_PATH="${XDG_CACHE_HOME:-$HOME/.cache}/biligo-linux/ms-playwright"
+.venv-linux/bin/python scripts/test_playwright_runtime.py --smoke-browser
+.venv-linux/bin/python scripts/smoke_test_web_auth_ui.py
+
+# 在有 DISPLAY 的桌面中验证五个平台浏览器模块；只打开本地测试页面。
+.venv-linux/bin/python scripts/test_linux_support.py --smoke-desktop
 ```
 
 `.github/workflows/linux.yml` 仅针对 Linux 分支推送、面向该分支的 PR 和手动触发运行，
@@ -148,3 +156,37 @@ git clone --branch Linux --single-branch https://github.com/Chiyang001/BiliGo.gi
 
 只需部署源码时，也可从已提交的 Linux 分支用 `git archive` 导出；不要把 worktree 的 `.git` 指针当成独立仓库复制。
 后续 Windows 更新需要在本分支单独审查、合入和验证，不自动同步运行数据。
+
+## 本机 WSL 验证记录（2026-10-31）
+
+已安装独立 WSL 2 实例 `Ubuntu-BiliGo`，发行版文件位于 `C:\WSL\Ubuntu-BiliGo`，默认用户为 `biligo`。
+源码位于 Ubuntu 的 `/home/biligo/BiliGo`，从 `Linux` 分支传入，不包含 Windows 运行数据或 Git worktree 指针。
+原 Windows `BiliGo` 项目的 `main` 分支保持不变，WSL 默认发行版仍为原来的 `docker-desktop`。
+
+本次环境为 Ubuntu 24.04.5 LTS / x86_64、Python 3.12.3、Playwright 1.64.1、Chromium 156.0.8078.4，
+使用 WSLg 的 `DISPLAY=:0` 和 systemd。
+
+| 检查 | 结果 |
+| --- | --- |
+| Linux 安装脚本、独立虚拟环境和浏览器缓存 | 通过 |
+| 启动与路径隔离、浏览器运行时、面板安全回归 | 37 项通过 |
+| 真实 Chromium 无头启动 | 通过 |
+| 抖音、小红书、微博、闲鱼、视频号浏览器模块的图形启动、切换无头模式、持久化测试 Cookie | 全部通过，仅使用本地测试页面 |
+| 真实浏览器中的面板登录、改密、记住设备及初始密码流程 | 通过 |
+| `start.sh` 启动、健康检查、未登录访问限制、退出清理 | 通过 |
+| systemd 非 root 运行、目录权限、重启后面板凭据保持、停服 | 通过 |
+| Windows 通过 localhost 访问 Ubuntu 的 5500 端口 | 通过 |
+
+systemd 验证使用临时单元和独立数据目录，测试结束后已停服并清理，未设置开机自启。
+未使用真实平台账号或发送消息，平台账号登录、实际收发和长期监控仍需后续验证；Docker 镜像本次未构建。
+Ubuntu 22.04、Debian 12 和 ARM64 仍需分别实机验证。
+
+在 Windows PowerShell 中启动已安装的 Linux 副本：
+
+```powershell
+wsl -d Ubuntu-BiliGo -u biligo --cd /home/biligo/BiliGo --exec env PORT=5500 BILIGO_OPEN_BROWSER=0 bash start.sh
+```
+
+然后访问 `http://localhost:5500`，初始密码在此终端显示，按 `Ctrl+C` 停止。
+这个副本使用 Linux 自己的数据目录；后续 Windows 工作目录中的源码改动需要单独同步到 Ubuntu 副本。
+如需以管理员身份管理 Ubuntu，可使用 `wsl -d Ubuntu-BiliGo -u root`；无需调整 Windows 版依赖。
