@@ -1,6 +1,6 @@
 # BiliGo for Linux
 
-本目录属于独立分支 `codex/linux-support`。Windows 主程序继续在原 `BiliGo` 目录的 `main` 分支维护。
+本目录属于独立分支 `Linux`。Windows 主程序继续在原 `BiliGo` 目录的 `main` 分支维护。
 Linux 的改动只保存在此分支，不自动合并或上传到主分支。
 
 ## 环境与安装
@@ -139,11 +139,11 @@ BILIGO_OPEN_BROWSER=0
 工作流随分支推送后才会执行，未执行不能视为实机验证通过。
 
 当前 Windows 开发机通过 Git worktree 隔离两个目录，二者共享 Git 历史但各自有独立工作文件。
-在本目录运行 `git branch --show-current` 应显示 `codex/linux-support`。
+在本目录运行 `git branch --show-current` 应显示 `Linux`。
 发布此分支后，Linux 可单独克隆：
 
 ```bash
-git clone --branch codex/linux-support --single-branch https://github.com/Chiyang001/BiliGo.git biligo-linux
+git clone --branch Linux --single-branch https://github.com/Chiyang001/BiliGo.git biligo-linux
 ```
 
 只需部署源码时，也可从已提交的 Linux 分支用 `git archive` 导出；不要把 worktree 的 `.git` 指针当成独立仓库复制。

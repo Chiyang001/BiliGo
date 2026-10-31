@@ -2,9 +2,9 @@ name: Linux compatibility
 
 on:
   push:
-    branches: [codex/linux-support]
+    branches: [Linux]
   pull_request:
-    branches: [codex/linux-support]
+    branches: [Linux]
   workflow_dispatch:
 
 permissions:
