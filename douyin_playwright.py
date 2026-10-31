@@ -10,7 +10,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
-from playwright_runtime import BrowserRuntimeError, configure_playwright_env, ensure_playwright_ready
+from playwright_runtime import (
+    BrowserRuntimeError, configure_playwright_env, ensure_browser_display, ensure_playwright_ready,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1597,6 +1599,7 @@ class DouyinBrowserWorker:
         if not self._playwright:
             raise RuntimeError('Playwright 未初始化')
 
+        ensure_browser_display(self.headless)
         launch_args = [
             '--disable-blink-features=AutomationControlled',
         ]

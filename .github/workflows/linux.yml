@@ -1,0 +1,44 @@
+name: Linux compatibility
+
+on:
+  push:
+    branches: [codex/linux-support]
+  pull_request:
+    branches: [codex/linux-support]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Check shell scripts
+        run: |
+          for script in start.sh install_linux.sh deploy/linux/environment.sh; do
+            bash -n "$script"
+          done
+      - name: Install Linux runtime
+        run: bash install_linux.sh --with-deps
+      - name: Run regression checks
+        run: |
+          .venv-linux/bin/python scripts/test_linux_support.py
+          .venv-linux/bin/python scripts/test_playwright_runtime.py
+          .venv-linux/bin/python scripts/test_web_security.py
+      - name: Exercise real Chromium and panel login
+        run: |
+          export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/biligo-linux/ms-playwright"
+          .venv-linux/bin/python scripts/test_playwright_runtime.py --smoke-browser
+          .venv-linux/bin/python scripts/smoke_test_web_auth_ui.py
+      - name: Exercise Linux startup and shutdown
+        run: .venv-linux/bin/python scripts/test_linux_support.py --smoke-server

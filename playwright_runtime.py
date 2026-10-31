@@ -19,6 +19,16 @@ class BrowserRuntimeError(RuntimeError):
     """The browser runtime is unavailable; this is not an expired login session."""
 
 
+def ensure_browser_display(headless: bool) -> None:
+    """Interactive Chromium needs an X11 display on Linux, including VNC/XWayland."""
+    if sys.platform.startswith('linux') and not headless and not os.environ.get('DISPLAY', '').strip():
+        raise BrowserRuntimeError(
+            'Linux 图形登录需要可访问的桌面显示（DISPLAY）。'
+            '请在 Linux 桌面或 VNC 会话中启动 BiliGo，并在该桌面的浏览器窗口完成登录；'
+            '仅通过 SSH 或网页面板无法操作服务器浏览器。已有登录态可继续使用无头监控。'
+        )
+
+
 def _system_browser_cache():
     if sys.platform == 'win32':
         base = os.environ.get('LOCALAPPDATA') or os.path.join(os.path.expanduser('~'), 'AppData', 'Local')
@@ -114,7 +124,11 @@ def _install_chromium(browsers_dir: str) -> None:
         os.makedirs(browsers_dir, exist_ok=True)
     logger.info('正在下载 Playwright Chromium 到 %s ...', browsers_dir or 'default')
     cmd = [sys.executable, '-m', 'playwright', 'install', 'chromium']
-    if os.name != 'nt' and not is_frozen():
+    # System packages belong to provisioning, not an unattended web service.
+    # An administrator can opt in explicitly; install_linux.sh --with-deps is
+    # the normal Linux installation path.
+    with_deps = os.environ.get('BILIGO_PLAYWRIGHT_WITH_DEPS', '').strip().lower() in ('1', 'true', 'yes')
+    if with_deps and not is_frozen():
         cmd.append('--with-deps')
     subprocess.check_call(cmd, env=env, timeout=180)
 

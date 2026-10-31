@@ -1,0 +1,29 @@
+[Unit]
+Description=BiliGo Linux message automation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=biligo
+Group=biligo
+WorkingDirectory=/opt/biligo-linux
+Environment=HOME=/var/lib/biligo-linux
+Environment=BILIGO_DATA_DIR=/var/lib/biligo-linux
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/cache/biligo-linux/ms-playwright
+Environment=BILIGO_OPEN_BROWSER=0
+Environment=PORT=4999
+EnvironmentFile=-/etc/biligo-linux.env
+StateDirectory=biligo-linux
+StateDirectoryMode=0700
+CacheDirectory=biligo-linux
+CacheDirectoryMode=0700
+UMask=0077
+ExecStart=/bin/bash /opt/biligo-linux/start.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

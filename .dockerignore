@@ -17,6 +17,7 @@ export/
 .biligo_web_token
 .biligo_web_auth.sqlite3*
 .venv/
+.venv-linux/
 /images/
 docker-deploy.bat
 docker-deploy.sh

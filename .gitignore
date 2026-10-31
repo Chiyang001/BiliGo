@@ -1,4 +1,5 @@
 .venv/
+.venv-linux/
 playwright-browsers/
 
 __pycache__/

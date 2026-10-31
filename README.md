@@ -1,5 +1,7 @@
 # BiliGo V3.2.1 Ultra
 
+> **Linux 独立适配分支：`codex/linux-support`**。Linux 安装、启动、数据隔离、远程桌面登录和 systemd 部署请先阅读 [LINUX.md](LINUX.md)。Windows 主程序继续在 `main` 分支维护。
+
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-V3.2.1_Ultra-blue.svg)

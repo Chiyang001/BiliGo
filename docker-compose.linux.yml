@@ -1,0 +1,22 @@
+name: biligo-linux
+
+services:
+  biligo-linux:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: biligo-linux:latest
+    restart: unless-stopped
+    ports:
+      - "${BILIGO_LINUX_PORT:-5000}:4999"
+    volumes:
+      - biligo-linux-data:/data
+    environment:
+      BILIGO_DATA_DIR: /data
+      BILIGO_OPEN_BROWSER: "0"
+      PORT: "4999"
+      TZ: Asia/Shanghai
+    shm_size: 1gb
+
+volumes:
+  biligo-linux-data:
