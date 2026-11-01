@@ -25,6 +25,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $fixture 'app.py'), '# source')
     $unicodeImage = ([string][char]0x89c6) + ([char]0x9891) + '.png'
     [IO.File]::WriteAllText((Join-Path $fixture $unicodeImage), 'test image')
+    $longName = ('longname-' * 13) + '.py'
+    [IO.File]::WriteAllText((Join-Path $fixture $longName), 'long path content')
     [IO.File]::WriteAllText((Join-Path $fixture 'config.json'), 'secret config')
     [IO.File]::WriteAllText((Join-Path $fixture '.env'), 'secret env')
     [IO.File]::WriteAllText((Join-Path $fixture '.secret.py'), 'secret python config')
@@ -34,17 +36,19 @@ try {
     [IO.File]::WriteAllText((Join-Path $fixture 'docker/defaults/config.json'), '{}')
     $archive = Join-Path $fixture 'test.tar.gz'
     New-BiligoArchive $fixture $archive
-    $tarExecutable = Get-BiligoTarPath
-    $members = @(& $tarExecutable -tzf $archive | Where-Object { -not $_.EndsWith('/') } | ForEach-Object { $_ -replace '^\./', '' })
+    # Python's independent standard-library parser verifies the generated POSIX archive.
+    $archiveJson = & python -c 'import json,sys,tarfile; print(json.dumps(tarfile.open(sys.argv[1]).getnames(), ensure_ascii=True))' $archive
+    $members = ConvertFrom-Json -InputObject $archiveJson
     Assert-True ($LASTEXITCODE -eq 0) 'Cannot inspect archive.'
-    Assert-True ($members.Count -eq 4) "Unexpected package members: $members"
+    Assert-True ($members.Count -eq 5) "Unexpected package members: $members"
     Assert-True ($members -contains 'app.py') 'Missing source.'
     Assert-True ($members -contains 'docker/defaults/config.json') 'Missing safe defaults.'
     Assert-True ($members -contains 'deploy/linux/provision-ssh.sh') 'Missing deployment script.'
     $extracted = Join-Path $fixture 'extracted'
     $null = New-Item -ItemType Directory -Path $extracted
-    & $tarExecutable -xzf $archive -C $extracted
+    & python -c 'import sys,tarfile; tarfile.open(sys.argv[1]).extractall(sys.argv[2])' $archive $extracted
     Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $extracted $unicodeImage))) 'Unicode filename changed during packaging.'
+    Assert-True ([IO.File]::ReadAllText((Join-Path $extracted $longName)) -eq 'long path content') 'Long PAX filename or contents changed.'
     # Generate a new key only inside the test fixture; never touch the user's real SSH keys.
     function Get-BiligoDefaultIdentity { return (Join-Path $fixture 'test identity') }
     $public = Get-BiligoBootstrapPublicKey

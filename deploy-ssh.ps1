@@ -24,7 +24,6 @@ param(
 )
 . (Join-Path $PSScriptRoot 'deploy/ssh-common.ps1')
 foreach ($command in @('ssh', 'scp')) { $null = Get-Command $command -CommandType Application -ErrorAction Stop }
-$null = Get-BiligoTarPath
 foreach ($endpoint in @($PipIndex, $BrowserDownloadHost)) {
     if ($endpoint -and $endpoint -notmatch '^https://[^\s''"\\]+$') { throw 'Download/index overrides must be HTTPS URLs.' }
 }

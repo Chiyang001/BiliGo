@@ -152,15 +152,6 @@ function Initialize-BiligoSshLogin {
     Write-Host '[SSH] Passwordless login verified. Continuing deployment.'
 }
 
-function Get-BiligoTarPath {
-    # Prefer the Windows Unicode-aware bsdtar over GNU/MSYS tar earlier on PATH.
-    if ($env:OS -eq 'Windows_NT' -and $env:SystemRoot) {
-        $windowsTar = Join-Path $env:SystemRoot 'System32/tar.exe'
-        if (Test-Path -LiteralPath $windowsTar -PathType Leaf) { return $windowsTar }
-    }
-    return (Get-Command tar -CommandType Application -ErrorAction Stop).Source
-}
-
 function New-BiligoArchive {
     param([string]$Project, [string]$Destination)
     # Allow source/resources only. Never traverse local profiles, .git, venv or runtime data.
@@ -183,29 +174,11 @@ function New-BiligoArchive {
         if ($relative -match '[\r\n]' -or $relative.StartsWith('-')) { throw 'Unsafe archive filename.' }
         $relative
     }
-    # Some Windows tar builds crash when non-ANSI filenames arrive through argv.
-    # Copy the allowlisted upload inputs to a temporary staging directory so tar
-    # discovers their Unicode names through the filesystem instead of argv/-T.
-    $tarExecutable = Get-BiligoTarPath
-    $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    $staging = Join-Path $temporaryRoot ('biligo-upload-stage-' + [guid]::NewGuid().ToString('N'))
-    try {
-        $null = New-Item -ItemType Directory -Path $staging
-        foreach ($relative in $manifest) {
-            $target = Join-Path $staging $relative
-            $null = New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force
-            [IO.File]::Copy((Join-Path $Project $relative), $target)
-        }
-        & $tarExecutable --format=pax --options=hdrcharset=UTF-8 -czf $Destination -C $staging .
-        if ($LASTEXITCODE -ne 0) { throw "Cannot create deployment archive (exit $LASTEXITCODE; tool $tarExecutable)." }
-    } finally {
-        $resolvedStaging = [IO.Path]::GetFullPath($staging)
-        if ($resolvedStaging.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase) -and
-            (Split-Path $resolvedStaging -Leaf) -match '^biligo-upload-stage-[a-f0-9]{32}$' -and
-            (Test-Path -LiteralPath $resolvedStaging)) {
-            Remove-Item -LiteralPath $resolvedStaging -Recurse -Force
-        }
+    # Windows tar builds can crash or corrupt Unicode names on non-Chinese systems.
+    if (-not ('BiliGo.UploadTar' -as [type])) {
+        Add-Type -Path (Join-Path $PSScriptRoot 'UploadTar.cs')
     }
+    [BiliGo.UploadTar]::Create($Destination, $Project, [string[]]$manifest)
 }
 
 function ConvertTo-BiligoProcessArgument {

@@ -17,7 +17,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-ssh.ps1 -Server my-
 powershell -NoProfile -ExecutionPolicy Bypass -File .\connect-ssh.ps1 -Server my-server
 ```
 
-前提：本机 Windows PowerShell 5.1 / PowerShell 7，已有 OpenSSH 的 `ssh`、`scp` 和 Windows `tar`；
+前提：本机 Windows PowerShell 5.1 / PowerShell 7，已有 OpenSSH 的 `ssh` 和 `scp`；
 服务器为 Ubuntu 24.04 或 Debian 12，启用 systemd，使用 root 或具有免密 sudo 权限的管理员连接。
 SSH 服务需允许 TCP 转发。部署入口先检查免密登录；已经可用时直接继续。
 首次尚未免密时，会在当前终端通过 OpenSSH 提示输入服务器的 SSH 登录密码（输入不回显），
@@ -113,7 +113,8 @@ sudo journalctl -u biligo-ssh -n 80 --no-pager
 重复部署保留认证库和数据均通过。PowerShell 5.1 和 7 连接通过；自动打开浏览器的调用在
 隧道健康后触发，并核对了 URL（测试替换了系统浏览器启动器，未启动用户浏览器）。
 Chromium 真实无头启动通过，现有 37 项回归和新增 4 项认证显示检查通过，
-两个 PowerShell 版本的打包、中文文件名、凭据排除及参数检查通过。
+两个 PowerShell 版本的打包、中文/长文件名、凭据排除及参数检查通过。
+源码上传包通过 .NET 生成 UTF-8 PAX tar.gz，不依赖 Windows tar 的区域设置或本机 Python。
 后续加入首次自动配置公钥：PowerShell 5.1 / 7 均通过真实 OpenSSH 密码认证、生成并安装公钥、
 免密验证及再次运行不提示密码的完整链路；使用临时 Linux 账号和仅供测试的 AskPass 提供合成密码，
 未使用真实服务器密码。新增公钥追加、重复跳过、权限和软链接边界检查后，该测试文件共 8 项检查通过。
@@ -127,7 +128,7 @@ npmmirror 全新下载 Chromium、Headless Shell、FFmpeg，并成功启动无�
 测试未使用真实平台账号，未连接或修改用户远程服务器；测试服务完成后清理。
 Debian 12、ARM64、无 CA 证书的极简系统及指定代理仍需对应环境验证。
 
-本机可重跑的独立检查：
+本机可重跑的独立检查（检查脚本需要 Python 标准库读取并验证归档；部署本身不需要本机 Python）：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_ssh_deployment.ps1
