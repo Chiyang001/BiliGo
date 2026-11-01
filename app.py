@@ -6554,7 +6554,7 @@ def run_server(open_browser: bool = False):
     if should_open_browser:
         threading.Thread(target=open_browser_when_ready, args=(port,), daemon=True).start()
 
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host=os.environ.get('BILIGO_BIND_HOST', '0.0.0.0'), port=port, debug=False)
 
 
 if __name__ == '__main__':

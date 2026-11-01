@@ -2,6 +2,12 @@
 
 > **Linux 独立适配分支：`Linux`**。Linux 安装、启动、数据隔离、远程桌面登录和 systemd 部署请先阅读 [LINUX.md](LINUX.md)。Windows 主程序继续在 `main` 分支维护。
 
+Linux 服务器支持从 Windows 本机通过 SSH 一键部署：`powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-ssh.ps1 -Server my-server`。
+以后使用 `connect-ssh.ps1` 连接，自动在本机打开面板、显示初始密码状态及实时日志；无需 VNC。
+首次尚未配置免密时，会在终端提示输入服务器 SSH 密码并自动安装公钥，验证后继续部署；不保存密码或上传私钥。
+默认优先清华 APT/PyPI 和 npmmirror 浏览器镜像，失败后回退对应官方源；`-Mirror China` 可固定国内源。
+支持条件、镜像源和参数见 [SSH 部署说明](LINUX.md#windows-本机通过-ssh-一键部署无需-vnc)。
+
 <div align="center">
 
 ![Version](https://img.shields.io/badge/version-V3.2.1_Ultra-blue.svg)

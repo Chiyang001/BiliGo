@@ -11,6 +11,22 @@ permissions:
   contents: read
 
 jobs:
+  windows-ssh-client:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Check Windows PowerShell SSH client and upload isolation
+        shell: powershell
+        run: ./scripts/test_ssh_deployment.ps1
+      - name: Check PowerShell 7 SSH client
+        shell: pwsh
+        run: ./scripts/test_ssh_deployment.ps1
+      - name: Check read-only credential display
+        run: python scripts/test_ssh_deployment.py
   linux:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -25,7 +41,7 @@ jobs:
           python-version: '3.11'
       - name: Check shell scripts
         run: |
-          for script in start.sh install_linux.sh deploy/linux/environment.sh; do
+          for script in start.sh install_linux.sh deploy/linux/*.sh; do
             bash -n "$script"
           done
       - name: Install Linux runtime
@@ -35,6 +51,8 @@ jobs:
           .venv-linux/bin/python scripts/test_linux_support.py
           .venv-linux/bin/python scripts/test_playwright_runtime.py
           .venv-linux/bin/python scripts/test_web_security.py
+          .venv-linux/bin/python scripts/test_ssh_deployment.py
+          .venv-linux/bin/python scripts/test_download_sources.py
       - name: Exercise real Chromium and panel login
         run: |
           export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/biligo-linux/ms-playwright"

@@ -5,6 +5,139 @@ Linux 的改动只保存在此分支，不自动合并或上传到主分支。
 
 ## 环境与安装
 
+### Windows 本机通过 SSH 一键部署（无需 VNC）
+
+本机在本项目目录执行，`my-server` 替换为 SSH 别名或 `user@服务器公网地址`：
+
+```powershell
+# 首次部署：安装依赖、启用后台服务、建立隧道、打开本机浏览器、显示初始密码并持续输出日志。
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-ssh.ps1 -Server my-server
+
+# 后续连接：不上传、不安装、不重启服务，不改变密码或平台登录态。
+powershell -NoProfile -ExecutionPolicy Bypass -File .\connect-ssh.ps1 -Server my-server
+```
+
+前提：本机 Windows PowerShell 5.1 / PowerShell 7，已有 OpenSSH 的 `ssh`、`scp` 和 Windows `tar`；
+服务器为 Ubuntu 24.04 或 Debian 12，启用 systemd，使用 root 或具有免密 sudo 权限的管理员连接。
+SSH 服务需允许 TCP 转发。部署入口先检查免密登录；已经可用时直接继续。
+首次尚未免密时，会在当前终端通过 OpenSSH 提示输入服务器的 SSH 登录密码（输入不回显），
+将本机公钥追加到登录用户的 `~/.ssh/authorized_keys`，保留已有公钥并避免重复添加，随后验证免密登录。
+验证成功后自动继续部署，后续 SSH/SCP 和连接脚本均使用 BatchMode，不再询问服务器密码。
+脚本不读取或保存服务器密码，不上传私钥，不修改服务器 SSH 服务配置，也不创建备份。
+服务器如禁用密码登录，需先通过服务器控制台添加公钥；普通用户仍需免密 sudo，脚本不会配置 sudo 权限。
+首次连接接受新主机密钥，已有密钥变更会被拒绝；连接超时、主机密钥错误不会触发公钥配置。
+
+默认复用本机 `~/.ssh/id_ed25519`、`id_rsa` 或 `id_ecdsa` 中已有的首个私钥；
+没有这些密钥时才创建新的 Ed25519 密钥 `~/.ssh/id_ed25519`，新密钥不设置口令以支持无人值守连接。
+已有私钥不会被覆盖；也可用 `-IdentityFile` 指定已有私钥。若已有私钥本身设置了口令，
+先将其加载进 ssh-agent，才能在后续步骤使用 BatchMode；脚本不会移除原有密钥口令。
+SSH 认证失败时仅重用/生成本机密钥并追加公钥，免密验证未通过不会上传项目或开始部署。
+不自动安装本机工具。
+
+安装使用独立的 `biligo-ssh` 服务，与手动安装的 `biligo-linux` 服务分开；
+源码 `/opt/biligo-ssh`、数据 `/var/lib/biligo-ssh`、浏览器缓存 `/var/cache/biligo-ssh`，
+部署配置 `/etc/biligo-ssh/`。服务以非 root 用户运行，默认只监听服务器 `127.0.0.1:4999`。
+本机浏览器打开 `http://127.0.0.1:5500`，通过 SSH 隧道访问；无需新增公网面板端口、域名或 HTTPS 代理。
+关闭终端或按 Ctrl+C 会结束隧道及日志连接，服务仍继续运行，服务器重启后自动启动。
+
+常用参数：
+
+```powershell
+# 自定义 SSH 端口、私钥和本机端口；后续连接使用相同 SSH 参数。
+.\deploy-ssh.ps1 -Server user@server -Port 2222 -IdentityFile "$env:USERPROFILE\.ssh\id_ed25519" -LocalPort 5501
+.\connect-ssh.ps1 -Server user@server -Port 2222 -LocalPort 5501
+
+# 默认 Auto 已优先国内镜像；China 固定国内源，不回退官方。只部署、不持续连接。
+.\deploy-ssh.ps1 -Server my-server -Mirror China -DeployOnly
+
+# CI/无人值守运行：尚未免密时立即报错，不弹出服务器密码提示。
+.\deploy-ssh.ps1 -Server my-server -NonInteractive -DeployOnly
+
+# 自定义 PyPI，或服务器可访问的 HTTP(S) 下载代理。
+.\deploy-ssh.ps1 -Server my-server -PipIndex https://pypi.tuna.tsinghua.edu.cn/simple
+.\deploy-ssh.ps1 -Server my-server -Proxy http://127.0.0.1:7890
+
+# 本机已有 5500 或服务器已有 4999 服务时分别更换端口；后续连接自动读取远端端口。
+.\deploy-ssh.ps1 -Server my-server -RemotePort 5502 -LocalPort 5503
+
+# 保持隧道但不跟随日志；-NoBrowser 禁止自动打开本机浏览器。
+.\connect-ssh.ps1 -Server my-server -NoBrowser -NoFollow
+
+# 忘记自定义面板密码时显式重置，撤销所有面板会话；普通连接绝不重置。
+.\connect-ssh.ps1 -Server my-server -ResetPanelPassword
+```
+
+`-SshConfig 路径` 可指定独立的 OpenSSH 配置；未指定则沿用本机默认配置及跳板机等设置。
+`-BrowserDownloadHost https://...` 可指定与当前 Playwright 版本匹配的 Chromium 下载站点。
+没有稳定的下载源或可用代理时会报错，不会关闭 TLS 校验或使用未知公共代理。
+
+镜像源策略：默认 `-Mirror Auto` 优先国内 HTTPS 镜像：APT 使用清华源，Python 使用清华 PyPI，
+Chromium、Headless Shell 和 FFmpeg 使用 npmmirror 的 Playwright 镜像。
+APT 更新、Python 包安装或浏览器下载失败后，仅该类回退官方源；Python 的选择独立于 APT，避免 APT 回退后 Python 也被带回官方。
+`-Mirror Official` 固定官方源；`-Mirror China` 固定国内镜像，不回退官方。
+自定义 `-PipIndex` 或 `-BrowserDownloadHost` 时只使用指定地址，不自动替换。
+APT 设置只作用于本次部署及 Playwright 系统依赖安装，所选源记录在
+`/etc/biligo-ssh/apt.sources.list`，不替换 `/etc/apt/sources.list*`。
+Python 源、可选 Chromium 下载地址及代理保存在权限为 600 的 `service.env`，供本服务使用。
+重复部署需再次传入需要保留的自定义源/代理参数。
+已经启动的安装进程不会自动切换镜像，新策略在下一次执行部署脚本时生效；不要并发启动两次部署。
+重复部署复用已安装的依赖和已完成的浏览器缓存，无需清空数据或缓存。
+代理地址以服务器为视角，`127.0.0.1` 表示服务器自身；不会自动借用本机代理。
+此代理用于安装下载及支持这些环境变量的 Python 请求，不会自动改变 Chromium 访问平台时的代理设置。
+不修改网卡、DNS、路由、防火墙或 SSH 服务配置。
+
+初始密码会在每次连接时从服务器认证库只读显示；设置自定义密码后只显示“已设置”，无法恢复其明文。
+实时日志通过 SSH 跟随 systemd journal，只显示连接后的新记录，不回放可能包含旧初始密码的历史日志。
+不将密码写入本机日志文件或访问 URL。上传包仅包含源码、界面资源和无凭据默认模板，排除本机运行配置、
+账号资料、数据库、虚拟环境及 Git 内容。重复部署会短暂停服、覆盖源码及更新依赖，保留独立数据目录；
+失败时报告错误，不自动备份、创建快照或回滚。
+
+**此模式完全不安装或使用 VNC/noVNC，也不配置远程桌面。** B 站面板内扫码/API 功能可以使用；
+抖音、小红书等平台需要服务器图形浏览器交互的首次登录、验证码，仍需要有效桌面和操作途径。
+SSH 面板隧道不传输浏览器窗口，不能在无图形环境中代替这些操作；已有有效登录态可运行无头监控。
+ARM64 支持安装路径选择，尚需实机验证。Ubuntu 22.04 的默认 Python 不满足要求，此自动部署入口会拒绝该系统。
+
+常用服务器维护命令（通过 SSH 执行）：
+
+```bash
+sudo systemctl status biligo-ssh
+sudo systemctl restart biligo-ssh
+sudo systemctl stop biligo-ssh
+sudo journalctl -u biligo-ssh -n 80 --no-pager
+```
+
+本机 SSH 部署验证（2026-11-01）：在独立 WSL Ubuntu 24.04 / x86_64 测试目标中，
+使用临时 SSH 密钥、独立 sshd 监听端口及合成账号数据，实际运行了 Windows 部署/连接脚本。
+官方源及清华 APT/PyPI 源安装、SCP 校验、回环监听、非 root 服务、面板初始登录与改密、
+实时日志、断开后服务持续运行及日志进程清理、重连、自定义端口、显式密码重置、
+重复部署保留认证库和数据均通过。PowerShell 5.1 和 7 连接通过；自动打开浏览器的调用在
+隧道健康后触发，并核对了 URL（测试替换了系统浏览器启动器，未启动用户浏览器）。
+Chromium 真实无头启动通过，现有 37 项回归和新增 4 项认证显示检查通过，
+两个 PowerShell 版本的打包、中文文件名、凭据排除及参数检查通过。
+后续加入首次自动配置公钥：PowerShell 5.1 / 7 均通过真实 OpenSSH 密码认证、生成并安装公钥、
+免密验证及再次运行不提示密码的完整链路；使用临时 Linux 账号和仅供测试的 AskPass 提供合成密码，
+未使用真实服务器密码。新增公钥追加、重复跳过、权限和软链接边界检查后，该测试文件共 8 项检查通过。
+另验证了免密已就绪时跳过配置、网络错误不触发密码提示、`-NonInteractive` 立即失败及免密验证失败时停止。
+国内镜像优先策略另有 8 项隔离检查，覆盖三类源的优先级、失败回退、自定义覆盖、固定模式和回退后清除浏览器镜像设置。
+本机 Ubuntu 实际下载验证通过：清华源下载匹配版本的 Playwright wheel（48.5 MB，约 3.3 秒），
+npmmirror 全新下载 Chromium、Headless Shell、FFmpeg，并成功启动无头 Chromium。
+上述时间仅代表本机测试网络，不代表远程服务器的下载速度；测试缓存均位于独立临时目录并已清理。
+可选实际下载检查：使用已安装 Playwright 的 Linux Python 执行 `python scripts/test_download_sources.py --smoke-downloads`，
+会在临时目录下载匹配版本的 Playwright wheel 和浏览器，并验证 Chromium 无头启动，完成后清理临时下载。
+测试未使用真实平台账号，未连接或修改用户远程服务器；测试服务完成后清理。
+Debian 12、ARM64、无 CA 证书的极简系统及指定代理仍需对应环境验证。
+
+本机可重跑的独立检查：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_ssh_deployment.ps1
+python .\scripts\test_ssh_deployment.py
+```
+
+Linux 可执行 `python3 scripts/test_download_sources.py` 检查镜像策略，不连接外网或安装系统包。
+
+### 手动安装
+
 适配目标为 Ubuntu 22.04 / 24.04 和 Debian 12，使用 Python 3.11 或更新版本。
 当前新增自动检查覆盖 Ubuntu 22.04 / 24.04；其他发行版和 ARM64 仍需实机验证。
 浏览器依赖以 [Playwright 官方系统要求](https://playwright.dev/python/docs/intro#system-requirements)为准。
