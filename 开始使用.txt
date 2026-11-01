@@ -1,0 +1,19 @@
+BiliGo Linux 服务器版
+
+解压 ZIP，在解压后的目录打开 PowerShell。
+把下面的“服务器公网IP”换成你的实际地址；登录用户不是 root 时也替换用户名。
+
+首次部署：
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-ssh.ps1 -Server root@服务器公网IP
+
+以后连接、打开面板并显示日志：
+powershell -NoProfile -ExecutionPolicy Bypass -File .\connect-ssh.ps1 -Server root@服务器公网IP
+
+首次会在终端提示输入服务器 SSH 密码，自动配置免密后继续部署。
+部署完成后自动打开本机浏览器，初始面板密码和实时日志显示在本机终端。
+关闭连接终端后，服务器继续运行；下次执行连接命令即可。
+
+服务器需使用 Ubuntu 24.04 或 Debian 12，启用 systemd，使用 root 或免密 sudo。
+本机需要 Windows PowerShell 和 OpenSSH 客户端。默认优先国内镜像，不使用 VNC。
+需要服务器图形浏览器操作的平台首次登录或验证码，仍需相应图形环境。
+更多参数见 LINUX.md。

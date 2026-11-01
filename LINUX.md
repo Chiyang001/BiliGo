@@ -7,14 +7,15 @@ Linux 的改动只保存在此分支，不自动合并或上传到主分支。
 
 ### Windows 本机通过 SSH 一键部署（无需 VNC）
 
-本机在本项目目录执行，`my-server` 替换为 SSH 别名或 `user@服务器公网地址`：
+下载 Release 的 `BiliGo_V3.2.1_Ultra_Linux.zip`，解压，在解压后的目录打开 PowerShell。
+将下面的用户名及服务器公网 IP 替换为实际值：
 
 ```powershell
 # 首次部署：安装依赖、启用后台服务、建立隧道、打开本机浏览器、显示初始密码并持续输出日志。
-powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-ssh.ps1 -Server my-server
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-ssh.ps1 -Server root@服务器公网IP
 
 # 后续连接：不上传、不安装、不重启服务，不改变密码或平台登录态。
-powershell -NoProfile -ExecutionPolicy Bypass -File .\connect-ssh.ps1 -Server my-server
+powershell -NoProfile -ExecutionPolicy Bypass -File .\connect-ssh.ps1 -Server root@服务器公网IP
 ```
 
 前提：本机 Windows PowerShell 5.1 / PowerShell 7，已有 OpenSSH 的 `ssh` 和 `scp`；
