@@ -152,6 +152,15 @@ function Initialize-BiligoSshLogin {
     Write-Host '[SSH] Passwordless login verified. Continuing deployment.'
 }
 
+function Get-BiligoTarPath {
+    # Prefer the Windows Unicode-aware bsdtar over GNU/MSYS tar earlier on PATH.
+    if ($env:OS -eq 'Windows_NT' -and $env:SystemRoot) {
+        $windowsTar = Join-Path $env:SystemRoot 'System32/tar.exe'
+        if (Test-Path -LiteralPath $windowsTar -PathType Leaf) { return $windowsTar }
+    }
+    return (Get-Command tar -CommandType Application -ErrorAction Stop).Source
+}
+
 function New-BiligoArchive {
     param([string]$Project, [string]$Destination)
     # Allow source/resources only. Never traverse local profiles, .git, venv or runtime data.
@@ -175,8 +184,9 @@ function New-BiligoArchive {
         $relative
     }
     # Native Unicode arguments avoid Windows tar's locale-dependent decoding of -T files.
-    & tar -czf $Destination -C $Project -- @manifest
-    if ($LASTEXITCODE -ne 0) { throw 'Cannot create deployment archive.' }
+    $tarExecutable = Get-BiligoTarPath
+    & $tarExecutable -czf $Destination -C $Project -- @manifest
+    if ($LASTEXITCODE -ne 0) { throw "Cannot create deployment archive (exit $LASTEXITCODE; tool $tarExecutable)." }
 }
 
 function ConvertTo-BiligoProcessArgument {

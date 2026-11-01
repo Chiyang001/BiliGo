@@ -34,7 +34,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $fixture 'docker/defaults/config.json'), '{}')
     $archive = Join-Path $fixture 'test.tar.gz'
     New-BiligoArchive $fixture $archive
-    $members = @(& tar -tzf $archive)
+    $tarExecutable = Get-BiligoTarPath
+    $members = @(& $tarExecutable -tzf $archive)
     Assert-True ($LASTEXITCODE -eq 0) 'Cannot inspect archive.'
     Assert-True ($members.Count -eq 4) "Unexpected package members: $members"
     Assert-True ($members -contains 'app.py') 'Missing source.'
@@ -42,7 +43,7 @@ try {
     Assert-True ($members -contains 'deploy/linux/provision-ssh.sh') 'Missing deployment script.'
     $extracted = Join-Path $fixture 'extracted'
     $null = New-Item -ItemType Directory -Path $extracted
-    & tar -xzf $archive -C $extracted
+    & $tarExecutable -xzf $archive -C $extracted
     Assert-True ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath (Join-Path $extracted $unicodeImage))) 'Unicode filename changed during packaging.'
     # Generate a new key only inside the test fixture; never touch the user's real SSH keys.
     function Get-BiligoDefaultIdentity { return (Join-Path $fixture 'test identity') }
