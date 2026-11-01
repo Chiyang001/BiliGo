@@ -35,7 +35,7 @@ try {
     $archive = Join-Path $fixture 'test.tar.gz'
     New-BiligoArchive $fixture $archive
     $tarExecutable = Get-BiligoTarPath
-    $members = @(& $tarExecutable -tzf $archive)
+    $members = @(& $tarExecutable -tzf $archive | Where-Object { -not $_.EndsWith('/') } | ForEach-Object { $_ -replace '^\./', '' })
     Assert-True ($LASTEXITCODE -eq 0) 'Cannot inspect archive.'
     Assert-True ($members.Count -eq 4) "Unexpected package members: $members"
     Assert-True ($members -contains 'app.py') 'Missing source.'

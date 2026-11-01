@@ -183,10 +183,29 @@ function New-BiligoArchive {
         if ($relative -match '[\r\n]' -or $relative.StartsWith('-')) { throw 'Unsafe archive filename.' }
         $relative
     }
-    # Native Unicode arguments avoid Windows tar's locale-dependent decoding of -T files.
+    # Some Windows tar builds crash when non-ANSI filenames arrive through argv.
+    # Copy the allowlisted upload inputs to a temporary staging directory so tar
+    # discovers their Unicode names through the filesystem instead of argv/-T.
     $tarExecutable = Get-BiligoTarPath
-    & $tarExecutable -czf $Destination -C $Project -- @manifest
-    if ($LASTEXITCODE -ne 0) { throw "Cannot create deployment archive (exit $LASTEXITCODE; tool $tarExecutable)." }
+    $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    $staging = Join-Path $temporaryRoot ('biligo-upload-stage-' + [guid]::NewGuid().ToString('N'))
+    try {
+        $null = New-Item -ItemType Directory -Path $staging
+        foreach ($relative in $manifest) {
+            $target = Join-Path $staging $relative
+            $null = New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force
+            [IO.File]::Copy((Join-Path $Project $relative), $target)
+        }
+        & $tarExecutable --format=pax --options=hdrcharset=UTF-8 -czf $Destination -C $staging .
+        if ($LASTEXITCODE -ne 0) { throw "Cannot create deployment archive (exit $LASTEXITCODE; tool $tarExecutable)." }
+    } finally {
+        $resolvedStaging = [IO.Path]::GetFullPath($staging)
+        if ($resolvedStaging.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase) -and
+            (Split-Path $resolvedStaging -Leaf) -match '^biligo-upload-stage-[a-f0-9]{32}$' -and
+            (Test-Path -LiteralPath $resolvedStaging)) {
+            Remove-Item -LiteralPath $resolvedStaging -Recurse -Force
+        }
+    }
 }
 
 function ConvertTo-BiligoProcessArgument {
