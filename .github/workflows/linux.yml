@@ -21,7 +21,9 @@ jobs:
           python-version: '3.11'
       - name: Check Windows PowerShell SSH client and upload isolation
         shell: powershell
-        run: ./scripts/test_ssh_deployment.ps1
+        run: |
+          Get-Command ssh-keygen -CommandType Application | Format-Table Name, Path
+          ./scripts/test_ssh_deployment.ps1
       - name: Check PowerShell 7 SSH client
         shell: pwsh
         run: ./scripts/test_ssh_deployment.ps1

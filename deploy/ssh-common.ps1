@@ -66,7 +66,8 @@ function Test-BiligoSshLogin {
 function Invoke-BiligoKeygen {
     param([string[]]$Arguments)
     $info = New-Object Diagnostics.ProcessStartInfo
-    $info.FileName = (Get-Command ssh-keygen -CommandType Application -ErrorAction Stop).Source
+    $keygen = Get-Command ssh-keygen -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    $info.FileName = $keygen.Path
     # Preserve empty -N / -P values on Windows PowerShell 5.1 as well as PowerShell 7.
     $info.Arguments = (($Arguments | ForEach-Object { ConvertTo-BiligoProcessArgument $_ }) -join ' ')
     $info.UseShellExecute = $false
@@ -77,7 +78,8 @@ function Invoke-BiligoKeygen {
     $process = New-Object Diagnostics.Process
     $process.StartInfo = $info
     try {
-        [void]$process.Start()
+        try { [void]$process.Start() }
+        catch { throw "Cannot start ssh-keygen at $($info.FileName): $($_.Exception.Message)" }
         $process.StandardInput.Close()
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
@@ -201,7 +203,8 @@ function Start-BiligoConnection {
     $arguments = @($Options) + @('-T', '-o', 'ExitOnForwardFailure=yes',
         '-L', "127.0.0.1:${LocalPort}:127.0.0.1:${RemotePort}", $Server, $remote)
     $info = New-Object Diagnostics.ProcessStartInfo
-    $info.FileName = (Get-Command ssh -CommandType Application).Source
+    $sshCommand = Get-Command ssh -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    $info.FileName = $sshCommand.Path
     $info.Arguments = (($arguments | ForEach-Object { ConvertTo-BiligoProcessArgument $_ }) -join ' ')
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
