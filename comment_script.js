@@ -599,7 +599,7 @@ async function loadCommentLogs() {
 
 // 检查评论服务器状态
 function checkCommentServerStatus() {
-    fetch('/api/comment-status')
+    fetch('/api/comment-status', {cache: 'no-store'})
     .then(response => response.json())
     .then(data => {
         isCommentMonitoring = data.monitoring;

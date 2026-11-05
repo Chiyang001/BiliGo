@@ -154,6 +154,7 @@
             history.replaceState(null, '', `${location.pathname}${location.search}#tab=${target.config.id}`);
             if (focus) target.tab.focus({preventScroll: true});
             content.scrollTop = 0;
+            document.dispatchEvent(new CustomEvent('platform-tab-change', {detail: {id: target.config.id}}));
         }
 
         tabs.forEach((item, index) => {
@@ -185,6 +186,27 @@
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initPlatformTabs);
     else initPlatformTabs();
+})();
+
+// 从账号设置返回运行控制，以及浏览器返回/切回窗口时，立即同步登录和运行状态。
+(() => {
+    let refreshTimer;
+    function refreshControlStatus() {
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => {
+            const refresh = window.checkServerStatus || window.checkCommentServerStatus ||
+                window.checkDouyinStatus || window.checkXhsStatus;
+            if (typeof refresh === 'function') refresh();
+        }, 50);
+    }
+    document.addEventListener('platform-tab-change', event => {
+        if (event.detail.id === 'control') refreshControlStatus();
+    });
+    window.addEventListener('pageshow', refreshControlStatus);
+    window.addEventListener('focus', refreshControlStatus);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) refreshControlStatus();
+    });
 })();
 
 window.setPlatformLoginRequired = function (required) {

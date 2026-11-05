@@ -13,12 +13,17 @@
         <header>
             <div class="logo"><h1>BiliGo</h1><div class="subtitle">统一 AI 回复设置</div></div>
             <div class="header-actions">
-                <span class="version-badge">V3.2.1 Ultra</span>
+                <span class="version-badge">V3.3.0 Ultra</span>
                 <button class="btn-switch btn-secondary" id="ai-back-button">返回平台</button>
             </div>
         </header>
 
         <main class="ai-settings-shell">
+            <div class="ai-account-scope" id="ai-account-scope" hidden>
+                <label for="ai-config-account">当前配置范围</label>
+                <select id="ai-config-account"></select>
+                <span id="ai-account-scope-hint"></span>
+            </div>
             <section class="ai-settings-hero">
                 <canvas id="ai-ambient-canvas" aria-hidden="true"></canvas>
                 <div class="ai-hero-copy">

@@ -24,7 +24,7 @@ windows_version_info = VSVersionInfo(
             StringStruct('OriginalFilename', EXE_BASENAME + '.exe'),
             StringStruct('ProductName', 'BiliGo'),
             StringStruct('ProductVersion', APP_VERSION),
-            StringStruct('Comments', f'Security update · {APP_VERSION_DATE}'),
+            StringStruct('Comments', f'Account configuration update · {APP_VERSION_DATE}'),
         ])]),
         VarFileInfo([VarStruct('Translation', [2052, 1200])]),
     ],

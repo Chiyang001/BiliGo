@@ -1,12 +1,58 @@
 let rules = [];
 let isMonitoring = false;
 let isMessageLoggedIn = false;
+let messageStatusSequence = 0;
 let currentPage = 1;
 const rulesPerPage = 10;
 let editingRuleId = null;
+let selectedMessageAccount = null;
+let accountSelectionReady = false;
+
+// 每个请求固定携带发起时选中的账号，单账号模式保留原有接口行为。
+function fetchMessageConfig(path, options = {}) {
+    const url = new URL(path, location.origin);
+    if (selectedMessageAccount !== null) url.searchParams.set('account', selectedMessageAccount);
+    return fetch(url.pathname + url.search, {cache: 'no-store', ...options});
+}
+
+function messageRulesStorageKey() {
+    return selectedMessageAccount === null ? 'bilibili_reply_rules'
+        : 'bilibili_reply_rules:account:' + encodeURIComponent(selectedMessageAccount);
+}
+
+function selectMessageAccount(name) {
+    sessionStorage.setItem('biligo:message:config-account', name);
+    // 重新初始化所有表单和弹窗，避免切换后提交上一个账号的未保存内容。
+    location.reload();
+}
+
+function renderMessageAccountSelector(accounts, multiMode) {
+    let host = document.getElementById('message-account-selector');
+    if (!host) {
+        host = document.createElement('div');
+        host.id = 'message-account-selector';
+        host.className = 'message-account-selector';
+        host.innerHTML = '<label for="message-config-account">当前配置账号</label><select id="message-config-account"></select><small>回复、AI、邮件及运行参数仅对所选账号生效。</small>';
+        const sidebar = document.querySelector('.platform-tab-sidebar');
+        if (sidebar) sidebar.insertBefore(host, sidebar.querySelector('.platform-tab-group-label'));
+        else document.querySelector('.container').prepend(host);
+        host.querySelector('select').addEventListener('change', event => selectMessageAccount(event.target.value));
+    }
+    host.hidden = !multiMode;
+    const select = host.querySelector('select');
+    select.replaceChildren();
+    accounts.forEach(account => {
+        const option = new Option(account.name + (account.enabled === false ? '（已禁用）' : ''), account.name);
+        select.add(option);
+    });
+    if (!accounts.length) select.add(new Option('请先添加账号', ''));
+    select.disabled = !accounts.length;
+    select.value = selectedMessageAccount || '';
+}
 
 // 页面加载时初始化
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadAccounts(false);
     loadConfig();
     loadRules(); // loadRules内部会调用updateRulesDisplay()
     checkServerStatus();
@@ -17,7 +63,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadNewMessageConfig();
     loadFollowCheckIntervalConfig();
     loadTimingConfig();
-    loadAccounts();  // 加载多账号列表
+    loadUnfollowReplyConfig();
     loadEmailConfig();  // 加载邮件配置
 });
 
@@ -46,7 +92,7 @@ function updateAiProviderHint() {
 
 async function loadAiProviderConfig() {
     try {
-        const response = await fetch('/api/ai-config');
+        const response = await fetchMessageConfig('/api/ai-config');
         if (!response.ok) return;
         const config = await response.json();
         document.getElementById('ai-auto-reply-enabled').checked = Boolean(config.enabled);
@@ -76,10 +122,10 @@ async function saveAiProviderConfig() {
     result.textContent = '正在测试连接...';
     result.style.color = 'var(--text-muted)';
     try {
-        const response = await fetch('/api/ai-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const response = await fetchMessageConfig('/api/ai-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const data = await response.json();
         if (!response.ok || data.success === false) throw new Error(data.error || data.message || '保存失败');
-        const testResponse = await fetch('/api/ai-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const testResponse = await fetchMessageConfig('/api/ai-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const testData = await testResponse.json();
         if (!testResponse.ok || testData.success === false) throw new Error(testData.error || '连接失败');
         result.textContent = testData.message || '连接成功，配置已保存';
@@ -425,6 +471,7 @@ function saveConfig() {
         if (data.success) {
             showToast('配置保存成功', 'success');
             addLog('配置保存成功', 'success');
+            checkServerStatus();
         } else {
             showToast('保存失败: ' + data.error, 'error');
             addLog('保存失败: ' + data.error, 'error');
@@ -438,7 +485,7 @@ function saveConfig() {
 
 // 加载取消关注回复配置
 function loadUnfollowReplyConfig() {
-    fetch('/api/unfollow-reply-config')
+    fetchMessageConfig('/api/unfollow-reply-config')
     .then(response => response.json())
     .then(data => {
         if (document.getElementById('unfollow-reply-enabled')) {
@@ -452,6 +499,7 @@ function loadUnfollowReplyConfig() {
             // 设置内容
             document.getElementById('unfollow-reply-message').value = data.unfollow_reply_message || '很遗憾看到您取消了关注，希望我们还有机会再见！';
             
+            document.getElementById('unfollow-reply-image-path').value = data.unfollow_reply_image || '';
             if (data.unfollow_reply_image) {
                 document.getElementById('unfollow-reply-image-path').value = data.unfollow_reply_image;
                 showImagePreview('unfollow', data.unfollow_reply_image);
@@ -505,7 +553,7 @@ function saveUnfollowReplyConfig() {
         configData.unfollow_reply_image = imagePath;
     }
     
-    fetch('/api/unfollow-reply-config', {
+    fetchMessageConfig('/api/unfollow-reply-config', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -528,21 +576,11 @@ function saveUnfollowReplyConfig() {
     });
 }
 
-// 在页面加载时也加载取消关注回复配置
-document.addEventListener('DOMContentLoaded', function() {
-    // 加载取消关注回复设置
-    loadUnfollowReplyConfig();
-});
-
-// 加载配置
 function loadConfig() {
-    fetch('/api/config')
+    fetchMessageConfig('/api/config')
     .then(response => response.json())
     .then(data => {
-        isMessageLoggedIn = data.multi_account_mode
-            ? (data.accounts || []).some(account => account.enabled !== false && account.sessdata && account.bili_jct)
-            : !!(data.sessdata && data.bili_jct);
-        updateButtonStates();
+        checkServerStatus();
         if (data.sessdata) {
             document.getElementById('sessdata').value = data.sessdata;
         }
@@ -567,6 +605,7 @@ function loadConfig() {
             // 设置统一回复内容
             document.getElementById('default-reply-message').value = data.default_reply_message || '您好，我现在不在，稍后会回复您的消息。';
             
+            document.getElementById('default-reply-image-path').value = data.default_reply_image || '';
             if (data.default_reply_image) {
                 document.getElementById('default-reply-image-path').value = data.default_reply_image;
                 showImagePreview('default', data.default_reply_image);
@@ -577,6 +616,7 @@ function loadConfig() {
             document.querySelector(`input[name="followed-reply-type"][value="${followedReplyType}"]`).checked = true;
             toggleFollowedReplyContent(followedReplyType);
             document.getElementById('followed-reply-message').value = data.followed_reply_message || '您好，感谢您的关注！我现在不在，稍后会回复您的消息。';
+            document.getElementById('followed-reply-image-path').value = data.followed_reply_image || '';
             if (data.followed_reply_image) {
                 document.getElementById('followed-reply-image-path').value = data.followed_reply_image;
                 showImagePreview('followed', data.followed_reply_image);
@@ -587,6 +627,7 @@ function loadConfig() {
             document.querySelector(`input[name="unfollowed-reply-type"][value="${unfollowedReplyType}"]`).checked = true;
             toggleUnfollowedReplyContent(unfollowedReplyType);
             document.getElementById('unfollowed-reply-message').value = data.unfollowed_reply_message || '您好，我现在不在，稍后会回复您的消息。';
+            document.getElementById('unfollowed-reply-image-path').value = data.unfollowed_reply_image || '';
             if (data.unfollowed_reply_image) {
                 document.getElementById('unfollowed-reply-image-path').value = data.unfollowed_reply_image;
                 showImagePreview('unfollowed', data.unfollowed_reply_image);
@@ -693,7 +734,7 @@ function saveDefaultReply() {
         }
     }
     
-    fetch('/api/config', {
+    fetchMessageConfig('/api/config', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -789,15 +830,19 @@ function deleteRule(id) {
 
 // 保存规则到本地存储
 function saveRules() {
-    localStorage.setItem('bilibili_reply_rules', JSON.stringify(rules));
+    localStorage.setItem(messageRulesStorageKey(), JSON.stringify(rules));
     
     // 同时发送到服务器
-    fetch('/api/rules', {
+    fetchMessageConfig('/api/rules', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({rules: rules})
+    })
+    .then(async response => {
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || '保存规则失败');
     })
     .catch(error => {
         console.error('同步规则到服务器失败:', error);
@@ -808,17 +853,17 @@ function saveRules() {
 // 从本地存储和服务器加载规则
 function loadRules() {
     // 首先尝试从服务器加载
-    fetch('/api/rules')
+    fetchMessageConfig('/api/rules')
     .then(response => response.json())
     .then(data => {
         if (data.rules && Array.isArray(data.rules)) {
             rules = data.rules;
             // 同步到本地存储
-            localStorage.setItem('bilibili_reply_rules', JSON.stringify(rules));
+            localStorage.setItem(messageRulesStorageKey(), JSON.stringify(rules));
             addLog(`从服务器加载了 ${rules.length} 条规则`, 'success');
         } else {
             // 如果服务器没有规则，尝试从本地存储加载
-            const saved = localStorage.getItem('bilibili_reply_rules');
+            const saved = localStorage.getItem(messageRulesStorageKey());
             if (saved) {
                 rules = JSON.parse(saved);
                 addLog(`从本地存储加载了 ${rules.length} 条规则`, 'info');
@@ -829,7 +874,7 @@ function loadRules() {
     .catch(error => {
         // 服务器加载失败，尝试从本地存储加载
         console.error('从服务器加载规则失败:', error);
-        const saved = localStorage.getItem('bilibili_reply_rules');
+        const saved = localStorage.getItem(messageRulesStorageKey());
         if (saved) {
             try {
                 rules = JSON.parse(saved);
@@ -1034,15 +1079,18 @@ async function loadMessageLogs() {
 
 // 检查服务器状态
 function checkServerStatus() {
-    fetch('/api/status')
+    const sequence = ++messageStatusSequence;
+    return fetch('/api/status', {cache: 'no-store'})
     .then(response => response.json())
     .then(data => {
+        if (sequence !== messageStatusSequence) return;
         isMonitoring = data.monitoring;
         isMessageLoggedIn = !!data.message_config_set;
         updateButtonStates();
         updateStatus(data.monitoring ? '监控中...' : '未启动');
     })
     .catch(error => {
+        if (sequence !== messageStatusSequence) return;
         updateStatus('服务器连接失败');
         showToast('无法连接到服务器', 'error');
         addLog('无法连接到服务器', 'error');
@@ -1540,7 +1588,7 @@ if (window.innerWidth <= 768) {
 
 // 加载关注后回复配置
 function loadFollowReplyConfig() {
-    fetch('/api/follow-reply-config')
+    fetchMessageConfig('/api/follow-reply-config')
     .then(response => response.json())
     .then(data => {
         if (document.getElementById('follow-reply-enabled')) {
@@ -1554,6 +1602,7 @@ function loadFollowReplyConfig() {
             // 设置内容
             document.getElementById('follow-reply-message').value = data.follow_reply_message || '感谢您的关注！欢迎来到我的频道~';
             
+            document.getElementById('follow-reply-image-path').value = data.follow_reply_image || '';
             if (data.follow_reply_image) {
                 document.getElementById('follow-reply-image-path').value = data.follow_reply_image;
                 showImagePreview('follow', data.follow_reply_image);
@@ -1660,7 +1709,7 @@ function saveFollowReply() {
     }
     
     // 先保存关注回复设置
-    fetch('/api/follow-reply-config', {
+    fetchMessageConfig('/api/follow-reply-config', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1671,7 +1720,7 @@ function saveFollowReply() {
     .then(data => {
         if (data.success) {
             // 关注回复设置保存成功后，保存检查间隔设置
-            return fetch('/api/follow-check-interval-config', {
+            return fetchMessageConfig('/api/follow-check-interval-config', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1714,7 +1763,7 @@ function testFollowDetection() {
     showToast('正在测试关注者检测功能...', 'info');
     addLog('开始测试关注者检测功能', 'info');
     
-    fetch('/api/test-follow-detection', {
+    fetchMessageConfig('/api/test-follow-detection', {
         method: 'POST'
     })
     .then(response => response.json())
@@ -1743,7 +1792,7 @@ function testFollowDetection() {
 
 // 加载仅回复新消息配置
 function loadNewMessageConfig() {
-    fetch('/api/new-message-config')
+    fetchMessageConfig('/api/new-message-config')
     .then(response => response.json())
     .then(data => {
         if (document.getElementById('only-reply-new-messages')) {
@@ -1782,7 +1831,7 @@ function saveNewMessageConfig() {
         return;
     }
     
-    fetch('/api/new-message-config', {
+    fetchMessageConfig('/api/new-message-config', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1816,7 +1865,7 @@ function saveNewMessageConfig() {
 
 // 加载关注者检查间隔配置
 function loadFollowCheckIntervalConfig() {
-    fetch('/api/follow-check-interval-config')
+    fetchMessageConfig('/api/follow-check-interval-config')
     .then(response => response.json())
     .then(data => {
         if (document.getElementById('follow-check-interval')) {
@@ -1986,7 +2035,7 @@ function importConfig() {
     importBtn.disabled = true;
     importBtn.innerHTML = ' 导入中...';
     
-    fetch('/api/import-config', {
+    fetchMessageConfig('/api/import-config', {
         method: 'POST',
         body: formData
     })
@@ -2015,7 +2064,7 @@ function importConfig() {
 function exportConfig() {
     showToast('正在导出配置包...', 'info');
     
-    fetch('/api/export-config')
+    fetchMessageConfig('/api/export-config')
     .then(response => {
         if (response.ok) {
             return response.blob();
@@ -2141,7 +2190,7 @@ function toggleTimingConfig() {
 
 // 加载时间间隔配置
 function loadTimingConfig() {
-    fetch('/api/timing-config')
+    fetchMessageConfig('/api/timing-config')
     .then(response => response.json())
     .then(data => {
         if (document.getElementById('message-check-interval')) {
@@ -2207,7 +2256,7 @@ function saveTimingConfig() {
         auto_restart_interval: autoRestartInterval
     };
     
-    fetch('/api/timing-config', {
+    fetchMessageConfig('/api/timing-config', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -2284,11 +2333,24 @@ document.addEventListener('keydown', function(event) {
 // ==================== 多账号管理功能 ====================
 
 // 加载账号列表
-function loadAccounts() {
-    fetch('/api/accounts')
+function loadAccounts(reloadOnChange = true) {
+    return fetch('/api/accounts')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
+                const previous = selectedMessageAccount;
+                const stored = sessionStorage.getItem('biligo:message:config-account');
+                selectedMessageAccount = data.multi_account_mode
+                    ? ((data.accounts || []).find(account => account.name === stored)?.name ?? data.accounts?.[0]?.name ?? null)
+                    : null;
+                if (selectedMessageAccount !== null) sessionStorage.setItem('biligo:message:config-account', selectedMessageAccount);
+                renderMessageAccountSelector(data.accounts || [], !!data.multi_account_mode);
+                if (accountSelectionReady && reloadOnChange && previous !== selectedMessageAccount) {
+                    location.reload();
+                    return;
+                }
+                accountSelectionReady = true;
+                checkServerStatus();
                 updateAccountsList(data.accounts);
                 
                 // 更新多账号模式开关与界面显示（不触发服务端保存）
@@ -2308,42 +2370,52 @@ function loadAccounts() {
 function updateAccountsList(accounts) {
     const accountsList = document.getElementById('accounts-list');
     if (!accountsList) return;
-    
-    if (!accounts || accounts.length === 0) {
-        accountsList.innerHTML = '<p class="help-text">暂无账号，点击下方按钮添加</p>';
+    accountsList.replaceChildren();
+    if (!accounts?.length) {
+        const hint = document.createElement('p');
+        hint.className = 'help-text';
+        hint.textContent = '暂无账号，点击下方按钮添加';
+        accountsList.append(hint);
         return;
     }
-    
-    let html = '<div class="accounts-container">';
+    const container = document.createElement('div');
+    container.className = 'accounts-container';
     accounts.forEach(account => {
-        const statusClass = account.enabled ? 'enabled' : 'disabled';
-        const statusText = account.enabled ? '已启用' : '已禁用';
-        const statusIcon = account.enabled ? '' : '⏸';
-        
-        html += `
-            <div class="account-item ${statusClass}">
-                <div class="account-info">
-                    <div class="account-name">${statusIcon} ${account.name}</div>
-                    <div class="account-details">
-                        <span>UID: ${account.uid || '未知'}</span>
-                        <span>SESSDATA: ${account.sessdata_preview}</span>
-                    </div>
-                </div>
-                <div class="account-actions">
-                    <button class="btn-small ${account.enabled ? 'btn-warning' : 'btn-success'}" 
-                            onclick="toggleAccount('${account.name}', ${!account.enabled})">
-                        ${account.enabled ? '禁用' : '启用'}
-                    </button>
-                    <button class="btn-small btn-danger" onclick="deleteAccount('${account.name}')">
-                        删除
-                    </button>
-                </div>
-            </div>
-        `;
+        const enabled = account.enabled !== false;
+        const item = document.createElement('div');
+        item.className = `account-item ${enabled ? 'enabled' : 'disabled'}`;
+        const info = document.createElement('div');
+        info.className = 'account-info';
+        const name = document.createElement('div');
+        name.className = 'account-name';
+        name.textContent = `${account.name} · ${enabled ? '已启用' : '已禁用'}`;
+        const details = document.createElement('div');
+        details.className = 'account-details';
+        details.textContent = `UID: ${account.uid || '未知'} · SESSDATA: ${account.sessdata_preview || ''}`;
+        info.append(name, details);
+        const actions = document.createElement('div');
+        actions.className = 'account-actions';
+        const configure = document.createElement('button');
+        configure.className = 'btn-small btn-primary';
+        configure.textContent = '个性化配置';
+        configure.onclick = () => {
+            sessionStorage.setItem('biligo:bili_message:active-tab', 'reply');
+            history.replaceState(null, '', location.pathname + location.search + '#tab=reply');
+            selectMessageAccount(account.name);
+        };
+        const toggle = document.createElement('button');
+        toggle.className = `btn-small ${enabled ? 'btn-warning' : 'btn-success'}`;
+        toggle.textContent = enabled ? '禁用' : '启用';
+        toggle.onclick = () => toggleAccount(account.name, !enabled);
+        const remove = document.createElement('button');
+        remove.className = 'btn-small btn-danger';
+        remove.textContent = '删除';
+        remove.onclick = () => deleteAccount(account.name);
+        actions.append(configure, toggle, remove);
+        item.append(info, actions);
+        container.append(item);
     });
-    html += '</div>';
-    
-    accountsList.innerHTML = html;
+    accountsList.append(container);
 }
 
 // 仅切换界面显示，不保存到服务端
@@ -2385,15 +2457,18 @@ function toggleMultiAccountMode(enabled) {
     .then(data => {
         if (data.success) {
             showToast(data.message, 'success');
+            location.reload();
         } else {
             showToast(data.error || '切换模式失败', 'error');
             // 恢复复选框状态
             document.getElementById('multi-account-mode').checked = !enabled;
+            applyAccountModeUI(!enabled);
         }
     })
     .catch(error => {
         showToast('切换模式失败: ' + error, 'error');
         document.getElementById('multi-account-mode').checked = !enabled;
+        applyAccountModeUI(!enabled);
     });
 }
 
@@ -2603,7 +2678,7 @@ function saveEmailConfig() {
         receiver_email: receiverEmail
     };
     
-    fetch('/api/save_email_config', {
+    fetchMessageConfig('/api/save_email_config', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -2643,7 +2718,7 @@ function testEmailNotification() {
     
     showToast('正在发送测试邮件...', 'info');
     
-    fetch('/api/test_email', {
+    fetchMessageConfig('/api/test_email', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -2651,7 +2726,9 @@ function testEmailNotification() {
         body: JSON.stringify({
             sender_email: senderEmail,
             sender_password: senderPassword,
-            receiver_email: receiverEmail
+            receiver_email: receiverEmail,
+            smtp_server: document.getElementById('smtp-server').value.trim(),
+            smtp_port: Number(document.getElementById('smtp-port').value)
         })
     })
     .then(response => response.json())
@@ -2669,7 +2746,7 @@ function testEmailNotification() {
 }
 
 function loadEmailConfig() {
-    fetch('/api/get_email_config')
+    fetchMessageConfig('/api/get_email_config')
     .then(response => response.json())
     .then(data => {
         if (data.success && data.config) {

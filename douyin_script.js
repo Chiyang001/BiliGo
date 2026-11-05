@@ -650,7 +650,7 @@ async function stopDouyinMonitoring() {
 
 async function checkDouyinStatus() {
     try {
-        const res = await fetch('/api/douyin-status');
+        const res = await fetch('/api/douyin-status', {cache: 'no-store'});
         const data = await res.json();
         isDouyinMonitoring = !!data.monitoring;
         const statusText = document.getElementById('status');

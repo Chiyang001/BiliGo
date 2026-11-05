@@ -406,7 +406,7 @@ async function stopXhsMonitoring() { await fetch(platformApi('-stop'),{method:'P
 
 async function checkXhsStatus() {
     try {
-        const data = await (await fetch(platformApi('-status'))).json();
+        const data = await (await fetch(platformApi('-status'), {cache: 'no-store'})).json();
         xhsMonitoring = !!data.monitoring;
         const startBtn = document.getElementById('start-btn');
         const stopBtn = document.getElementById('stop-btn');

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, has_request_context, request, jsonify, send_from_directory
 import json
 import os
 import threading
@@ -8,7 +8,9 @@ from datetime import datetime
 import logging
 import hashlib
 import uuid
-from collections import defaultdict
+from collections import ChainMap, defaultdict
+from copy import deepcopy
+from werkzeug.exceptions import BadRequest, NotFound
 import base64
 import mimetypes
 from werkzeug.utils import secure_filename
@@ -111,6 +113,155 @@ config = {
 
 # 私信回复系统变量
 rules = []
+message_profiles_lock = threading.RLock()
+account_rule_matcher_caches = {}
+# 登录信息、邮件服务和 AI 服务仍由各自的配置面板管理。
+MESSAGE_SETTING_KEYS = frozenset(config) - {'accounts', 'multi_account_mode', 'email_notification', 'ai_provider'} | {
+    'image_reply_enabled', 'image_folder_path', 'followers_cache_size',
+}
+MESSAGE_SETTING_DEFAULTS = {key: deepcopy(config[key]) for key in MESSAGE_SETTING_KEYS if key in config}
+MESSAGE_SETTING_DEFAULTS.update(image_reply_enabled=False, image_folder_path='', followers_cache_size=1000)
+MESSAGE_SERVICE_DEFAULTS = {
+    'ai_provider': deepcopy(config['ai_provider']),
+    'ai_knowledge_base': normalize_knowledge_config({}),
+    'email_notification': deepcopy(config['email_notification']),
+}
+MESSAGE_PROFILE_KEYS = MESSAGE_SETTING_KEYS | frozenset(MESSAGE_SERVICE_DEFAULTS)
+
+
+def ensure_message_profiles():
+    """将旧版共用配置一次性复制为各账号的独立配置，空规则也视为已配置。"""
+    changed = False
+    with message_profiles_lock:
+        for account in config.get('accounts', []):
+            if 'message_config' not in account:
+                account['message_config'] = {}
+                changed = True
+            for key in MESSAGE_SETTING_KEYS:
+                if key not in account['message_config']:
+                    account['message_config'][key] = deepcopy(config.get(key, MESSAGE_SETTING_DEFAULTS[key]))
+                    changed = True
+            for key, default in MESSAGE_SERVICE_DEFAULTS.items():
+                if key not in account['message_config']:
+                    source = config.get(key, default)
+                    if key == 'email_notification':
+                        source = config.get('email_notifications', {}).get('bili_message') or source
+                    account['message_config'][key] = deepcopy(source)
+                    if key == 'email_notification' and account.get('email'):
+                        account['message_config'][key]['receiver_email'] = account['email']
+                    changed = True
+            if 'message_rules' not in account:
+                account['message_rules'] = deepcopy(rules)
+                changed = True
+        if changed:
+            save_config()
+
+
+def get_message_account(account_name):
+    for account in config.get('accounts', []):
+        if account.get('name') == account_name:
+            return account
+    raise NotFound('指定的账号不存在，请重新选择配置账号')
+
+
+def request_message_account():
+    account_name = request.args.get('account')
+    if account_name is not None:
+        get_message_account(account_name)
+    return account_name
+
+
+def get_message_config(account_name=None):
+    if account_name is None:
+        return config
+    ensure_message_profiles()
+    # 写入仅落到该账号的设置；未设置的通用服务参数仍可读取。
+    return ChainMap(get_message_account(account_name)['message_config'], config)
+
+
+def get_message_rules(account_name=None):
+    if account_name is None:
+        return rules
+    ensure_message_profiles()
+    return get_message_account(account_name)['message_rules']
+
+
+def get_message_email_config(account_name=None):
+    if account_name is not None:
+        return get_message_config(account_name)['email_notification']
+    return config.get('email_notifications', {}).get('bili_message') or config.get('email_notification', {})
+
+
+def message_conversation_key(value, account_name=None):
+    """同一联系人在不同 B 站账号下使用独立的 AI 上下文和事件标识。"""
+    return json.dumps([account_name, str(value)], ensure_ascii=False) if account_name else str(value)
+
+
+def knowledge_document_shared(path, account_name):
+    scopes = [(None, config)] + [(row.get('name'), row.get('message_config', {})) for row in config.get('accounts', [])]
+    for name, settings in scopes:
+        if name == account_name:
+            continue
+        knowledge = normalize_knowledge_config(settings.get('ai_knowledge_base') or {})
+        if any(os.path.abspath(str(doc.get('path') or '')) == path for base in knowledge['bases'] for doc in base['documents']):
+            return True
+    return False
+
+
+def replace_message_rules(new_rules, account_name=None):
+    global rules
+    if account_name is None:
+        rules = new_rules
+        save_rules()
+    else:
+        get_message_account(account_name)['message_rules'] = new_rules
+        save_config()
+    precompile_rules(account_name)
+
+
+@app.before_request
+def validate_message_account_scope():
+    service_endpoints = {
+        'handle_ai_config', 'test_ai_provider', 'list_ai_models', 'test_ai_latency', 'ai_generate_endpoint',
+        'handle_ai_knowledge', 'save_ai_knowledge_settings', 'upload_ai_knowledge_document',
+        'delete_ai_knowledge_document', 'delete_ai_knowledge_base',
+        'list_ai_handoffs', 'reply_ai_handoff', 'dismiss_ai_handoff',
+        'save_email_config', 'get_email_config', 'test_email', 'platform_email_config',
+    }
+    scoped_endpoints = {
+        'handle_config', 'handle_rules', 'handle_image_config', 'handle_follow_reply_config',
+        'handle_unfollow_reply_config', 'handle_new_message_config', 'handle_follow_check_interval_config',
+        'handle_timing_config', 'import_config', 'export_config', 'export_keywords', 'test_follow_detection',
+        'platform_import_api',
+    }
+    if request.endpoint not in scoped_endpoints | service_endpoints:
+        return
+    ensure_message_profiles()
+    account_name = request_message_account()
+    if request.endpoint in service_endpoints:
+        if account_name is None and request.endpoint in {'save_email_config', 'test_email', 'platform_email_config'}:
+            data = request.get_json(silent=True) or {}
+            platform = (request.view_args or {}).get('platform') or data.get('platform') or 'bili_message'
+            if platform == 'bili_message' and config.get('multi_account_mode') and request.method == 'POST':
+                return jsonify(success=False, error='请先选择需要配置的账号'), 400
+        return
+    if account_name is None and config.get('multi_account_mode') and request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        if request.endpoint == 'platform_import_api' and 'bili_message' not in (data.get('source'), data.get('target')):
+            return
+        if request.endpoint == 'handle_config' and set(data) <= {'sessdata', 'bili_jct'}:
+            return
+        return jsonify(success=False, error='请先选择需要配置的账号'), 400
+
+
+@app.errorhandler(BadRequest)
+@app.errorhandler(NotFound)
+def message_request_error(error):
+    if request.path.startswith('/api/'):
+        return jsonify(success=False, error=error.description), error.code
+    return error
+
+
 monitoring = False
 monitor_thread = None
 monitor_threads = {}  # 多账号监控线程字典 {account_name: thread}
@@ -137,7 +288,7 @@ program_start_time = int(time.time())
 error_tracker = {}  # 存储已发送邮件的错误 {error_hash: {'count': int, 'first_time': timestamp, 'last_time': timestamp, 'notified': bool}}
 error_tracker_lock = threading.Lock()  # 线程锁，确保错误追踪的线程安全
 user_reply_stats_lock = threading.Lock()  # 用户回复统计文件读写锁
-last_error_email_notify_time = 0  # 错误提醒邮件全局限流时间戳（1小时内仅发送一次）
+last_error_email_notify_times = {}  # 各账号的错误邮件限流时间戳
 
 # 配置文件路径 - 私信系统使用独立配置
 CONFIG_FILE = None  # 私信配置文件路径
@@ -205,6 +356,10 @@ def get_im_dev_id_for_account(account_name=None):
 
 def resolve_message_api_credentials():
     """解析私信 API 凭证，兼容单账号与多账号模式。返回 (sessdata, bili_jct, dev_id, account_name, error)"""
+    if has_request_context() and request.args.get('account') is not None:
+        account_name = request_message_account()
+        account = get_message_account(account_name)
+        return account.get('sessdata'), account.get('bili_jct'), get_im_dev_id_for_account(account_name), account_name, None
     if config.get('multi_account_mode', False):
         enabled_accounts = [
             acc for acc in config.get('accounts', [])
@@ -499,7 +654,7 @@ class BilibiliAPI:
         current_time = time.time()
         
         # 使用配置中的发送间隔（按账号实例隔离）
-        send_interval = config.get('send_delay_interval', 1.0)
+        send_interval = get_message_config(self.account_name or None).get('send_delay_interval', 1.0)
         if current_time - self.last_send_time < send_interval:
             wait_time = send_interval - (current_time - self.last_send_time)
             add_log(f"发送间隔控制，等待 {wait_time:.1f} 秒", 'info', account_name=self.account_name)
@@ -944,14 +1099,16 @@ class BilibiliAPI:
             add_log(f"获取最近关注者异常: {e}", 'error')
             return []
 
-def send_email_notification(subject, body, receiver_email=None, platform='bili_message', email_config_override=None):
+def send_email_notification(subject, body, receiver_email=None, platform='bili_message', email_config_override=None, account_name=None):
     """发送邮件通知"""
     try:
         import smtplib
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
         
-        email_config = email_config_override or config.get('email_notifications', {}).get(platform)
+        email_config = email_config_override
+        if email_config is None:
+            email_config = get_message_email_config(account_name) if platform == 'bili_message' else config.get('email_notifications', {}).get(platform)
         if email_config is None:
             email_config = config.get('email_notification', {})
         if not email_config.get('enabled', False):
@@ -1044,7 +1201,7 @@ def send_login_expired_notification(account_name='', receiver_email=None):
     </body>
     </html>
     """
-    return send_email_notification(subject, body, receiver_email)
+    return send_email_notification(subject, body, receiver_email, account_name=account_name or None)
 
 def generate_error_hash(error_type, error_message, context=''):
     """生成错误的唯一哈希值"""
@@ -1053,17 +1210,21 @@ def generate_error_hash(error_type, error_message, context=''):
 
 def track_and_notify_error(error_type, error_message, error_details='', context='', account_name='', receiver_email=None):
     """追踪错误并发送邮件通知（相同错误只发送一次）"""
-    global error_tracker, last_error_email_notify_time
+    global error_tracker
     
+    settings = get_message_email_config(account_name or None)
+    if not settings.get('enabled', False):
+        return False
+
     # 生成错误哈希
-    error_hash = generate_error_hash(error_type, error_message, context)
+    error_hash = generate_error_hash(error_type, error_message, message_conversation_key(context, account_name or None))
     
     current_time = int(time.time())
     notify_interval = 3600  # 1小时
     
-    # 全局邮件限流：1小时内仅发送一次错误提醒
+    # 每个账号独立限流：1小时内仅发送一次错误提醒
     with error_tracker_lock:
-        if current_time - last_error_email_notify_time < notify_interval:
+        if current_time - last_error_email_notify_times.get(account_name, 0) < notify_interval:
             logger.info(f"错误提醒邮件限流中（1小时内仅一次），跳过发送: {error_type} - {error_message}")
             return False
     
@@ -1094,17 +1255,9 @@ def track_and_notify_error(error_type, error_message, error_details='', context=
         # 确定接收邮箱
         if not receiver_email:
             # 尝试从配置中获取邮箱
-            email_config = config.get('email_notification', {})
+            email_config = settings
             receiver_email = email_config.get('receiver_email', '')
             
-            # 如果是多账号模式，尝试获取账号的邮箱
-            if not receiver_email and account_name:
-                accounts = config.get('accounts', [])
-                for acc in accounts:
-                    if acc.get('name') == account_name:
-                        receiver_email = acc.get('email', '')
-                        break
-        
         if not receiver_email:
             logger.warning("未配置接收邮箱，无法发送错误通知")
             return False
@@ -1166,12 +1319,12 @@ def track_and_notify_error(error_type, error_message, error_details='', context=
         """
         
         # 发送邮件
-        if send_email_notification(subject, body, receiver_email):
+        if send_email_notification(subject, body, receiver_email, account_name=account_name or None):
             # 标记为已通知
             with error_tracker_lock:
                 if error_hash in error_tracker:
                     error_tracker[error_hash]['notified'] = True
-                last_error_email_notify_time = int(time.time())
+                last_error_email_notify_times[account_name] = int(time.time())
             
             logger.info(f"错误通知邮件已发送至: {receiver_email}")
             add_log(f"错误通知邮件已发送: {error_type} - {error_message}", 'info')
@@ -1249,8 +1402,9 @@ def increment_user_reply_count(user_id, stats=None, account_uid=None):
         return stats[user_id_str]['count']
 
 
-def get_user_reply_limit():
+def get_user_reply_limit(account_name=None):
     """返回单用户回复上限；None 表示不限制。"""
+    config = get_message_config(account_name)
     if config.get('unlimited_replies_per_user') is True:
         return None
     try:
@@ -1259,10 +1413,10 @@ def get_user_reply_limit():
         return 3
 
 
-def format_user_reply_limit_text(limit=None):
+def format_user_reply_limit_text(limit=None, account_name=None):
     """格式化回复次数上限显示文本。"""
     if limit is None:
-        limit = get_user_reply_limit()
+        limit = get_user_reply_limit(account_name)
     return '不限' if limit is None else str(limit)
 
 def add_log(message, log_type='info', system='message', error_details='', context='', account_name=''):
@@ -1321,9 +1475,11 @@ def load_config():
     
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                loaded_config = json.load(f)
-                config.update(loaded_config)
+            with message_profiles_lock:
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    loaded_config = json.load(f)
+                    config.update(loaded_config)
+                account_rule_matcher_caches.clear()
             logger.info(f"成功加载私信配置文件: {CONFIG_FILE}")
         except Exception as e:
             logger.error(f"加载私信配置失败: {e}")
@@ -1335,8 +1491,9 @@ def save_config():
     """保存私信系统配置"""
     try:
         init_config_paths()  # 确保路径已初始化
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        with message_profiles_lock:
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
         logger.info(f"成功保存私信配置文件: {CONFIG_FILE}")
     except Exception as e:
         logger.error(f"保存私信配置失败: {e}")
@@ -1369,6 +1526,7 @@ def load_rules():
         rules = []
         add_log(f"私信关键词文件不存在: {RULES_FILE}，创建新文件", 'info', system='message')
         logger.warning(f"私信关键词文件不存在: {RULES_FILE}")
+    ensure_message_profiles()
 
 def save_rules():
     """保存私信系统规则"""
@@ -1424,12 +1582,12 @@ def load_rules_from_file(file_path):
     except Exception as e:
         return None, f"读取文件失败: {str(e)}"
 
-def precompile_rules():
+def precompile_rules(account_name=None):
     """预编译规则，提高匹配速度"""
     global rule_matcher_cache
-    rule_matcher_cache = {}
+    compiled = {}
     
-    for i, rule in enumerate(rules):
+    for i, rule in enumerate(get_message_rules(account_name)):
         if rule.get('enabled', True):
             # keywords.json 使用 'keyword' 字段，用逗号分隔多个关键词
             keyword_str = rule.get('keyword', '')
@@ -1438,17 +1596,26 @@ def precompile_rules():
             if not keywords:
                 keywords = [kw.lower().strip() for kw in keyword_str.split(',') if kw.strip()]
             
-            rule_matcher_cache[i] = {
+            compiled[i] = {
                 'keywords': keywords,
                 'reply': rule.get('reply', ''),
                 'reply_type': rule.get('reply_type', 'text'),  # 'text' 或 'image'
                 'reply_image': rule.get('reply_image', ''),  # 图片路径
                 'title': rule.get('name', f'规则{i+1}')  # keywords.json 使用 'name' 字段
             }
+    if account_name is None:
+        rule_matcher_cache = compiled
+    else:
+        account_rule_matcher_caches[account_name] = compiled
+    return compiled
 
-def check_keywords_fast(message):
+
+def check_keywords_fast(message, account_name=None):
     """极速关键词匹配（优化版）"""
-    if not message or not rule_matcher_cache:
+    matcher = rule_matcher_cache if account_name is None else account_rule_matcher_caches.get(account_name)
+    if matcher is None:
+        matcher = precompile_rules(account_name)
+    if not message or not matcher:
         return None
     
     message_lower = message.lower().strip()
@@ -1456,7 +1623,7 @@ def check_keywords_fast(message):
         return None
     
     # 使用更高效的匹配算法
-    for rule_id, rule_data in rule_matcher_cache.items():
+    for rule_id, rule_data in matcher.items():
         keywords = rule_data['keywords']
         if not keywords:
             continue
@@ -1551,6 +1718,7 @@ def cleanup_cache():
 
 def check_followers_changes(api, cache=None):
     """检测关注者变化（新关注和取消关注）- 修复版"""
+    config = get_message_config(getattr(api, 'account_name', '') or None)
     global followers_cache, welcome_sent_cache, last_follow_check, unfollowers_cache, follow_history
     
     try:
@@ -1641,12 +1809,12 @@ def check_followers_changes(api, cache=None):
                             if (is_new_follower or is_re_follow) and follower_mid not in local_welcome_sent_cache:
                                 should_send_welcome = True
                                 log_type = "新关注者" if is_new_follower else "重复关注者"
-                                add_log(f"⚡ 检测到{log_type}: {follower.get('uname', 'Unknown')} (UID: {follower_mid})", 'success')
+                                add_log(f"⚡ 检测到{log_type}: {follower.get('uname', 'Unknown')} (UID: {follower_mid})", 'success', account_name=getattr(api, 'account_name', ''))
                     else:
                         # 如果没有有效的mtime字段，使用缓存比较方式
                         if is_new_follower and follower_mid not in local_welcome_sent_cache:
                             should_send_welcome = True
-                            add_log(f"⚡ 检测到新关注者(无mtime): {follower.get('uname', 'Unknown')} (UID: {follower_mid})", 'success')
+                            add_log(f"⚡ 检测到新关注者(无mtime): {follower.get('uname', 'Unknown')} (UID: {follower_mid})", 'success', account_name=getattr(api, 'account_name', ''))
                     
                     if should_send_welcome:
                         new_followers.append(follower)
@@ -1667,7 +1835,7 @@ def check_followers_changes(api, cache=None):
                         # 因为我们已经从最新的关注者列表中获取了数据
                         unfollowers.append({'mid': unfollower_mid})
                         local_unfollowers_cache.add(unfollower_mid)
-                        add_log(f"💔 检测到取消关注: UID {unfollower_mid}", 'warning')
+                        add_log(f"💔 检测到取消关注: UID {unfollower_mid}", 'warning', account_name=getattr(api, 'account_name', ''))
                         # 从欢迎消息缓存中移除
                         if unfollower_mid in local_welcome_sent_cache:
                             local_welcome_sent_cache.remove(unfollower_mid)
@@ -1684,12 +1852,12 @@ def check_followers_changes(api, cache=None):
                             new_followers.append(follower)
                 local_followers_cache = current_followers.copy()
                 local_follow_inited = True
-                add_log(f"初始化粉丝缓存: {len(local_followers_cache)}个关注者（扫描{follow_scan_pages}页）", 'info')
+                add_log(f"初始化粉丝缓存: {len(local_followers_cache)}个关注者（扫描{follow_scan_pages}页）", 'info', account_name=getattr(api, 'account_name', ''))
             else:
                 # 增量更新：添加新关注者，保留已存在的
                 # 不删除任何关注者，只通过检测取消关注来更新
                 local_followers_cache = local_followers_cache.union(current_followers)
-                add_log(f"更新粉丝缓存: 当前缓存{len(local_followers_cache)}个关注者，本次获取{len(current_followers)}个", 'debug')
+                add_log(f"更新粉丝缓存: 当前缓存{len(local_followers_cache)}个关注者，本次获取{len(current_followers)}个", 'debug', account_name=getattr(api, 'account_name', ''))
             
             
             # 优化缓存管理，但保留更大的范围以便检测取消关注
@@ -1704,7 +1872,7 @@ def check_followers_changes(api, cache=None):
                     old_followers = local_followers_cache - current_followers
                     priority_followers.update(set(list(old_followers)[:remaining_slots]))
                 local_followers_cache = priority_followers
-                add_log(f"粉丝缓存已优化: 保留{len(local_followers_cache)}个关注者", 'info')
+                add_log(f"粉丝缓存已优化: 保留{len(local_followers_cache)}个关注者", 'info', account_name=getattr(api, 'account_name', ''))
             
             if len(local_unfollowers_cache) > 500:
                 # 减少取消关注缓存大小
@@ -1734,7 +1902,7 @@ def check_followers_changes(api, cache=None):
             return {'new_followers': new_followers, 'unfollowers': unfollowers}
         
     except Exception as e:
-        add_log(f"检测关注者变化异常: {e}", 'error')
+        add_log(f"检测关注者变化异常: {e}", 'error', account_name=getattr(api, 'account_name', ''))
         return {'new_followers': [], 'unfollowers': []}
 
 # 保持向后兼容性
@@ -1745,6 +1913,7 @@ def check_new_followers(api):
 
 def send_follow_welcome_message(api, follower):
     """向新关注者发送欢迎消息"""
+    config = get_message_config(getattr(api, 'account_name', '') or None)
     try:
         follower_mid = follower.get('mid')
         follower_name = follower.get('uname', 'Unknown')
@@ -1761,38 +1930,39 @@ def send_follow_welcome_message(api, follower):
         
         if reply_type == 'image' and reply_image and os.path.exists(reply_image):
             # 发送图片欢迎消息
-            add_log(f"向新关注者 {follower_name} 发送图片欢迎消息", 'info')
+            add_log(f"向新关注者 {follower_name} 发送图片欢迎消息", 'info', account_name=getattr(api, 'account_name', ''))
             result = api.send_image_msg(follower_mid, reply_image)
             if result and result.get('code') == 0:
                 success = True
-                add_log(f"✅ 成功向新关注者 {follower_name} 发送图片欢迎消息", 'success')
+                add_log(f"✅ 成功向新关注者 {follower_name} 发送图片欢迎消息", 'success', account_name=getattr(api, 'account_name', ''))
             else:
                 # 图片发送失败，尝试发送文字消息
-                add_log(f"图片发送失败，向 {follower_name} 发送文字欢迎消息", 'warning')
+                add_log(f"图片发送失败，向 {follower_name} 发送文字欢迎消息", 'warning', account_name=getattr(api, 'account_name', ''))
                 result = api.send_msg(follower_mid, content=reply_message)
                 if result and result.get('code') == 0:
                     success = True
-                    add_log(f"✅ 成功向新关注者 {follower_name} 发送文字欢迎消息", 'success')
+                    add_log(f"✅ 成功向新关注者 {follower_name} 发送文字欢迎消息", 'success', account_name=getattr(api, 'account_name', ''))
         else:
             # 发送文字欢迎消息
-            add_log(f"向新关注者 {follower_name} 发送文字欢迎消息: {reply_message}", 'info')
+            add_log(f"向新关注者 {follower_name} 发送文字欢迎消息: {reply_message}", 'info', account_name=getattr(api, 'account_name', ''))
             result = api.send_msg(follower_mid, content=reply_message)
             if result and result.get('code') == 0:
                 success = True
-                add_log(f"✅ 成功向新关注者 {follower_name} 发送欢迎消息", 'success')
+                add_log(f"✅ 成功向新关注者 {follower_name} 发送欢迎消息", 'success', account_name=getattr(api, 'account_name', ''))
         
         if not success:
             error_msg = result.get('message', '未知错误') if result else '网络错误'
-            add_log(f"❌ 向新关注者 {follower_name} 发送欢迎消息失败: {error_msg}", 'warning')
+            add_log(f"❌ 向新关注者 {follower_name} 发送欢迎消息失败: {error_msg}", 'warning', account_name=getattr(api, 'account_name', ''))
         
         return success
         
     except Exception as e:
-        add_log(f"发送关注欢迎消息异常: {e}", 'error')
+        add_log(f"发送关注欢迎消息异常: {e}", 'error', account_name=getattr(api, 'account_name', ''))
         return False
 
 def send_unfollow_goodbye_message(api, unfollower):
     """向取消关注者发送告别消息"""
+    config = get_message_config(getattr(api, 'account_name', '') or None)
     try:
         unfollower_mid = unfollower.get('mid')
         
@@ -1808,38 +1978,39 @@ def send_unfollow_goodbye_message(api, unfollower):
         
         if reply_type == 'image' and reply_image and os.path.exists(reply_image):
             # 发送图片告别消息
-            add_log(f"向取消关注者 UID:{unfollower_mid} 发送图片告别消息", 'info')
+            add_log(f"向取消关注者 UID:{unfollower_mid} 发送图片告别消息", 'info', account_name=getattr(api, 'account_name', ''))
             result = api.send_image_msg(unfollower_mid, reply_image)
             if result and result.get('code') == 0:
                 success = True
-                add_log(f"✅ 成功向取消关注者 UID:{unfollower_mid} 发送图片告别消息", 'success')
+                add_log(f"✅ 成功向取消关注者 UID:{unfollower_mid} 发送图片告别消息", 'success', account_name=getattr(api, 'account_name', ''))
             else:
                 # 图片发送失败，尝试发送文字消息
-                add_log(f"图片发送失败，向 UID:{unfollower_mid} 发送文字告别消息", 'warning')
+                add_log(f"图片发送失败，向 UID:{unfollower_mid} 发送文字告别消息", 'warning', account_name=getattr(api, 'account_name', ''))
                 result = api.send_msg(unfollower_mid, content=reply_message)
                 if result and result.get('code') == 0:
                     success = True
-                    add_log(f"✅ 成功向取消关注者 UID:{unfollower_mid} 发送文字告别消息", 'success')
+                    add_log(f"✅ 成功向取消关注者 UID:{unfollower_mid} 发送文字告别消息", 'success', account_name=getattr(api, 'account_name', ''))
         else:
             # 发送文字告别消息
-            add_log(f"向取消关注者 UID:{unfollower_mid} 发送文字告别消息: {reply_message}", 'info')
+            add_log(f"向取消关注者 UID:{unfollower_mid} 发送文字告别消息: {reply_message}", 'info', account_name=getattr(api, 'account_name', ''))
             result = api.send_msg(unfollower_mid, content=reply_message)
             if result and result.get('code') == 0:
                 success = True
-                add_log(f"✅ 成功向取消关注者 UID:{unfollower_mid} 发送告别消息", 'success')
+                add_log(f"✅ 成功向取消关注者 UID:{unfollower_mid} 发送告别消息", 'success', account_name=getattr(api, 'account_name', ''))
         
         if not success:
             error_msg = result.get('message', '未知错误') if result else '网络错误'
-            add_log(f"❌ 向取消关注者 UID:{unfollower_mid} 发送告别消息失败: {error_msg}", 'warning')
+            add_log(f"❌ 向取消关注者 UID:{unfollower_mid} 发送告别消息失败: {error_msg}", 'warning', account_name=getattr(api, 'account_name', ''))
         
         return success
         
     except Exception as e:
-        add_log(f"发送取消关注告别消息异常: {e}", 'error')
+        add_log(f"发送取消关注告别消息异常: {e}", 'error', account_name=getattr(api, 'account_name', ''))
         return False
 
 def process_single_session(api, my_uid, session):
     """处理单个会话的消息（只检测最后一条消息）"""
+    config = get_message_config(getattr(api, 'account_name', '') or None)
     global message_cache, last_message_times, program_start_time
     
     try:
@@ -1852,7 +2023,7 @@ def process_single_session(api, my_uid, session):
             return []
         
         # 从JSON文件读取用户回复统计
-        max_replies = get_user_reply_limit()
+        max_replies = get_user_reply_limit(getattr(api, 'account_name', '') or None)
         current_replies = get_user_reply_count(talker_id, account_uid=my_uid)
         
         # 只在首次达到限制时记录日志
@@ -1861,7 +2032,7 @@ def process_single_session(api, my_uid, session):
             with user_reply_stats_lock:
                 user_reply_stats = load_user_reply_stats()
                 if user_reply_stats.get(user_id_str, {}).get('logged', False) == False:
-                    add_log(f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，后续消息将不再回复", 'info', system='message')
+                    add_log(f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，后续消息将不再回复", 'info', system='message', account_name=getattr(api, 'account_name', ''))
                     if user_id_str not in user_reply_stats:
                         user_reply_stats[user_id_str] = {'count': current_replies, 'last_reply_time': 0}
                     user_reply_stats[user_id_str]['logged'] = True
@@ -1880,7 +2051,7 @@ def process_single_session(api, my_uid, session):
         if config.get('only_reply_new_messages', True):
             # 如果消息时间早于程序启动时间，跳过处理
             if msg_timestamp < program_start_time:
-                add_log(f"用户{talker_id} 消息时间早于程序启动时间，跳过回复（仅回复新消息模式）", 'debug', system='message')
+                add_log(f"用户{talker_id} 消息时间早于程序启动时间，跳过回复（仅回复新消息模式）", 'debug', system='message', account_name=getattr(api, 'account_name', ''))
                 # 仍然更新最后处理时间，避免重复检查
                 last_message_times[talker_id] = msg_timestamp
                 return []
@@ -1895,7 +2066,7 @@ def process_single_session(api, my_uid, session):
         
         # 如果最后一条消息是我发的，不回复
         if sender_uid == my_uid:
-            add_log(f"用户{talker_id} 最后一条消息是我发的，跳过回复", 'debug', system='message')
+            add_log(f"用户{talker_id} 最后一条消息是我发的，跳过回复", 'debug', system='message', account_name=getattr(api, 'account_name', ''))
             return []
         
         # 获取消息内容
@@ -1924,12 +2095,12 @@ def process_single_session(api, my_uid, session):
         # AI 模式与传统关键词/默认回复互斥，启用后直接生成回复。
         if platform_enabled('bili_message', config.get('ai_provider') or {}):
             history = build_conversation_context(
-                'bili_message', str(talker_id), config.get('ai_provider') or {},
+                'bili_message', message_conversation_key(talker_id, getattr(api, 'account_name', '') or None), config.get('ai_provider') or {},
             )
             ai_context = '请用简洁、友好的中文回复这条用户私信。'
             if history:
                 ai_context += '\n\n' + history
-            decision = generate_ai_decision(message_text, ai_context, 'bili_message')
+            decision = generate_ai_decision(message_text, ai_context, 'bili_message', account_name=getattr(api, 'account_name', '') or None)
             if decision.get('needs_human'):
                 queue_ai_handoff(
                     'bili_message', msg_id, f'用户 {talker_id}', str(talker_id), message_text,
@@ -1940,15 +2111,15 @@ def process_single_session(api, my_uid, session):
             ai_reply = decision.get('reply')
             if ai_reply:
                 return [{'talker_id': talker_id, 'rule': {'title': 'AI 自动回复', 'reply': ai_reply, 'reply_type': 'text'}, 'message': message_text, 'timestamp': msg_timestamp}]
-            add_log(f"AI 回复生成失败，已跳过用户{talker_id}的消息", 'error', system='message')
+            add_log(f"AI 回复生成失败，已跳过用户{talker_id}的消息", 'error', system='message', account_name=getattr(api, 'account_name', ''))
             record_dashboard_event('bili_message', 'reply_failure', msg_id, contact_id=str(talker_id), reply_mode='ai')
             return []
 
         # 极速关键词匹配
-        matched_rule = check_keywords_fast(message_text)
+        matched_rule = check_keywords_fast(message_text, getattr(api, 'account_name', '') or None)
         
         if matched_rule:
-            add_log(f"✅ 检测到关键词匹配: 用户{talker_id} 消息'{message_text}' 匹配规则'{matched_rule['title']}'", 'info', system='message')
+            add_log(f"✅ 检测到关键词匹配: 用户{talker_id} 消息'{message_text}' 匹配规则'{matched_rule['title']}'", 'info', system='message', account_name=getattr(api, 'account_name', ''))
             return [{
                 'talker_id': talker_id,
                 'rule': matched_rule,
@@ -1985,7 +2156,7 @@ def process_single_session(api, my_uid, session):
                         user_type = '默认'
                     
                     if reply_type == 'text' and reply_message:
-                        add_log(f"⚠️ 用户{talker_id}({user_type}) 消息'{message_text}' 未匹配关键词，使用{user_type}用户文字回复", 'info', system='message')
+                        add_log(f"⚠️ 用户{talker_id}({user_type}) 消息'{message_text}' 未匹配关键词，使用{user_type}用户文字回复", 'info', system='message', account_name=getattr(api, 'account_name', ''))
                         return [{
                             'talker_id': talker_id,
                             'rule': {
@@ -1997,7 +2168,7 @@ def process_single_session(api, my_uid, session):
                             'timestamp': msg_timestamp
                         }]
                     elif reply_type == 'image' and reply_image:
-                        add_log(f"⚠️ 用户{talker_id}({user_type}) 消息'{message_text}' 未匹配关键词，使用{user_type}用户图片回复", 'info', system='message')
+                        add_log(f"⚠️ 用户{talker_id}({user_type}) 消息'{message_text}' 未匹配关键词，使用{user_type}用户图片回复", 'info', system='message', account_name=getattr(api, 'account_name', ''))
                         return [{
                             'talker_id': talker_id,
                             'rule': {
@@ -2013,7 +2184,7 @@ def process_single_session(api, my_uid, session):
                     # 不区分用户类型，使用统一的默认回复
                     default_type = config.get('default_reply_type', 'text')
                     if default_type == 'text' and config.get('default_reply_message'):
-                        add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认文字回复", 'info', system='message')
+                        add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认文字回复", 'info', system='message', account_name=getattr(api, 'account_name', ''))
                         return [{
                             'talker_id': talker_id,
                             'rule': {
@@ -2025,7 +2196,7 @@ def process_single_session(api, my_uid, session):
                             'timestamp': msg_timestamp
                         }]
                     elif default_type == 'image' and config.get('default_reply_image'):
-                        add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认图片回复", 'info', system='message')
+                        add_log(f"⚠️ 用户{talker_id} 消息'{message_text}' 未匹配关键词，使用默认图片回复", 'info', system='message', account_name=getattr(api, 'account_name', ''))
                         return [{
                             'talker_id': talker_id,
                             'rule': {
@@ -2038,7 +2209,7 @@ def process_single_session(api, my_uid, session):
                             'timestamp': msg_timestamp
                         }]
             else:
-                add_log(f"❌ 用户{talker_id} 消息'{message_text}' 未匹配任何关键词", 'debug', system='message')
+                add_log(f"❌ 用户{talker_id} 消息'{message_text}' 未匹配任何关键词", 'debug', system='message', account_name=getattr(api, 'account_name', ''))
                 return []
         
     except Exception as e:
@@ -2068,6 +2239,7 @@ def monitor_single_account(account_name, sessdata, bili_jct, account_uid, accoun
                        account_name=account_name)
                 
                 # 发送登录失效邮件通知（只发送一次）
+                account_email = get_message_email_config(account_name).get('receiver_email', '')
                 if not login_failed_notified and account_email:
                     if send_login_expired_notification(account_name, account_email):
                         add_log(f"[{account_name}] 已发送登录失效通知至 {account_email}", 'info', system='message', account_name=account_name)
@@ -2138,7 +2310,7 @@ def _record_bili_reply_metric(result, event_type):
     )
 
 
-def _record_bili_ai_context(result, assistant_message):
+def _record_bili_ai_context(result, assistant_message, account_name=None):
     """Commit context only after an AI private-message reply is confirmed sent."""
     title = str((result.get('rule') or {}).get('title') or '')
     if 'AI' not in title:
@@ -2147,14 +2319,15 @@ def _record_bili_ai_context(result, assistant_message):
         result.get('talker_id'), result.get('timestamp', 0), result.get('message', '')
     )
     record_conversation_exchange(
-        'bili_message', str(result.get('talker_id') or ''),
-        str(result.get('message') or ''), str(assistant_message or ''), event_key,
-        config.get('ai_provider') or {},
+        'bili_message', message_conversation_key(result.get('talker_id') or '', account_name),
+        str(result.get('message') or ''), str(assistant_message or ''), message_conversation_key(event_key, account_name),
+        get_message_config(account_name).get('ai_provider') or {},
     )
 
 
 def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
     """发送私信回复并更新统计。返回 (success, stop_account)"""
+    config = get_message_config(getattr(api, 'account_name', '') or None)
     reply_result = None
     reply_content = result['rule']['reply']
     reply_type = result['rule'].get('reply_type', 'text')
@@ -2191,7 +2364,7 @@ def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
 
         if verification_success:
             current_count = increment_user_reply_count(result['talker_id'], account_uid=account_uid)
-            limit_text = format_user_reply_limit_text()
+            limit_text = format_user_reply_limit_text(account_name=getattr(api, 'account_name', '') or None)
             add_log(
                 f"[{account_prefix}] ✅ 已成功回复用户 {result['talker_id']} "
                 f"(规则: {result['rule'].get('title', '未知')}) 内容: {reply_content[:20]}... "
@@ -2199,7 +2372,7 @@ def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
                 'success', system='message', account_name=account_prefix
             )
             _record_bili_reply_metric(result, 'reply_success')
-            _record_bili_ai_context(result, result['rule'].get('reply', ''))
+            _record_bili_ai_context(result, result['rule'].get('reply', ''), getattr(api, 'account_name', '') or None)
             return True, False
 
         add_log(f"[{account_prefix}] ⚠️ 用户 {result['talker_id']} 发送验证失败，消息可能未送达", 'warning',
@@ -2232,6 +2405,7 @@ def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
 
 def _process_follower_changes(api, cache, account_prefix):
     """检测并处理关注/取关变化，返回本轮回复数"""
+    config = get_message_config(getattr(api, 'account_name', '') or None)
     reply_count = 0
     if not config.get('follow_reply_enabled', False) and not config.get('unfollow_reply_enabled', False):
         return reply_count
@@ -2267,6 +2441,7 @@ def _process_follower_changes(api, cache, account_prefix):
 
 def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
     """监控循环核心逻辑（可用于单账号或多账号）"""
+    config = get_message_config(getattr(api, 'account_name', '') or None)
     message_cache = cache['message_cache']
     last_message_times = cache['last_message_times']
 
@@ -2280,6 +2455,7 @@ def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
 
     while monitoring:
         try:
+            config = get_message_config(getattr(api, 'account_name', '') or None)
             loop_start = time.time()
             current_time = int(time.time())
 
@@ -2318,7 +2494,7 @@ def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
                     import gc
                     gc.collect()
                     cleanup_error_tracker()
-                    precompile_rules()
+                    precompile_rules(getattr(api, 'account_name', '') or None)
                     add_log(
                         f"[{account_prefix}] 缓存清理: {old_cache_size} -> {len(message_cache)}",
                         'info', system='message', account_name=account_prefix
@@ -2519,6 +2695,7 @@ def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
 
 def process_single_session_with_cache(api, my_uid, session, message_cache, last_message_times, account_uid=None):
     """处理单个会话（使用传入的缓存和统计）"""
+    config = get_message_config(getattr(api, 'account_name', '') or None)
     try:
         if not session or not isinstance(session, dict):
             return []
@@ -2528,7 +2705,7 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
             return []
         
         # 从JSON文件读取用户回复次数
-        max_replies = get_user_reply_limit()
+        max_replies = get_user_reply_limit(getattr(api, 'account_name', '') or None)
         current_replies = get_user_reply_count(talker_id, account_uid=account_uid)
         
         # 只在首次达到限制时记录日志，避免重复输出
@@ -2540,7 +2717,7 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
                     add_log(
                         f"用户{talker_id} 已达到最大回复次数限制 ({current_replies}/{max_replies})，后续消息将不再回复",
                         'info', system='message'
-                    )
+                    , account_name=getattr(api, 'account_name', ''))
                     if user_id_str not in user_reply_stats:
                         user_reply_stats[user_id_str] = {'count': current_replies, 'last_reply_time': 0}
                     user_reply_stats[user_id_str]['logged'] = True
@@ -2598,12 +2775,12 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
 
         if platform_enabled('bili_message', config.get('ai_provider') or {}):
             history = build_conversation_context(
-                'bili_message', str(talker_id), config.get('ai_provider') or {},
+                'bili_message', message_conversation_key(talker_id, getattr(api, 'account_name', '') or None), config.get('ai_provider') or {},
             )
             ai_context = '请用简洁、友好的中文回复这条用户私信。'
             if history:
                 ai_context += '\n\n' + history
-            decision = generate_ai_decision(message_text, ai_context, 'bili_message')
+            decision = generate_ai_decision(message_text, ai_context, 'bili_message', account_name=getattr(api, 'account_name', '') or None)
             if decision.get('needs_human'):
                 queue_ai_handoff(
                     'bili_message', msg_id, f'用户 {talker_id}', str(talker_id), message_text,
@@ -2626,7 +2803,7 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
             return []
         
         # 关键词匹配
-        matched_rule = check_keywords_fast(message_text)
+        matched_rule = check_keywords_fast(message_text, getattr(api, 'account_name', '') or None)
         
         if matched_rule:
             return [{
@@ -3416,10 +3593,14 @@ def static_files(filename):
 
 @app.route('/api/config', methods=['GET', 'POST'])
 def handle_config():
-    global config
     
+    config = get_message_config(request_message_account())
     if request.method == 'POST':
         data = request.get_json()
+        if not isinstance(data, dict):
+            return jsonify(success=False, error='配置必须为对象'), 400
+        if request_message_account() is not None and set(data) - MESSAGE_SETTING_KEYS:
+            return jsonify(success=False, error='账号个性化配置仅支持回复和监控设置'), 400
         traditional_keys = {
             'default_reply_enabled', 'default_reply_message', 'default_reply_type', 'default_reply_image',
             'separate_reply_by_follow', 'followed_reply_message', 'followed_reply_type', 'followed_reply_image',
@@ -3432,13 +3613,13 @@ def handle_config():
         add_log("私信系统配置已更新", 'success', system='message')
         return jsonify({'success': True})
     else:
-        return jsonify(config)
+        return jsonify(dict(config))
 
 # AI provider configuration is intentionally kept separate from platform
 # credentials so it can be shared by all supported channels.
 @app.route('/api/ai-config', methods=['GET', 'POST'])
 def handle_ai_config():
-    global config
+    config = get_message_config(request_message_account())
     current = config.get('ai_provider') or {
         'enabled': False,
         'format': 'openai',
@@ -3493,6 +3674,7 @@ def handle_ai_config():
 
 @app.route('/api/ai-test', methods=['POST'])
 def test_ai_provider():
+    config = get_message_config(request_message_account())
     data = request.get_json(silent=True) or config.get('ai_provider') or {}
     fmt = str(data.get('format', 'openai')).lower()
     base_url = str(data.get('base_url', '')).strip().rstrip('/')
@@ -3518,6 +3700,7 @@ def test_ai_provider():
 
 def _ai_provider_request_config(data):
     """合并页面输入和已保存凭据，避免要求用户重新显示 API Key。"""
+    config = get_message_config(request_message_account())
     saved = config.get('ai_provider') or {}
     return {
         'format': str(data.get('format', saved.get('format', 'openai'))).lower(),
@@ -3617,7 +3800,7 @@ def _safe_ai_knowledge_response(knowledge):
 
 @app.route('/api/ai-knowledge', methods=['GET', 'POST'])
 def handle_ai_knowledge():
-    global config
+    config = get_message_config(request_message_account())
     current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
     if request.method == 'GET':
         return jsonify(_safe_ai_knowledge_response(current))
@@ -3644,7 +3827,7 @@ def handle_ai_knowledge():
 
 @app.route('/api/ai-knowledge/settings', methods=['POST'])
 def save_ai_knowledge_settings():
-    global config
+    config = get_message_config(request_message_account())
     data = request.get_json(silent=True) or {}
     current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
     requested = data.get('platform_assignments') if isinstance(data.get('platform_assignments'), dict) else {}
@@ -3660,7 +3843,7 @@ def save_ai_knowledge_settings():
 
 @app.route('/api/ai-knowledge/upload', methods=['POST'])
 def upload_ai_knowledge_document():
-    global config
+    config = get_message_config(request_message_account())
     base_id = str(request.form.get('knowledge_base_id') or '').strip()
     current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
     knowledge_base = next((base for base in current['bases'] if base['id'] == base_id), None) if base_id else None
@@ -3713,7 +3896,7 @@ def upload_ai_knowledge_document():
 
 @app.route('/api/ai-knowledge/documents/<document_id>', methods=['DELETE'])
 def delete_ai_knowledge_document(document_id):
-    global config
+    config = get_message_config(request_message_account())
     current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
     owning_base = next((base for base in current['bases'] if any(str(doc.get('id')) == document_id for doc in base['documents'])), None)
     target = next((doc for doc in owning_base['documents'] if str(doc.get('id')) == document_id), None) if owning_base else None
@@ -3722,7 +3905,7 @@ def delete_ai_knowledge_document(document_id):
     knowledge_root = os.path.abspath(os.path.join(get_app_root(), 'ai_knowledge'))
     target_path = os.path.abspath(str(target.get('path') or ''))
     try:
-        if is_path_within(knowledge_root, target_path) and os.path.isfile(target_path):
+        if is_path_within(knowledge_root, target_path) and os.path.isfile(target_path) and not knowledge_document_shared(target_path, request_message_account()):
             os.remove(target_path)
     except (OSError, ValueError):
         pass
@@ -3733,7 +3916,7 @@ def delete_ai_knowledge_document(document_id):
 
 @app.route('/api/ai-knowledge/bases/<base_id>', methods=['DELETE'])
 def delete_ai_knowledge_base(base_id):
-    global config
+    config = get_message_config(request_message_account())
     current = normalize_knowledge_config(config.get('ai_knowledge_base') or {})
     target = next((base for base in current['bases'] if base['id'] == base_id), None)
     if not target:
@@ -3742,7 +3925,7 @@ def delete_ai_knowledge_base(base_id):
     for document in target['documents']:
         path = os.path.abspath(str(document.get('path') or ''))
         try:
-            if is_path_within(knowledge_root, path) and os.path.isfile(path):
+            if is_path_within(knowledge_root, path) and os.path.isfile(path) and not knowledge_document_shared(path, request_message_account()):
                 os.remove(path)
         except (OSError, ValueError):
             pass
@@ -3753,23 +3936,27 @@ def delete_ai_knowledge_base(base_id):
     save_config()
     return jsonify({'success': True})
 
-def generate_ai_reply(user_message, context='', platform=None):
+def generate_ai_reply(user_message, context='', platform=None, account_name=None):
     """Generate one reply using the configured provider; return None on failure."""
+    settings = get_message_config(account_name) if platform == 'bili_message' else config
     return generate_shared_ai_reply(
-        user_message, context, config.get('ai_provider') or {}, config.get('ai_knowledge_base') or {}, platform
+        user_message, context, settings.get('ai_provider') or {}, settings.get('ai_knowledge_base') or {}, platform
     )
 
 
-def generate_ai_decision(user_message, context='', platform=None):
+def generate_ai_decision(user_message, context='', platform=None, account_name=None):
+    settings = get_message_config(account_name) if platform == 'bili_message' else config
     return generate_shared_ai_decision(
-        user_message, context, config.get('ai_provider') or {},
-        config.get('ai_knowledge_base') or {}, platform,
+        user_message, context, settings.get('ai_provider') or {},
+        settings.get('ai_knowledge_base') or {}, platform,
     )
 
 
 def queue_ai_handoff(
     platform, external_key, sender_name, sender_id, message_text, reason, target,
 ):
+    if platform == 'bili_message' and target.get('account_name'):
+        external_key = message_conversation_key(external_key, target['account_name'])
     item_id = ai_handoff_store.add(
         platform, external_key, sender_name, sender_id, message_text, reason, target,
     )
@@ -3788,7 +3975,7 @@ def ai_generate_endpoint():
     message = str(data.get('message', '')).strip()
     if not message:
         return jsonify({'success': False, 'error': '消息内容不能为空'}), 400
-    reply = generate_ai_reply(message, data.get('context', ''))
+    reply = generate_ai_reply(message, data.get('context', ''), 'bili_message' if request_message_account() is not None else None, account_name=request_message_account())
     if not reply:
         return jsonify({'success': False, 'error': 'AI 提供商未启用或请求失败'}), 502
     return jsonify({'success': True, 'reply': reply})
@@ -3803,6 +3990,8 @@ def _send_ai_handoff_reply(item, text):
             (row for row in (config.get('accounts') or []) if str(row.get('name') or '') == account_name),
             None,
         ) if account_name else None
+        if account_name and account is None:
+            return False, '待回消息所属账号已删除'
         source = account or config
         sessdata = source.get('sessdata')
         bili_jct = source.get('bili_jct')
@@ -3851,12 +4040,14 @@ def _send_ai_handoff_reply(item, text):
 
 @app.route('/api/ai-handoffs')
 def list_ai_handoffs():
-    provider = config.get('ai_provider') or {}
+    account_name = request_message_account()
+    queue_scope = account_name if account_name is not None else ''
+    provider = get_message_config(account_name).get('ai_provider') or {}
     platform = str(request.args.get('platform') or '')
     return jsonify({
         'enabled': normalize_handoff_settings(provider.get('human_handoff'))['enabled'],
-        'pending_count': ai_handoff_store.pending_count(),
-        'items': ai_handoff_store.list(status='pending', platform=platform),
+        'pending_count': ai_handoff_store.pending_count(account_name=queue_scope),
+        'items': ai_handoff_store.list(status='pending', platform=platform, account_name=queue_scope),
     })
 
 
@@ -3871,6 +4062,9 @@ def reply_ai_handoff(item_id):
     item = ai_handoff_store.get(item_id)
     if not item:
         return jsonify({'success': False, 'error': '待回消息不存在'}), 404
+    account_name = request_message_account()
+    if account_name is not None and (item['platform'] != 'bili_message' or (item.get('_target') or {}).get('account_name') != account_name):
+        return jsonify(success=False, error='待回消息不属于所选账号'), 404
     if item.get('status') != 'pending' or not ai_handoff_store.claim(item_id):
         return jsonify({'success': False, 'error': '该消息已处理或正在发送'}), 409
     try:
@@ -3879,11 +4073,12 @@ def reply_ai_handoff(item_id):
             ai_handoff_store.release(item_id)
             return jsonify({'success': False, 'error': error or '发送失败'}), 502
         ai_handoff_store.resolve(item_id, 'replied', text)
+        owner = (item.get('_target') or {}).get('account_name') if item['platform'] == 'bili_message' else None
         record_conversation_exchange(
-            item['platform'], str(item.get('_sender_id') or ''),
+            item['platform'], message_conversation_key(item.get('_sender_id') or '', owner),
             str(item.get('message_text') or ''), text,
             f"human:{item.get('_external_key') or item_id}",
-            config.get('ai_provider') or {},
+            get_message_config(owner).get('ai_provider') or {},
         )
         record_dashboard_event(
             item['platform'], 'reply_success', f"human:{item.get('_external_key') or item_id}",
@@ -3897,6 +4092,10 @@ def reply_ai_handoff(item_id):
 
 @app.route('/api/ai-handoffs/<item_id>/dismiss', methods=['POST'])
 def dismiss_ai_handoff(item_id):
+    account_name = request_message_account()
+    item = ai_handoff_store.get(item_id)
+    if account_name is not None and (not item or item['platform'] != 'bili_message' or (item.get('_target') or {}).get('account_name') != account_name):
+        return jsonify(success=False, error='待回消息不属于所选账号'), 404
     if not ai_handoff_store.claim(item_id):
         return jsonify({'success': False, 'error': '该消息不存在或已处理'}), 409
     if not ai_handoff_store.resolve(item_id, 'dismissed'):
@@ -3906,19 +4105,20 @@ def dismiss_ai_handoff(item_id):
 
 @app.route('/api/rules', methods=['GET', 'POST'])
 def handle_rules():
-    global rules
+    account_name = request_message_account()
     
     if request.method == 'POST':
-        if platform_enabled('bili_message', config.get('ai_provider') or {}):
+        if platform_enabled('bili_message', get_message_config(account_name).get('ai_provider') or {}):
             return jsonify({'success': False, 'error': '已启用AI模式，无法修改关键词回复'}), 409
         data = request.get_json()
-        rules = data.get('rules', [])
-        save_rules()
-        precompile_rules()
+        new_rules = data.get('rules', [])
+        if not isinstance(new_rules, list) or any(not isinstance(rule, dict) for rule in new_rules):
+            return jsonify(success=False, error='规则必须为对象数组'), 400
+        replace_message_rules(new_rules, account_name)
         add_log("私信关键词规则已更新并预编译完成", 'success', system='message')
         return jsonify({'success': True})
     else:
-        return jsonify({'rules': rules})
+        return jsonify({'rules': get_message_rules(account_name)})
 
 @app.route('/api/start', methods=['POST'])
 def start_monitoring():
@@ -4119,8 +4319,8 @@ def handle_logs():
 
 @app.route('/api/image-config', methods=['GET', 'POST'])
 def handle_image_config():
-    global config
     
+    config = get_message_config(request_message_account())
     if request.method == 'POST':
         data = request.get_json()
         
@@ -4201,8 +4401,8 @@ def get_home_directory():
 @app.route('/api/follow-reply-config', methods=['GET', 'POST'])
 def handle_follow_reply_config():
     """处理关注后回复配置"""
-    global config
     
+    config = get_message_config(request_message_account())
     if request.method == 'POST':
         data = request.get_json()
         
@@ -4238,8 +4438,8 @@ def handle_follow_reply_config():
 @app.route('/api/unfollow-reply-config', methods=['GET', 'POST'])
 def handle_unfollow_reply_config():
     """处理取消关注回复配置"""
-    global config
     
+    config = get_message_config(request_message_account())
     if request.method == 'POST':
         data = request.get_json()
         
@@ -4316,8 +4516,8 @@ def test_follow_detection():
 @app.route('/api/new-message-config', methods=['GET', 'POST'])
 def handle_new_message_config():
     """处理仅回复新消息配置"""
-    global config
     
+    config = get_message_config(request_message_account())
     if request.method == 'POST':
         data = request.get_json()
         
@@ -4362,8 +4562,16 @@ def handle_new_message_config():
                     
                     # 如果减少了限制，清理现有计数
                     if new_max < old_max:
-                        # 重置所有用户的回复计数（清空JSON文件），让新配置立即生效
-                        save_user_reply_stats({})
+                        # 仅重置当前账号的用户回复计数。
+                        with user_reply_stats_lock:
+                            stats = load_user_reply_stats()
+                            account_name = request_message_account()
+                            if account_name is None:
+                                stats = {key: value for key, value in stats.items() if '_' in key}
+                            else:
+                                prefix = str(get_message_account(account_name).get('uid')) + '_'
+                                stats = {key: value for key, value in stats.items() if not key.startswith(prefix)}
+                            save_user_reply_stats(stats)
                         add_log("已清理用户回复计数，新配置立即生效", 'info')
             else:
                 return jsonify({'success': False, 'error': '单用户最大回复次数必须在1-100之间'})
@@ -4382,8 +4590,8 @@ def handle_new_message_config():
 @app.route('/api/follow-check-interval-config', methods=['GET', 'POST'])
 def handle_follow_check_interval_config():
     """处理关注者检查间隔配置"""
-    global config
     
+    config = get_message_config(request_message_account())
     if request.method == 'POST':
         data = request.get_json()
         
@@ -4456,8 +4664,8 @@ def handle_follow_check_interval_config():
 @app.route('/api/timing-config', methods=['GET', 'POST'])
 def handle_timing_config():
     """处理时间间隔配置"""
-    global config
     
+    config = get_message_config(request_message_account())
     if request.method == 'POST':
         data = request.get_json()
         
@@ -4591,6 +4799,7 @@ def handle_accounts():
                 }
                 accounts.append(new_account)
                 config['accounts'] = accounts
+                ensure_message_profiles()
                 save_config()
                 
                 add_log(f"✅ 成功添加账号: {name} (UID: {uid})", 'success')
@@ -4651,6 +4860,7 @@ def handle_accounts():
             return jsonify({'success': False, 'error': f'账号 "{name}" 不存在'})
         
         config['accounts'] = accounts
+        account_rule_matcher_caches.pop(name, None)
         save_config()
         
         add_log(f"已删除账号: {name}", 'warning')
@@ -4720,7 +4930,9 @@ def preview_image():
 @app.route('/api/import-config', methods=['POST'])
 def import_config():
     """导入完整配置包"""
-    global rules
+    account_name = request_message_account()
+    config = get_message_config(account_name)
+    rules = deepcopy(get_message_rules(account_name))
     try:
         init_config_paths()
         
@@ -4770,10 +4982,9 @@ def import_config():
             return jsonify({'success': False, 'error': '不支持的文件格式，请使用包含config和rules的完整配置文件'})
         
         # 验证和更新配置
-        global config, rules
         
         # 备份当前配置
-        backup_config = config.copy()
+        backup_config = deepcopy(config)
         backup_rules = rules.copy()
         
         try:
@@ -4783,12 +4994,12 @@ def import_config():
                 if import_mode == 'replace':
                     # 只更新存在的配置项，保持默认值
                     for key, value in imported_config.items():
-                        if key in config:
+                        if key in config and (account_name is None or key in MESSAGE_PROFILE_KEYS):
                             config[key] = value
                             config_updated = True
                 else:  # append模式对配置也是替换
                     for key, value in imported_config.items():
-                        if key in config:
+                        if key in config and (account_name is None or key in MESSAGE_PROFILE_KEYS):
                             config[key] = value
                             config_updated = True
             
@@ -4833,8 +5044,7 @@ def import_config():
             # 保存配置和规则
             if config_updated:
                 save_config()
-            save_rules()
-            precompile_rules()
+            replace_message_rules(rules, account_name)
             
             # 记录日志
             success_msg = f"成功导入配置包: {rules_message}"
@@ -4856,8 +5066,12 @@ def import_config():
             
         except Exception as e:
             # 恢复备份
-            config = backup_config
-            rules = backup_rules
+            if account_name is None:
+                config.clear()
+                config.update(backup_config)
+            else:
+                get_message_account(account_name)['message_config'] = deepcopy(backup_config.maps[0])
+            replace_message_rules(backup_rules, account_name)
             raise e
         
 
@@ -4964,6 +5178,9 @@ def validate_config_file():
 @app.route('/api/export-config', methods=['GET'])
 def export_config():
     """导出完整配置包（包含config.json和keywords.json）"""
+    account_name = request_message_account()
+    config = get_message_config(account_name)
+    rules = get_message_rules(account_name)
     try:
         init_config_paths()
         
@@ -4981,7 +5198,8 @@ def export_config():
             'app_version': APP_VERSION,
             'export_time': datetime.now().isoformat(),
             'app_name': 'BiliGo',
-            'config': config.copy(),
+            'config': ({key: config[key] for key in MESSAGE_PROFILE_KEYS if key in config}
+                       if account_name is not None else dict(config)),
             'rules': rules.copy()
         }
         
@@ -5012,6 +5230,9 @@ def export_config():
 @app.route('/api/export-keywords', methods=['GET'])
 def export_keywords():
     """导出完整配置包（包含config和keywords，统一格式）"""
+    account_name = request_message_account()
+    config = get_message_config(account_name)
+    rules = get_message_rules(account_name)
     try:
         init_config_paths()
         
@@ -5029,7 +5250,8 @@ def export_keywords():
             'app_version': APP_VERSION,
             'export_time': datetime.now().isoformat(),
             'app_name': 'BiliGo',
-            'config': config.copy(),
+            'config': ({key: config[key] for key in MESSAGE_PROFILE_KEYS if key in config}
+                       if account_name is not None else dict(config)),
             'rules': rules.copy()
         }
         
@@ -5718,7 +5940,7 @@ def _platform_import_data(platform):
     if platform == 'bili_message':
         load_config()
         load_rules()
-        source_config, source_rules = config, rules
+        source_config, source_rules = get_message_config(request_message_account()), get_message_rules(request_message_account())
         portable = {
             'check_interval': source_config.get('message_check_interval'),
             'send_delay': source_config.get('send_delay_interval'),
@@ -5788,14 +6010,17 @@ def _platform_import_data(platform):
 
 def _apply_platform_import(platform, portable, imported_rules, mode):
     if platform == 'bili_message':
-        target_config, target_rules = config, rules
+        account_name = request_message_account()
+        target_config, target_rules = get_message_config(account_name), get_message_rules(account_name)
         key_map = {
             'check_interval': 'message_check_interval', 'send_delay': 'send_delay_interval',
             'only_new': 'only_reply_new_messages', 'max_replies': 'max_replies_per_user',
             'unlimited_replies': 'unlimited_replies_per_user',
             'default_enabled': 'default_reply_enabled', 'default_message': 'default_reply_message',
         }
-        save_target_config, save_target_rules, compile_target = save_config, save_rules, precompile_rules
+        save_target_config = save_config
+        save_target_rules = lambda: replace_message_rules(target_rules, account_name)
+        compile_target = lambda: precompile_rules(account_name)
     elif platform == 'bili_comment':
         target_config, target_rules = comment_config, comment_rules
         key_map = {
@@ -5856,7 +6081,7 @@ def platform_import_api():
         return jsonify({'success': False, 'error': '源平台和目标平台不能相同'}), 400
     if mode not in ('replace', 'append'):
         return jsonify({'success': False, 'error': '导入模式无效'}), 400
-    if platform_enabled(target, config.get('ai_provider') or {}):
+    if platform_enabled(target, (get_message_config(request_message_account()) if target == 'bili_message' else config).get('ai_provider') or {}):
         return jsonify({'success': False, 'error': '目标平台已启用AI模式，请先关闭该平台AI回复后再导入传统规则'}), 409
     try:
         portable, imported_rules = _platform_import_data(source)
@@ -6126,7 +6351,7 @@ def validate_comment_keywords_file():
 def save_email_config():
     """保存邮件配置"""
     try:
-        global config
+        account_name = request_message_account()
         data = request.get_json()
         
         platform = str(data.get('platform') or 'bili_message')
@@ -6140,9 +6365,14 @@ def save_email_config():
             'sender_password': data.get('sender_password', ''),
             'receiver_email': data.get('receiver_email', '')
         }
-        config.setdefault('email_notifications', {})[platform] = email_config
-        if platform == 'bili_message':
-            config['email_notification'] = email_config
+        if account_name is not None:
+            if platform != 'bili_message':
+                return jsonify(success=False, error='账号邮件配置仅适用于B站私信'), 400
+            get_message_config(account_name)['email_notification'] = email_config
+        else:
+            config.setdefault('email_notifications', {})[platform] = email_config
+            if platform == 'bili_message':
+                config['email_notification'] = email_config
         
         # 保存配置到文件
         save_config()
@@ -6158,9 +6388,8 @@ def save_email_config():
 def get_email_config():
     """获取邮件配置"""
     try:
-        global config
         platform = request.args.get('platform', 'bili_message')
-        email_config = config.get('email_notifications', {}).get(platform) or config.get('email_notification', {
+        email_config = get_message_email_config(request_message_account()) if platform == 'bili_message' else config.get('email_notifications', {}).get(platform, {
             'enabled': False,
             'smtp_server': 'smtp.qq.com',
             'smtp_port': 587,
@@ -6181,8 +6410,11 @@ def platform_email_config(platform):
     """Read or update per-platform error email alerts."""
     if platform not in ('bili_message', 'bili_comment', 'douyin', 'xiaohongshu', 'weibo', 'xianyu', 'channels'):
         return jsonify({'success': False, 'error': '不支持的平台'}), 400
-    global config
-    configs = config.setdefault('email_notifications', {})
+    account_name = request_message_account()
+    if account_name is not None and platform != 'bili_message':
+        return jsonify(success=False, error='账号邮件配置仅适用于B站私信'), 400
+    configs = ({'bili_message': get_message_email_config(account_name)} if account_name is not None
+               else config.setdefault('email_notifications', {}))
     if request.method == 'POST':
         data = request.get_json() or {}
         configs[platform] = {
@@ -6193,6 +6425,10 @@ def platform_email_config(platform):
             'sender_password': str(data.get('sender_password', '')),
             'receiver_email': str(data.get('receiver_email', '')).strip(),
         }
+        if account_name is not None:
+            get_message_config(account_name)['email_notification'] = configs[platform]
+        elif platform == 'bili_message':
+            config['email_notification'] = configs[platform]
         save_config()
         return jsonify({'success': True, 'config': configs[platform]})
     return jsonify({'success': True, 'config': configs.get(platform, {'enabled': False, 'smtp_server': 'smtp.qq.com', 'smtp_port': 587, 'sender_email': '', 'sender_password': '', 'receiver_email': ''})})
@@ -6201,7 +6437,9 @@ def platform_email_config(platform):
 def test_email():
     """发送测试邮件"""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
+        if request_message_account() is not None:
+            data = {**get_message_email_config(request_message_account()), **data}
         platform = data.get('platform', 'bili_message')
         sender_email = data.get('sender_email', '')
         sender_password = data.get('sender_password', '')

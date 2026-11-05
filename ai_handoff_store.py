@@ -120,7 +120,7 @@ class AiHandoffStore:
             item['_external_key'] = row['external_key']
         return item
 
-    def list(self, status: str = 'pending', platform: str = '', limit: int = 200) -> List[Dict[str, Any]]:
+    def list(self, status: str = 'pending', platform: str = '', limit: int = 200, account_name: Optional[str] = None) -> List[Dict[str, Any]]:
         self.initialize()
         clauses, params = [], []
         if status in ('pending', 'replied', 'dismissed'):
@@ -129,6 +129,11 @@ class AiHandoffStore:
         if platform in PLATFORM_NAMES:
             clauses.append('platform = ?')
             params.append(platform)
+        if account_name == '':
+            clauses.append("(platform != 'bili_message' OR COALESCE(json_extract(target_json, '$.account_name'), '') = '')")
+        elif account_name is not None:
+            clauses.extend(["platform = 'bili_message'", "json_extract(target_json, '$.account_name') = ?"])
+            params.append(account_name)
         where = (' WHERE ' + ' AND '.join(clauses)) if clauses else ''
         params.append(max(1, min(500, int(limit))))
         with self._lock, closing(self._connect()) as connection:
@@ -173,10 +178,17 @@ class AiHandoffStore:
                 (int(time.time()), str(item_id)),
             )
 
-    def pending_count(self) -> int:
+    def pending_count(self, account_name: Optional[str] = None) -> int:
         self.initialize()
+        where = "status = 'pending'"
+        params = []
+        if account_name == '':
+            where += " AND (platform != 'bili_message' OR COALESCE(json_extract(target_json, '$.account_name'), '') = '')"
+        elif account_name is not None:
+            where += " AND platform = 'bili_message' AND json_extract(target_json, '$.account_name') = ?"
+            params.append(account_name)
         with self._lock, closing(self._connect()) as connection:
-            return int(connection.execute("SELECT COUNT(*) FROM ai_handoffs WHERE status = 'pending'").fetchone()[0])
+            return int(connection.execute(f"SELECT COUNT(*) FROM ai_handoffs WHERE {where}", params).fetchone()[0])
 
     def clear_platform(self, platform: str) -> None:
         if platform not in PLATFORM_NAMES:

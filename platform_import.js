@@ -34,7 +34,14 @@
         button.disabled = true;
         button.textContent = '导入中...';
         try {
-            const response = await fetch('/api/platform-import', {
+            let path = '/api/platform-import';
+            const account = modal.querySelector('[data-platform-import-account]');
+            if (source === 'bili_message' && !account.closest('[hidden]')) {
+                if (!account.value) throw new Error('请选择源平台的B站账号');
+                path += '?account=' + encodeURIComponent(account.value);
+            }
+            const fetchImport = target === 'bili_message' && window.fetchMessageConfig ? window.fetchMessageConfig : fetch;
+            const response = await fetchImport(path, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({source, target, mode}),
@@ -73,6 +80,10 @@
                             <option value="">请选择</option>${options}
                         </select>
                     </div>
+                    <div class="form-row" data-platform-import-account-row hidden>
+                        <label for="platform-import-account">源B站账号:</label>
+                        <select id="platform-import-account" data-platform-import-account></select>
+                    </div>
                     <div class="form-row">
                         <label>导入模式:</label>
                         <div class="radio-group">
@@ -88,6 +99,21 @@
             </div>`;
         modal.querySelectorAll('[data-platform-import-close]').forEach(button => {
             button.addEventListener('click', () => closeModal(modal));
+        });
+        modal.querySelector('[data-platform-import-source]').addEventListener('change', async event => {
+            const row = modal.querySelector('[data-platform-import-account-row]');
+            row.hidden = true;
+            if (event.target.value !== 'bili_message') return;
+            try {
+                const data = await (await fetch('/api/accounts', {cache: 'no-store'})).json();
+                if (event.target.value !== 'bili_message' || !data.multi_account_mode) return;
+                const select = row.querySelector('select');
+                select.replaceChildren(new Option('请选择账号', ''));
+                (data.accounts || []).forEach(account => select.add(new Option(account.name, account.name)));
+                row.hidden = false;
+            } catch (error) {
+                notify('获取B站账号失败，请重试', 'error');
+            }
         });
         modal.querySelector('[data-platform-import-submit]').addEventListener('click', () => submitImport(target, modal));
         modal.addEventListener('click', event => {

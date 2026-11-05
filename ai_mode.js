@@ -55,7 +55,20 @@
             nav.title = `配置${platformNames[platform] || ''} AI回复`;
         }
         try {
-            const response = await fetch('/api/ai-config');
+            let accountName = null;
+            if (platform === 'bili_message') {
+                const accountsResponse = await fetch('/api/accounts', {cache: 'no-store'});
+                if (!accountsResponse.ok) return;
+                const data = await accountsResponse.json();
+                if (data.multi_account_mode) {
+                    const saved = sessionStorage.getItem('biligo:message:config-account');
+                    accountName = (data.accounts || []).find(account => account.name === saved)?.name ?? data.accounts?.[0]?.name ?? null;
+                    if (accountName === null) return;
+                    if (nav) nav.onclick = () => { location.href = `/ai-reply?from=bili_message&account=${encodeURIComponent(accountName)}`; };
+                }
+            }
+            const query = accountName === null ? '' : '?account=' + encodeURIComponent(accountName);
+            const response = await fetch('/api/ai-config' + query, {cache: 'no-store'});
             if (!response.ok) return;
             const config = await response.json();
             if (config.enabled && config.platforms && config.platforms[platform]) {

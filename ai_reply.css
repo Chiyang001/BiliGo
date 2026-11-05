@@ -177,3 +177,9 @@
     #ai-ambient-canvas { opacity: .45; }
     .ai-settings-hero::after { display: none; }
 }
+/* The scope stays visible while moving between provider, knowledge and handoff tabs. */
+.ai-account-scope { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 16px 20px; border: 1px solid #dce4ef; border-radius: 14px; background: #fff; margin-bottom: 16px; }
+.ai-account-scope[hidden], .ai-tab-button[hidden] { display: none !important; }
+.ai-account-scope label { font-weight: 600; color: #344054; }
+.ai-account-scope select { max-width: 100%; min-width: 200px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 12px; background: #fff; }
+.ai-account-scope span { color: #667085; font-size: 12px; line-height: 1.6; }

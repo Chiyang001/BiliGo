@@ -113,6 +113,32 @@ def run_smoke(executable):
                     page.wait_for_url(origin + '/login')
                     browser.close()
                 print('Packaged EXE login, version badge, password settings and file access protections passed', flush=True)
+                # Exercise the new configuration APIs in the actual frozen application.
+                headers = {'X-BiliGo-CSRF': csrf}
+                response = session.post(origin + '/api/config', json={
+                    'accounts': [{'name': name, 'uid': uid, 'sessdata': 'test-session', 'bili_jct': 'test-token', 'enabled': True}
+                                 for name, uid in [('packaged-A', 1001), ('packaged-B', 1002)]],
+                    'multi_account_mode': True,
+                }, headers=headers, timeout=5)
+                assert response.ok and response.json()['success']
+                for name in ('packaged-A', 'packaged-B'):
+                    params = {'account': name}
+                    for path, payload in (
+                        ('/api/config', {'default_reply_message': name}),
+                        ('/api/rules', {'rules': [{'name': name, 'keyword': 'hello', 'reply': name}]}),
+                        ('/api/ai-config', {'enabled': False, 'model': name, 'base_url': 'https://example.invalid/v1', 'api_key': name}),
+                        ('/api/save_email_config', {'enabled': False, 'receiver_email': name + '@example.com'}),
+                    ):
+                        response = session.post(origin + path, params=params, json=payload, headers=headers, timeout=5)
+                        assert response.ok and response.json()['success'], (path, response.status_code)
+                for name in ('packaged-A', 'packaged-B'):
+                    params = {'account': name}
+                    assert session.get(origin + '/api/config', params=params, timeout=5).json()['default_reply_message'] == name
+                    assert session.get(origin + '/api/rules', params=params, timeout=5).json()['rules'][0]['reply'] == name
+                    provider = session.get(origin + '/api/ai-config', params=params, timeout=5).json()
+                    assert provider['model'] == name and provider['api_key_configured'] and provider['api_key'] == ''
+                    assert session.get(origin + '/api/get_email_config', params=params, timeout=5).json()['config']['receiver_email'] == name + '@example.com'
+                print('Packaged EXE per-account replies, rules, AI keys/models and email settings passed', flush=True)
         except Exception:
             if logfile.exists():
                 log = logfile.read_text(encoding='utf-8', errors='replace').replace(password, '[test password]')

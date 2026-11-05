@@ -17,6 +17,61 @@ let savedKnowledgeAssignments = {};
 let savedHandoffEnabled = false;
 let providerSwitchSaving = false;
 let knowledgeSwitchSaving = false;
+let selectedAiAccount = null;
+
+function fetchAiSettings(path, options = {}) {
+    const url = new URL(path, location.origin);
+    if (selectedAiAccount !== null) url.searchParams.set('account', selectedAiAccount);
+    return fetch(url.pathname + url.search, {cache: 'no-store', ...options});
+}
+
+async function initializeAiAccountScope() {
+    const response = await fetch('/api/accounts', {cache: 'no-store'});
+    if (!response.ok) throw new Error('无法读取账号列表');
+    const data = await response.json();
+    const query = new URLSearchParams(location.search);
+    const fromBili = query.get('from') === 'bili_message';
+    const requested = query.get('account') ?? (data.multi_account_mode && fromBili && query.get('scope') !== 'global'
+        ? sessionStorage.getItem('biligo:message:config-account') ?? data.accounts?.[0]?.name ?? null : null);
+    if (requested !== null) {
+        if (!(data.accounts || []).some(account => account.name === requested)) throw new Error('配置账号已不存在，请返回平台重新选择');
+        selectedAiAccount = requested;
+        sessionStorage.setItem('biligo:message:config-account', requested);
+    }
+    const host = document.getElementById('ai-account-scope');
+    host.hidden = !data.multi_account_mode && selectedAiAccount === null;
+    const select = document.getElementById('ai-config-account');
+    select.add(new Option('其他平台 / B站单账号', 'global'));
+    (data.accounts || []).forEach((account, index) => select.add(new Option('B站账号：' + account.name, String(index))));
+    select.value = selectedAiAccount === null ? 'global' : String(data.accounts.findIndex(account => account.name === selectedAiAccount));
+    select.addEventListener('change', () => {
+        const url = new URL(location.href);
+        url.searchParams.delete('account');
+        if (select.value === 'global') {
+            url.searchParams.set('scope', 'global');
+        } else {
+            url.searchParams.delete('scope');
+            url.searchParams.set('account', data.accounts[Number(select.value)].name);
+            url.searchParams.set('from', 'bili_message');
+        }
+        location.href = url.href;
+    });
+    const hint = document.getElementById('ai-account-scope-hint');
+    hint.textContent = selectedAiAccount === null ? '管理其他平台与B站单账号的 AI 设置。' : `当前仅配置「${selectedAiAccount}」的 AI 提供商、模型、知识库和人工待回。`;
+    if (selectedAiAccount !== null) {
+        document.querySelector('.ai-hero-copy h2').textContent = '按账号管理 AI 回复';
+        document.querySelector('.ai-hero-copy p').textContent = `当前账号：${selectedAiAccount}。保存后仅对该账号生效。`;
+        document.querySelectorAll('.ai-tab-button[data-tab]').forEach(button => {
+            if (Object.hasOwn(PLATFORM_ROUTES, button.dataset.tab) && button.dataset.tab !== 'bili_message') button.hidden = true;
+        });
+        document.querySelectorAll('[data-platform]').forEach(input => {
+            if (input.dataset.platform !== 'bili_message') input.disabled = true;
+        });
+        const filter = document.getElementById('ai-handoff-platform');
+        filter.value = 'bili_message';
+        filter.disabled = true;
+    }
+}
 
 function initAiAmbientAnimation() {
     const hero = document.querySelector('.ai-settings-hero');
@@ -123,7 +178,7 @@ function selectedPlatforms() {
 }
 
 function updatePlatformCount() {
-    const inputs = Array.from(document.querySelectorAll('[data-platform]'));
+    const inputs = Array.from(document.querySelectorAll('[data-platform]')).filter(input => selectedAiAccount === null || input.dataset.platform === 'bili_message');
     const count = inputs.filter(input => input.checked).length;
     document.getElementById('ai-platform-count').textContent = `${count} / ${inputs.length}`;
     document.querySelectorAll('.ai-tab-button[data-tab]').forEach(button => {
@@ -227,7 +282,7 @@ function createHandoffCard(item) {
         showCardResult('');
         setBusy(true);
         try {
-            const response = await fetch(`/api/ai-handoffs/${encodeURIComponent(item.id)}/reply`, {
+            const response = await fetchAiSettings(`/api/ai-handoffs/${encodeURIComponent(item.id)}/reply`, {
                 method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text}),
             });
             const body = await response.json();
@@ -245,7 +300,7 @@ function createHandoffCard(item) {
     dismiss.addEventListener('click', async () => {
         setBusy(true);
         try {
-            const response = await fetch(`/api/ai-handoffs/${encodeURIComponent(item.id)}/dismiss`, {method: 'POST'});
+            const response = await fetchAiSettings(`/api/ai-handoffs/${encodeURIComponent(item.id)}/dismiss`, {method: 'POST'});
             const body = await response.json();
             if (!response.ok || body.success === false) throw new Error(body.error || '操作失败');
             await loadHandoffs();
@@ -263,7 +318,7 @@ async function loadHandoffs(countOnly = false) {
     const filter = document.getElementById('ai-handoff-platform');
     const platform = countOnly ? '' : filter.value;
     try {
-        const response = await fetch(`/api/ai-handoffs?platform=${encodeURIComponent(platform)}`, {cache: 'no-store'});
+        const response = await fetchAiSettings(`/api/ai-handoffs?platform=${encodeURIComponent(platform)}`, {cache: 'no-store'});
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || '读取失败');
         updateHandoffCount(body.pending_count);
@@ -295,7 +350,7 @@ function showHandoffSaveStatus(message, type = '') {
 
 function setProviderSwitchesDisabled(disabled) {
     document.querySelectorAll('#ai-enabled, [data-platform], #ai-human-handoff-enabled, #ai-context-enabled, #ai-auto-compress').forEach(input => {
-        input.disabled = disabled;
+        input.disabled = disabled || (selectedAiAccount !== null && input.dataset.platform && input.dataset.platform !== 'bili_message');
     });
 }
 
@@ -306,7 +361,7 @@ async function saveProviderSwitchPartial(data, onSaved, onRollback, handoffStatu
     if (handoffStatus) showHandoffSaveStatus('正在保存…', 'saving');
     else showResult('正在保存…');
     try {
-        const response = await fetch('/api/ai-config', {
+        const response = await fetchAiSettings('/api/ai-config', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(data),
@@ -513,7 +568,7 @@ function newKnowledgeBase() {
 
 async function loadKnowledgeConfig() {
     try {
-        const response = await fetch('/api/ai-knowledge');
+        const response = await fetchAiSettings('/api/ai-knowledge');
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || '读取知识库失败');
         savedKnowledgeEnabled = Boolean(data.enabled);
@@ -534,7 +589,7 @@ function updateKnowledgeCharCount() {
 async function saveCurrentKnowledgeBase() {
     const name = document.getElementById('ai-knowledge-name').value.trim();
     if (!name) return showResult('请填写知识库名称', 'error');
-    const response = await fetch('/api/ai-knowledge', {
+    const response = await fetchAiSettings('/api/ai-knowledge', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
             id: selectedKnowledgeBaseId,
@@ -555,7 +610,7 @@ async function saveCurrentKnowledgeBase() {
 }
 
 async function saveKnowledgeSettings() {
-    const response = await fetch('/api/ai-knowledge/settings', {
+    const response = await fetchAiSettings('/api/ai-knowledge/settings', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({enabled: document.getElementById('ai-knowledge-enabled').checked, platform_assignments: knowledgeAssignments})
     });
@@ -602,7 +657,7 @@ async function uploadKnowledgeDocument(file) {
     form.append('file', file);
     showResult('正在从 Markdown 创建知识库...');
     try {
-        const response = await fetch('/api/ai-knowledge/upload', {method: 'POST', body: form});
+        const response = await fetchAiSettings('/api/ai-knowledge/upload', {method: 'POST', body: form});
         const body = await response.json();
         if (!response.ok || body.success === false) throw new Error(body.error || '上传失败');
         const index = knowledgeBases.findIndex(base => base.id === body.knowledge_base.id);
@@ -617,7 +672,7 @@ async function uploadKnowledgeDocument(file) {
 
 async function deleteKnowledgeDocument(documentId) {
     try {
-        const response = await fetch(`/api/ai-knowledge/documents/${encodeURIComponent(documentId)}`, {method: 'DELETE'});
+        const response = await fetchAiSettings(`/api/ai-knowledge/documents/${encodeURIComponent(documentId)}`, {method: 'DELETE'});
         const body = await response.json();
         if (!response.ok || body.success === false) throw new Error(body.error || '删除失败');
         const base = selectedKnowledgeBase();
@@ -630,7 +685,7 @@ async function deleteKnowledgeDocument(documentId) {
 
 async function deleteKnowledgeBase(baseId) {
     try {
-        const response = await fetch(`/api/ai-knowledge/bases/${encodeURIComponent(baseId)}`, {method: 'DELETE'});
+        const response = await fetchAiSettings(`/api/ai-knowledge/bases/${encodeURIComponent(baseId)}`, {method: 'DELETE'});
         const body = await response.json();
         if (!response.ok || body.success === false) throw new Error(body.error || '删除失败');
         knowledgeBases = knowledgeBases.filter(base => base.id !== baseId);
@@ -646,7 +701,7 @@ async function deleteKnowledgeBase(baseId) {
 async function loadProviderModels() {
     showProviderToolResult('正在获取模型列表...');
     try {
-        const response = await fetch('/api/ai-models', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload()) });
+        const response = await fetchAiSettings('/api/ai-models', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload()) });
         const body = await response.json();
         if (!response.ok || body.success === false) throw new Error(body.error || '获取失败');
         const models = Array.isArray(body.models) ? body.models : [];
@@ -675,7 +730,7 @@ async function loadProviderModels() {
 async function testProviderLatency() {
     showProviderToolResult('正在测速...');
     try {
-        const response = await fetch('/api/ai-latency', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload()) });
+        const response = await fetchAiSettings('/api/ai-latency', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload()) });
         const body = await response.json();
         if (!response.ok || body.success === false) throw new Error(body.error || '测速失败');
         showProviderToolResult(`当前延迟 ${body.latency_ms} ms · ${body.level}`, 'success');
@@ -688,7 +743,7 @@ async function saveSettings() {
     if (data.enabled && (!data.base_url || !data.model || (!data.api_key && !apiKeyConfigured))) return showResult('启用 AI 前请完整填写提供商配置', 'error');
     showResult('正在保存...');
     try {
-        const response = await fetch('/api/ai-config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+        const response = await fetchAiSettings('/api/ai-config', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
         const body = await response.json();
         if (!response.ok || body.success === false) throw new Error(body.error || '保存失败');
         await saveKnowledgeSettings();
@@ -711,7 +766,7 @@ async function testConnection() {
     if (!data.base_url || !data.model || (!data.api_key && !apiKeyConfigured)) return showResult('请完整填写接口地址、模型和 API Key', 'error');
     showResult('正在测试连接...');
     try {
-        const response = await fetch('/api/ai-test', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+        const response = await fetchAiSettings('/api/ai-test', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
         const body = await response.json();
         if (!response.ok || body.success === false) throw new Error(body.error || '连接失败');
         showResult(body.message || '连接成功', 'success');
@@ -719,16 +774,24 @@ async function testConnection() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        await initializeAiAccountScope();
+    } catch (error) {
+        showResult(error.message, 'error');
+        document.querySelector('.ai-settings-workspace').inert = true;
+        document.getElementById('ai-enabled').disabled = true;
+        return;
+    }
     initAiAmbientAnimation();
     const from = new URLSearchParams(location.search).get('from');
-    document.getElementById('ai-back-button').onclick = () => { location.href = PLATFORM_ROUTES[from] || '/'; };
+    document.getElementById('ai-back-button').onclick = () => { location.href = selectedAiAccount !== null ? '/' : PLATFORM_ROUTES[from] || '/'; };
     document.getElementById('ai-enabled').addEventListener('change', saveAiEnabledSetting);
     document.querySelectorAll('[data-platform]').forEach(input => input.addEventListener('change', () => {
         updatePlatformCount();
         savePlatformSettings();
     }));
     document.querySelectorAll('.ai-tab-button').forEach(button => button.addEventListener('click', () => openTab(button.dataset.tab)));
-    openTab(PLATFORM_ROUTES[from] ? from : 'bili_message');
+    openTab(selectedAiAccount !== null ? 'bili_message' : PLATFORM_ROUTES[from] ? from : 'bili_message');
     document.getElementById('ai-save-button').addEventListener('click', saveSettings);
     document.getElementById('ai-test-button').addEventListener('click', testConnection);
     document.getElementById('ai-load-models-button').addEventListener('click', loadProviderModels);
@@ -760,7 +823,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     loadKnowledgeConfig();
     try {
-        const response = await fetch('/api/ai-config');
+        const response = await fetchAiSettings('/api/ai-config');
         const config = await response.json();
         savedAiEnabled = Boolean(config.enabled);
         document.getElementById('ai-enabled').checked = savedAiEnabled;

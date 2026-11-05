@@ -242,6 +242,18 @@
 .platform-tab-runtime small { color: #98a2af; font-size: 9px; }
 .platform-tab-runtime strong { overflow: hidden; margin-top: 2px; color: #566276; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
+.message-account-selector {
+    margin: 8px 0 18px;
+    padding: 12px;
+    border: 1px solid var(--workspace-accent-border, #93d9ee);
+    border-radius: 10px;
+    background: var(--workspace-accent-soft, #eefaff);
+}
+.message-account-selector[hidden] { display: none; }
+.message-account-selector label { display: block; margin-bottom: 8px; color: #344054; font-size: 12px; font-weight: 600; }
+.message-account-selector select { width: 100%; min-width: 0; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; color: #344054; }
+.message-account-selector small { display: block; margin-top: 8px; color: #667085; font-size: 11px; line-height: 1.6; }
+
 .platform-tab-content.main-content {
     min-width: 0;
     min-height: 0;
