@@ -474,7 +474,8 @@ class BilibiliAPI:
             response.raise_for_status()
             result = response.json()
             
-            logger.info(f"扫码轮询响应: code={result.get('code')}, data={result.get('data')}")
+            # 不记录 data：登录成功时其中的 url 含 SESSDATA、bili_jct，refresh_token 也是登录凭据
+            logger.info(f"扫码轮询响应: code={result.get('code')}, status={(result.get('data') or {}).get('code')}")
             
             if result.get('code') == 0:
                 data = result.get('data', {})
@@ -491,11 +492,11 @@ class BilibiliAPI:
                     
                     # 检查响应头中的Set-Cookie
                     set_cookie_headers = response.headers.get('Set-Cookie', '')
-                    logger.info(f"Set-Cookie头: {set_cookie_headers[:200] if set_cookie_headers else 'None'}")
+                    logger.info(f"Set-Cookie头: {'有' if set_cookie_headers else 'None'}")
                     
                     # 从session.cookies中提取
                     for cookie in session.cookies:
-                        logger.info(f"Cookie: {cookie.name}={cookie.value[:20]}...")
+                        logger.info(f"Cookie: {cookie.name}")
                         if cookie.name == 'SESSDATA':
                             sessdata = cookie.value
                         elif cookie.name == 'bili_jct':
@@ -504,7 +505,7 @@ class BilibiliAPI:
                     # 方法2: 如果响应中有url，访问该url获取cookie
                     if (not sessdata or not bili_jct) and data.get('url'):
                         url_with_params = data.get('url')
-                        logger.info(f"尝试从跳转URL获取cookie: {url_with_params[:100]}...")
+                        logger.info(f"尝试从跳转URL获取cookie: {url_with_params.split('?', 1)[0]}")
                         try:
                             cookie_response = session.get(url_with_params, allow_redirects=True, timeout=10)
                             logger.info(f"跳转URL响应状态: {cookie_response.status_code}")
@@ -542,7 +543,7 @@ class BilibiliAPI:
                         }
                     else:
                         logger.warning(f"未能获取完整cookie - SESSDATA: {bool(sessdata)}, bili_jct: {bool(bili_jct)}")
-                        logger.warning(f"完整响应数据: {data}")
+                        logger.warning(f"响应字段: {sorted(data.keys())}")
                         
                         # 返回更详细的错误信息
                         missing = []
