@@ -2,6 +2,7 @@ from flask import Flask, has_request_context, request, jsonify, send_from_direct
 import json
 import os
 import threading
+import tempfile
 import time
 import requests
 from datetime import datetime
@@ -264,6 +265,7 @@ def message_request_error(error):
 
 monitoring = False
 monitor_thread = None
+monitor_control_lock = threading.Lock()
 monitor_threads = {}  # 多账号监控线程字典 {account_name: thread}
 message_logs = []  # 私信日志
 message_cache = {}
@@ -474,7 +476,7 @@ class BilibiliAPI:
             response.raise_for_status()
             result = response.json()
             
-            logger.info(f"扫码轮询响应: code={result.get('code')}, data={result.get('data')}")
+            logger.debug("扫码轮询响应: code=%s", result.get("code"))
             
             if result.get('code') == 0:
                 data = result.get('data', {})
@@ -489,13 +491,8 @@ class BilibiliAPI:
                     sessdata = ''
                     bili_jct = ''
                     
-                    # 检查响应头中的Set-Cookie
-                    set_cookie_headers = response.headers.get('Set-Cookie', '')
-                    logger.info(f"Set-Cookie头: {set_cookie_headers[:200] if set_cookie_headers else 'None'}")
-                    
                     # 从session.cookies中提取
                     for cookie in session.cookies:
-                        logger.info(f"Cookie: {cookie.name}={cookie.value[:20]}...")
                         if cookie.name == 'SESSDATA':
                             sessdata = cookie.value
                         elif cookie.name == 'bili_jct':
@@ -504,7 +501,7 @@ class BilibiliAPI:
                     # 方法2: 如果响应中有url，访问该url获取cookie
                     if (not sessdata or not bili_jct) and data.get('url'):
                         url_with_params = data.get('url')
-                        logger.info(f"尝试从跳转URL获取cookie: {url_with_params[:100]}...")
+                        logger.info("尝试从跳转URL获取cookie")
                         try:
                             cookie_response = session.get(url_with_params, allow_redirects=True, timeout=10)
                             logger.info(f"跳转URL响应状态: {cookie_response.status_code}")
@@ -515,7 +512,7 @@ class BilibiliAPI:
                                 elif cookie.name == 'bili_jct':
                                     bili_jct = cookie.value
                         except Exception as e:
-                            logger.error(f"访问跳转URL失败: {e}")
+                            logger.warning("访问扫码跳转URL失败: %s", type(e).__name__)
                     
                     # 方法3: 访问B站主页激活cookie
                     if not sessdata or not bili_jct:
@@ -542,7 +539,6 @@ class BilibiliAPI:
                         }
                     else:
                         logger.warning(f"未能获取完整cookie - SESSDATA: {bool(sessdata)}, bili_jct: {bool(bili_jct)}")
-                        logger.warning(f"完整响应数据: {data}")
                         
                         # 返回更详细的错误信息
                         missing = []
@@ -932,18 +928,22 @@ class BilibiliAPI:
             add_log(f"发送图片消息失败: {e}", 'error')
             return None
     
-    def get_my_uid(self):
-        """获取当前用户UID"""
+    def get_login_identity(self):
+        """返回 UID 和接口状态码，以区分登录失效与暂时的网络故障。"""
         url = 'https://api.bilibili.com/x/web-interface/nav'
         try:
             response = self.session.get(url, timeout=2)
             response.raise_for_status()
             data = response.json()
-            if data['code'] == 0:
-                return data['data']['mid']
+            code = data.get('code')
+            return (data['data']['mid'] if code == 0 else None), code
         except Exception as e:
             logger.error(f"获取用户信息失败: {e}")
-        return None
+            return None, None
+
+    def get_my_uid(self):
+        uid, _ = self.get_login_identity()
+        return uid
     
     def check_user_relation(self, target_uid):
         """检查用户关系（是否关注了我）
@@ -1492,12 +1492,22 @@ def save_config():
     try:
         init_config_paths()  # 确保路径已初始化
         with message_profiles_lock:
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=os.path.dirname(CONFIG_FILE),
+                                                 delete=False) as stream:
+                    temporary_path = stream.name
+                    json.dump(config, stream, ensure_ascii=False, indent=2)
+                os.replace(temporary_path, CONFIG_FILE)
+            finally:
+                if temporary_path and os.path.exists(temporary_path):
+                    os.unlink(temporary_path)
         logger.info(f"成功保存私信配置文件: {CONFIG_FILE}")
+        return True
     except Exception as e:
         logger.error(f"保存私信配置失败: {e}")
         add_log(f"保存私信配置失败: {e}", 'error', system='message')
+        return False
 
 def load_rules():
     """加载私信系统关键词规则"""
@@ -2216,81 +2226,85 @@ def process_single_session(api, my_uid, session):
         logger.error(f"处理会话 {session.get('talker_id')} 时出错: {e}")
         return []
 
-def monitor_single_account(account_name, sessdata, bili_jct, account_uid, account_email=''):
-    """监控单个账号的消息"""
-    add_log(f"🚀 开始监控账号: {account_name} (UID: {account_uid})", 'success', system='message', account_name=account_name)
-    
-    max_retries = 3
-    retry_count = 0
-    login_failed_notified = False  # 标记是否已发送登录失效通知
-    dev_id = get_im_dev_id_for_account(account_name)
-    
-    while monitoring and retry_count < max_retries:
-        try:
-            api = BilibiliAPI(sessdata, bili_jct, dev_id=dev_id, account_name=account_name)
-            my_uid = api.get_my_uid()
-            
-            if not my_uid:
-                error_msg = f"[{account_name}] 获取用户信息失败，登录可能已失效"
-                error_details = f"账号: {account_name}\nUID: {account_uid}\n重试次数: {retry_count + 1}/{max_retries}"
-                add_log(error_msg, 'error', system='message', 
-                       error_details=error_details, 
-                       context='账号登录验证', 
-                       account_name=account_name)
-                
-                # 发送登录失效邮件通知（只发送一次）
-                account_email = get_message_email_config(account_name).get('receiver_email', '')
-                if not login_failed_notified and account_email:
-                    if send_login_expired_notification(account_name, account_email):
-                        add_log(f"[{account_name}] 已发送登录失效通知至 {account_email}", 'info', system='message', account_name=account_name)
-                        login_failed_notified = True
-                    else:
-                        add_log(f"[{account_name}] 发送登录失效通知失败", 'warning', system='message', account_name=account_name)
-                
-                retry_count += 1
-                if retry_count < max_retries:
-                    time.sleep(0.3)
-                    continue
-                else:
-                    return
-            
-            add_log(f"[{account_name}] 监控已启动，用户UID: {my_uid}", 'success', system='message')
-            
-            # 预编译规则
-            precompile_rules()
-            
-            # 为每个账号创建独立的缓存（不包括user_reply_counts，使用JSON文件）
-            local_cache = {
-                'message_cache': {},
-                'last_message_times': defaultdict(int),
-                'last_send_time': 0,
-                'followers_cache': set(),
-                'welcome_sent_cache': set(),
-                'last_follow_check': 0,
-                'unfollowers_cache': set(),
-                'follow_history': {},
-                'follow_inited': False
-            }
-            
-            # 执行监控循环（使用独立缓存）
-            monitor_loop_core(api, my_uid, account_name, local_cache, account_uid=my_uid or account_uid)
-            
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            add_log(f"[{account_name}] 监控异常: {e}", 'error', system='message',
-                   error_details=error_details,
-                   context='账号监控循环',
-                   account_name=account_name)
-            retry_count += 1
-            if retry_count < max_retries and monitoring:
-                time.sleep(1)
-            else:
-                break
-    
-    add_log(f"[{account_name}] 监控已停止", 'warning', system='message', account_name=account_name)
+class MessageAccountWorker(threading.Thread):
+    """一个账号在本轮监控中的 API、缓存和状态。"""
+    def __init__(self, name, credentials, cache=None):
+        super().__init__(daemon=True)
+        self.account_name = name
+        self.credentials = credentials
+        self.stop_requested = threading.Event()
+        self.state = 'starting'
+        self.cache = cache if cache is not None else {
+            'message_cache': {}, 'last_message_times': defaultdict(int),
+            'last_send_time': 0, 'followers_cache': set(), 'welcome_sent_cache': set(),
+            'last_follow_check': 0, 'unfollowers_cache': set(), 'follow_history': {}, 'follow_inited': False,
+        }
 
-    add_log(f"[{account_name}] 监控已停止", 'warning', system='message', account_name=account_name)
+    def run(self):
+        name = self.account_name
+        uid, sessdata, bili_jct = self.credentials
+        delay = 2
+        while monitoring and not self.stop_requested.is_set():
+            try:
+                api = BilibiliAPI(sessdata, bili_jct, dev_id=get_im_dev_id_for_account(name), account_name=name)
+                my_uid, code = api.get_login_identity()
+                if self.stop_requested.is_set() or not monitoring:
+                    return
+                if code == -101 or (my_uid and uid and str(my_uid) != str(uid)):
+                    self.state = 'login_required'
+                elif my_uid:
+                    precompile_rules(name)
+                    add_log(f"[{name}] 登录验证通过，开始获取私信", account_name=name)
+                    self.state = 'starting'
+                    monitor_loop_core(api, my_uid, self)
+                    if self.stop_requested.is_set() or not monitoring:
+                        return
+                if self.state == 'login_required':
+                    add_log(f"[{name}] 登录凭据无效或与账号不符，请在账号配置中重新登录",
+                            'warning', account_name=name)
+                    send_login_expired_notification(name)
+                    return
+            except Exception:
+                logger.exception("[%s] 私信监控异常", name)
+            if self.state != 'retrying':
+                add_log(f"[{name}] 暂时无法连接，将自动重试", 'warning', account_name=name)
+            self.state = 'retrying'
+            self.stop_requested.wait(delay)
+            delay = min(60, delay * 2)
+
+
+def monitor_message_accounts():
+    # 仅此线程增删工作线程。旧凭据的线程退出后，才启动同一账号的新线程。
+    try:
+        while monitoring and config.get('multi_account_mode'):
+            with message_profiles_lock:
+                desired = {a['name']: (a.get('uid'), a['sessdata'], a['bili_jct'])
+                           for a in config.get('accounts', [])
+                           if a.get('enabled', True) and a.get('sessdata') and a.get('bili_jct')}
+            for name in monitor_threads.keys() | desired.keys():
+                worker = monitor_threads.get(name)
+                credentials = desired.get(name)
+                cache = None
+                if worker:
+                    if worker.credentials == credentials and not worker.stop_requested.is_set():
+                        continue
+                    worker.stop_requested.set()
+                    if worker.is_alive():
+                        continue
+                    if credentials and credentials[0] == worker.credentials[0]:
+                        cache = worker.cache
+                    del monitor_threads[name]
+                if credentials:
+                    worker = MessageAccountWorker(name, credentials, cache)
+                    monitor_threads[name] = worker
+                    worker.start()
+            time.sleep(0.25)
+    finally:
+        for worker in monitor_threads.values():
+            worker.stop_requested.set()
+        for worker in monitor_threads.values():
+            worker.join()
+        monitor_threads.clear()
 
 
 def _recreate_bilibili_api(api):
@@ -2298,14 +2312,14 @@ def _recreate_bilibili_api(api):
     return BilibiliAPI(api.sessdata, api.bili_jct, dev_id=api.dev_id, account_name=api.account_name)
 
 
-def _record_bili_reply_metric(result, event_type):
+def _record_bili_reply_metric(result, event_type, account_name=None):
     title = str((result.get('rule') or {}).get('title') or '')
     mode = 'ai' if 'AI' in title else ('default' if '默认' in title else 'rule')
     event_key = generate_message_id(
         result.get('talker_id'), result.get('timestamp', 0), result.get('message', '')
     )
     record_dashboard_event(
-        'bili_message', event_type, event_key,
+        'bili_message', event_type, message_conversation_key(event_key, account_name),
         contact_id=str(result.get('talker_id') or ''), reply_mode=mode,
     )
 
@@ -2347,7 +2361,7 @@ def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
         else:
             add_log(f"[{account_prefix}] 图片文件不存在，跳过回复用户 {result['talker_id']}", 'warning',
                     system='message', account_name=account_prefix)
-            _record_bili_reply_metric(result, 'reply_failure')
+            _record_bili_reply_metric(result, 'reply_failure', account_prefix)
             return False, False
     else:
         reply_result = api.send_msg(result['talker_id'], content=result['rule']['reply'])
@@ -2371,13 +2385,13 @@ def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
                 f"(第{current_count}/{limit_text}次)",
                 'success', system='message', account_name=account_prefix
             )
-            _record_bili_reply_metric(result, 'reply_success')
+            _record_bili_reply_metric(result, 'reply_success', account_prefix)
             _record_bili_ai_context(result, result['rule'].get('reply', ''), getattr(api, 'account_name', '') or None)
             return True, False
 
         add_log(f"[{account_prefix}] ⚠️ 用户 {result['talker_id']} 发送验证失败，消息可能未送达", 'warning',
                 system='message', account_name=account_prefix)
-        _record_bili_reply_metric(result, 'reply_failure')
+        _record_bili_reply_metric(result, 'reply_failure', account_prefix)
         return False, False
 
     if reply_result and reply_result.get('code') in (-412, -9412):
@@ -2386,24 +2400,24 @@ def _dispatch_message_reply(api, result, account_prefix, account_uid=None):
             'warning' if reply_result.get('code') == -412 else 'error',
             system='message', account_name=account_prefix
         )
-        _record_bili_reply_metric(result, 'reply_failure')
+        _record_bili_reply_metric(result, 'reply_failure', account_prefix)
         return False, False
 
     if reply_result and reply_result.get('code') == -101:
         add_log(f"[{account_prefix}] 🔐 登录状态失效，请重新配置登录信息", 'error',
                 system='message', account_name=account_prefix)
-        _record_bili_reply_metric(result, 'reply_failure')
+        _record_bili_reply_metric(result, 'reply_failure', account_prefix)
         return False, True
 
     error_msg = reply_result.get('message', '未知错误') if reply_result else '网络错误'
     error_code = reply_result.get('code', 'N/A') if reply_result else 'N/A'
     add_log(f"[{account_prefix}] ❌ 回复用户 {result['talker_id']} 失败 [错误码:{error_code}]: {error_msg}",
             'warning', system='message', account_name=account_prefix)
-    _record_bili_reply_metric(result, 'reply_failure')
+    _record_bili_reply_metric(result, 'reply_failure', account_prefix)
     return False, False
 
 
-def _process_follower_changes(api, cache, account_prefix):
+def _process_follower_changes(api, cache, account_prefix, stop_requested):
     """检测并处理关注/取关变化，返回本轮回复数"""
     config = get_message_config(getattr(api, 'account_name', '') or None)
     reply_count = 0
@@ -2413,7 +2427,7 @@ def _process_follower_changes(api, cache, account_prefix):
     try:
         followers_changes = check_followers_changes(api, cache)
         for follower in followers_changes.get('new_followers', []):
-            if not monitoring:
+            if not monitoring or stop_requested.is_set():
                 break
             try:
                 if send_follow_welcome_message(api, follower):
@@ -2424,7 +2438,7 @@ def _process_follower_changes(api, cache, account_prefix):
                         system='message', account_name=account_prefix)
 
         for unfollower in followers_changes.get('unfollowers', []):
-            if not monitoring:
+            if not monitoring or stop_requested.is_set():
                 break
             try:
                 send_unfollow_goodbye_message(api, unfollower)
@@ -2439,9 +2453,11 @@ def _process_follower_changes(api, cache, account_prefix):
     return reply_count
 
 
-def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
-    """监控循环核心逻辑（可用于单账号或多账号）"""
-    config = get_message_config(getattr(api, 'account_name', '') or None)
+def monitor_loop_core(api, my_uid, worker):
+    """轮询该账号的私信，沿用其缓存直到监控停止。"""
+    account_prefix = worker.account_name
+    account_uid = my_uid
+    cache = worker.cache
     message_cache = cache['message_cache']
     last_message_times = cache['last_message_times']
 
@@ -2453,13 +2469,13 @@ def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
     error_count = 0
     consecutive_errors = 0
 
-    while monitoring:
+    while monitoring and not worker.stop_requested.is_set():
         try:
             config = get_message_config(getattr(api, 'account_name', '') or None)
             loop_start = time.time()
             current_time = int(time.time())
 
-            if current_time - last_heartbeat >= 60:
+            if worker.state == 'running' and current_time - last_heartbeat >= 60:
                 add_log(
                     f"[{account_prefix}] 💓 系统运行正常: 处理{processed_count}条消息, 错误{error_count}次",
                     'info', system='message', account_name=account_prefix
@@ -2519,39 +2535,34 @@ def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
                     add_log(f"[{account_prefix}] API重新初始化异常: {e}", 'warning',
                             system='message', account_name=account_prefix)
 
-            sessions_data = None
-            for attempt in range(3):
-                try:
-                    sessions_data = api.get_sessions()
-                    if sessions_data:
-                        break
-                except Exception:
-                    if attempt < 2:
-                        time.sleep(0.3)
-
-            if not sessions_data or sessions_data.get('code') != 0:
+            sessions_data = api.get_sessions()
+            if worker.stop_requested.is_set() or not monitoring:
+                return
+            code = sessions_data.get('code') if sessions_data else None
+            if code == -101:
+                worker.state = 'login_required'
+                return
+            if code != 0:
+                if worker.state != 'retrying':
+                    add_log(f"[{account_prefix}] 获取私信会话失败（{code if code is not None else '网络异常'}），将自动重试",
+                            'warning', account_name=account_prefix)
+                worker.state = 'retrying'
                 consecutive_errors += 1
-                if consecutive_errors > 5:
-                    add_log(f"[{account_prefix}] 连续获取会话失败，重新初始化API", 'warning',
-                            system='message', account_name=account_prefix)
-                    try:
-                        api = _recreate_bilibili_api(api)
-                        consecutive_errors = 0
-                    except Exception as e:
-                        add_log(f"[{account_prefix}] API重新初始化失败: {e}", 'error',
-                                system='message', account_name=account_prefix)
-                time.sleep(2)
+                worker.stop_requested.wait(min(60, 2 ** min(consecutive_errors, 6)))
+                if code is None and consecutive_errors % 6 == 0 and not worker.stop_requested.is_set():
+                    api = _recreate_bilibili_api(api)
                 continue
 
+            worker.state = 'running'
             consecutive_errors = 0
-            reply_count = _process_follower_changes(api, cache, account_prefix)
+            reply_count = _process_follower_changes(api, cache, account_prefix, worker.stop_requested)
 
             data = sessions_data.get('data')
             if not data or not isinstance(data, dict):
-                time.sleep(1)
+                worker.stop_requested.wait(1)
                 elapsed = time.time() - loop_start
                 check_interval = config.get('message_check_interval', 0.05)
-                time.sleep(max(0.01, check_interval - elapsed))
+                worker.stop_requested.wait(max(0.01, check_interval - elapsed))
                 continue
 
             sessions = data.get('session_list', []) or []
@@ -2591,25 +2602,36 @@ def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
                     )
 
                 for session in check_sessions:
-                    if not monitoring:
+                    if not monitoring or worker.stop_requested.is_set():
                         break
                     try:
                         session_talker_id = session.get('talker_id', 'unknown')
+                        previous_time = last_message_times.get(session_talker_id, 0)
                         results = process_single_session_with_cache(
                             api, my_uid, session, message_cache, last_message_times, account_uid=account_uid
                         )
                         if not results:
                             continue
                         for result in results:
-                            success, stop_account = _dispatch_message_reply(
-                                api, result, account_prefix, account_uid=account_uid
-                            )
+                            cancelled = worker.stop_requested.is_set() or not monitoring
+                            success, stop_account = False, False
+                            if not cancelled:
+                                success, stop_account = _dispatch_message_reply(
+                                    api, result, account_prefix, account_uid=account_uid
+                                )
+                                if stop_account:
+                                    worker.state = 'login_required'
+                            if stop_account or cancelled:
+                                # 凭据失效或发送前取消，换证后仍应处理这条私信。
+                                last_message_times[session_talker_id] = previous_time
+                                message_cache.pop(generate_message_id(
+                                    result['talker_id'], result['timestamp'], result['message']
+                                ), None)
+                                return
                             if success:
                                 reply_count += 1
                                 processed_count += 1
                                 last_reply_time = current_time
-                            elif stop_account:
-                                return
                             else:
                                 error_count += 1
                     except Exception as e:
@@ -2662,7 +2684,7 @@ def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
 
             elapsed = time.time() - loop_start
             check_interval = config.get('message_check_interval', 0.05)
-            time.sleep(max(0.01, check_interval - elapsed))
+            worker.stop_requested.wait(max(0.01, check_interval - elapsed))
 
         except KeyboardInterrupt:
             add_log(f"[{account_prefix}] 收到停止信号", 'warning', system='message', account_name=account_prefix)
@@ -2688,9 +2710,9 @@ def monitor_loop_core(api, my_uid, account_prefix, cache, account_uid=None):
                             system='message', account_name=account_prefix)
                     if consecutive_errors > 15:
                         return
-                time.sleep(2)
+                worker.stop_requested.wait(2)
             else:
-                time.sleep(1)
+                worker.stop_requested.wait(1)
 
 
 def process_single_session_with_cache(api, my_uid, session, message_cache, last_message_times, account_uid=None):
@@ -2768,8 +2790,9 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
         
         # 更新缓存
         message_cache[msg_id] = True
+        event_key = message_conversation_key(msg_id, getattr(api, 'account_name', '') or None)
         record_dashboard_event(
-            'bili_message', 'inbound', msg_id,
+            'bili_message', 'inbound', event_key,
             contact_id=str(talker_id),
         )
 
@@ -2797,7 +2820,7 @@ def process_single_session_with_cache(api, my_uid, session, message_cache, last_
                     'timestamp': msg_timestamp,
                 }]
             record_dashboard_event(
-                'bili_message', 'reply_failure', msg_id,
+                'bili_message', 'reply_failure', event_key,
                 contact_id=str(talker_id), reply_mode='ai',
             )
             return []
@@ -2903,55 +2926,9 @@ def monitor_messages():
     
     # 检查是否启用多账号模式
     if config.get('multi_account_mode', False):
-        accounts = config.get('accounts', [])
-        enabled_accounts = [acc for acc in accounts if acc.get('enabled', True)]
-        
-        if not enabled_accounts:
-            add_log("多账号模式已启用，但没有可用的账号", 'error', system='message')
-            monitoring = False
-            return
-        
-        add_log(f"🎯 多账号模式：将监控 {len(enabled_accounts)} 个账号", 'success', system='message')
-        
-        # 为每个账号创建独立的监控线程（独立缓存，互不干扰）
-        monitor_threads = {}
-        for account in enabled_accounts:
-            account_name = account.get('name')
-            sessdata = account.get('sessdata')
-            bili_jct = account.get('bili_jct')
-            account_uid = account.get('uid')
-            account_email = account.get('email', '')
-            
-            if not sessdata or not bili_jct:
-                add_log(f"账号 {account_name} 配置不完整，跳过", 'warning', system='message')
-                continue
-            
-            # 创建并启动账号监控线程
-            thread = threading.Thread(
-                target=monitor_single_account,
-                args=(account_name, sessdata, bili_jct, account_uid, account_email),
-                daemon=True
-            )
-            thread.start()
-            monitor_threads[account_name] = thread
-            add_log(f"✅ 账号 {account_name} 监控线程已启动", 'info', system='message')
-
-        if not monitor_threads:
-            add_log("多账号模式未启动任何有效线程，请检查账号配置", 'error', system='message')
-            monitoring = False
-            return
-        
-        # 等待所有线程结束
-        while monitoring:
-            time.sleep(1)
-            # 检查是否所有线程都已结束
-            all_stopped = all(not thread.is_alive() for thread in monitor_threads.values())
-            if all_stopped:
-                break
-        
-        add_log("所有账号监控已停止", 'warning', system='message')
+        monitor_message_accounts()
         return
-    
+
     # 单账号模式（向后兼容）
     if not config.get('sessdata') or not config.get('bili_jct'):
         add_log("未配置登录信息，无法启动监控", 'error', system='message')
@@ -3547,7 +3524,18 @@ def _dashboard_platform_statuses():
         is_multi = bool(config.get('multi_account_mode'))
         accounts = [item for item in config.get('accounts', []) if item.get('enabled', True)] if is_multi else []
         configured = any(item.get('sessdata') and item.get('bili_jct') for item in accounts) if is_multi else bool(config.get('sessdata') and config.get('bili_jct'))
-        assign('bili_message', monitoring, configured, len(rules), len(accounts) if is_multi else int(configured))
+        active = bool(monitoring and monitor_thread and monitor_thread.is_alive())
+        assign('bili_message', active, configured, len(rules), len(accounts) if is_multi else int(configured))
+        if is_multi and active:
+            states = message_account_states(active)
+            running = sum(state == 'running' for state in states.values())
+            status = statuses['bili_message']
+            status['state_label'] = f'{running}/{len(accounts)} 个账号正在接收'
+            if not running:
+                status['state'] = 'session_expired' if 'login_required' in states.values() else 'starting'
+            expired = [name for name, state in states.items() if state == 'login_required']
+            if expired:
+                status['message'] = '需要重新登录：' + '、'.join(expired)
     except Exception as exc:
         statuses['bili_message'] = {'state': 'unknown', 'state_label': '状态未知', 'message': str(exc), 'rules_count': 0, 'account_count': 0}
 
@@ -4122,6 +4110,11 @@ def handle_rules():
 
 @app.route('/api/start', methods=['POST'])
 def start_monitoring():
+    with monitor_control_lock:
+        return _start_monitoring()
+
+
+def _start_monitoring():
     global monitoring, monitor_thread, monitor_threads, program_start_time
     
     # 检查配置：多账号模式与单账号模式分别校验
@@ -4134,29 +4127,12 @@ def start_monitoring():
         if not config.get('sessdata') or not config.get('bili_jct'):
             return jsonify({'success': False, 'error': '请先配置登录信息'})
     
-    # 强制重置状态，确保可以重新启动
-    monitoring = False
-
-    # 停止单账号主线程
     if monitor_thread and monitor_thread.is_alive():
-        add_log("强制停止旧的监控线程", 'warning')
-        monitor_thread.join(timeout=3)
-        if monitor_thread.is_alive():
-            add_log("旧线程未能正常停止，但继续启动新线程", 'warning')
+        if monitoring:
+            return jsonify(success=True)
+        return jsonify(success=False, error='上一轮监控正在停止，请稍后启动')
+    monitor_threads = {}
 
-    # 停止多账号线程
-    if monitor_threads:
-        for account_name, thread in list(monitor_threads.items()):
-            if thread and thread.is_alive():
-                thread.join(timeout=3)
-                if thread.is_alive():
-                    add_log(f"账号 {account_name} 旧线程未能正常停止", 'warning', system='message')
-        monitor_threads = {}
-    
-    # 重置所有状态
-    monitoring = False  # 先设为False，避免竞态条件
-    monitor_thread = None
-    
     # 清理全局状态
     global message_cache, last_message_times, last_send_time, followers_cache, last_follow_check, unfollowers_cache, follow_history
     message_cache = {}
@@ -4189,30 +4165,36 @@ def start_monitoring():
 
 @app.route('/api/stop', methods=['POST'])
 def stop_monitoring():
-    global monitoring, monitor_thread, monitor_threads
-    
-    # 强制停止，不管当前状态
+    with monitor_control_lock:
+        _stop_message_monitor()
+    return jsonify(success=True)
+
+
+def _stop_message_monitor():
+    global monitoring
     monitoring = False
     add_log("停止监控私信", 'warning', system='message')
-    
-    # 等待线程结束
     if monitor_thread and monitor_thread.is_alive():
         monitor_thread.join(timeout=3)
-        if monitor_thread.is_alive():
-            add_log("监控线程未能在3秒内停止，但状态已重置", 'warning', system='message')
 
-    if monitor_threads:
-        for account_name, thread in list(monitor_threads.items()):
-            if thread and thread.is_alive():
-                thread.join(timeout=3)
-                if thread.is_alive():
-                    add_log(f"账号 {account_name} 监控线程未能在3秒内停止", 'warning', system='message')
-    
-    # 清理线程引用
-    monitor_thread = None
-    monitor_threads = {}
-    
-    return jsonify({'success': True})
+
+def message_account_states(actual_monitoring):
+    account_states = {}
+    if config.get('multi_account_mode'):
+        for account in config.get('accounts', []):
+            name = account.get('name')
+            worker = monitor_threads.get(name)
+            if not account.get('enabled', True):
+                state = 'disabled'
+            elif not account.get('sessdata') or not account.get('bili_jct'):
+                state = 'login_required'
+            elif not actual_monitoring:
+                state = 'stopped'
+            else:
+                state = worker.state if worker else 'starting'
+            account_states[name] = state
+    return account_states
+
 
 @app.route('/api/status')
 def get_status():
@@ -4220,17 +4202,9 @@ def get_status():
     global monitoring, monitor_thread, monitor_threads, comment_monitoring, comment_monitor_thread
     
     # 检查私信监控实际状态（兼容单账号与多账号并行）
-    active_single = bool(monitor_thread and monitor_thread.is_alive())
-    active_multi = any(thread and thread.is_alive() for thread in monitor_threads.values()) if monitor_threads else False
-    actual_monitoring = bool(monitoring and (active_single or active_multi))
-    
-    # 如果状态不一致，自动修正
-    if monitoring and not actual_monitoring:
-        monitoring = False
-        monitor_thread = None
-        monitor_threads = {}
-        add_log("检测到私信监控状态不一致，已自动修正", 'warning', system='message')
-    
+    actual_monitoring = bool(monitoring and monitor_thread and monitor_thread.is_alive())
+    account_states = message_account_states(actual_monitoring)
+
     # 检查评论监控实际状态
     actual_comment_monitoring = comment_monitoring and comment_monitor_thread and comment_monitor_thread.is_alive()
     
@@ -4249,6 +4223,7 @@ def get_status():
     message_config_set = bool(len(valid_enabled_accounts) > 0) if is_multi_mode else bool(config.get('sessdata') and config.get('bili_jct'))
 
     return jsonify({
+        'message_account_states': account_states,
         'message_monitoring': actual_monitoring,  # 私信监控状态
         'comment_monitoring': actual_comment_monitoring,  # 评论监控状态
         'system_running': system_running,  # 整体运行状态
@@ -4762,7 +4737,7 @@ def handle_accounts():
         data = request.get_json()
         action = data.get('action')
         
-        if action == 'add':
+        if action in ('add', 'reauthenticate'):
             # 添加新账号
             name = data.get('name', '').strip()
             sessdata = data.get('sessdata', '').strip()
@@ -4776,16 +4751,36 @@ def handle_accounts():
             
             # 检查账号名是否重复
             accounts = config.get('accounts', [])
-            if any(acc.get('name') == name for acc in accounts):
+            existing = next((acc for acc in accounts if acc.get('name') == name), None)
+            if action == 'reauthenticate' and existing is None:
+                return jsonify(success=False, error='该账号已删除，请刷新列表'), 404
+            if action == 'add' and existing is not None:
                 return jsonify({'success': False, 'error': f'账号名称 "{name}" 已存在'})
             
             # 验证账号有效性
             try:
-                api = BilibiliAPI(sessdata, bili_jct)
+                api = BilibiliAPI(sessdata, bili_jct, dev_id=str(uuid.uuid4()), account_name=name)
                 uid = api.get_my_uid()
                 if not uid:
                     return jsonify({'success': False, 'error': '无法获取用户信息，请检查登录凭证是否正确'})
                 
+                if action == 'reauthenticate':
+                    with message_profiles_lock:
+                        if get_message_account(name) is not existing:
+                            return jsonify(success=False, error='账号已变更，请刷新后重试'), 409
+                        if existing.get('uid') and str(uid) != str(existing['uid']):
+                            return jsonify(success=False, error=f'请使用 {name} 对应的B站账号登录'), 400
+                        previous = existing.copy()
+                        existing.update(sessdata=sessdata, bili_jct=bili_jct, uid=uid)
+                        if not save_config():
+                            existing.clear()
+                            existing.update(previous)
+                            return jsonify(success=False, error='登录凭据保存失败，请重试'), 500
+                        worker = monitor_threads.get(name)
+                        if worker and worker.state == 'login_required':
+                            worker.stop_requested.set()
+                    return jsonify(success=True, message=f'{name} 的登录凭据已更新')
+
                 # 添加账号
                 new_account = {
                     'name': name,
@@ -4834,13 +4829,17 @@ def handle_accounts():
         elif action == 'toggle_mode':
             # 切换多账号模式
             multi_mode = data.get('enabled', False)
-            config['multi_account_mode'] = multi_mode
-            save_config()
-            
             mode_text = "多账号模式" if multi_mode else "单账号模式"
-            add_log(f"已切换到{mode_text}", 'info')
-            return jsonify({'success': True, 'message': f'已切换到{mode_text}'})
-        
+            message = f"已切换到{mode_text}"
+            with monitor_control_lock:
+                if multi_mode != config.get('multi_account_mode') and monitoring:
+                    _stop_message_monitor()
+                    message += '，请启动新模式的私信监控'
+                config['multi_account_mode'] = multi_mode
+                save_config()
+            add_log(message, 'info')
+            return jsonify(success=True, message=message)
+
         else:
             return jsonify({'success': False, 'error': '未知操作'})
     
@@ -6787,6 +6786,13 @@ def run_server(open_browser: bool = False):
     xianyu_system.init_on_startup()
     from channels_reply_system import channels_system
     channels_system.init_on_startup()
+
+    # 部署时可以显式恢复重启前正在运行的私信监控。
+    if os.environ.get('BILIGO_START_MESSAGE_MONITOR') == '1':
+        with app.app_context():
+            result = start_monitoring().get_json()
+            if not result['success']:
+                logger.warning("未能恢复私信监控: %s", result.get('error'))
 
     should_open_browser = open_browser or os.environ.get('BILIGO_OPEN_BROWSER', '').strip().lower() in ('1', 'true', 'yes')
     if should_open_browser:

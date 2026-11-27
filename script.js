@@ -7,6 +7,12 @@ const rulesPerPage = 10;
 let editingRuleId = null;
 let selectedMessageAccount = null;
 let accountSelectionReady = false;
+let reauthAccount = null;
+let messageAccountStates = {};
+const messageStateLabels = {
+    starting: '正在验证', running: '监控中', retrying: '连接失败，正在重试',
+    login_required: '需要重新登录', disabled: '已禁用', stopped: '已停止'
+};
 
 // 每个请求固定携带发起时选中的账号，单账号模式保留原有接口行为。
 function fetchMessageConfig(path, options = {}) {
@@ -58,6 +64,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     checkServerStatus();
     loadMessageLogs();
     setInterval(loadMessageLogs, 4000);
+    setInterval(() => {
+        if (!document.hidden && isMonitoring) checkServerStatus();
+    }, 5000);
     initMobileOptimizations();
     initReplyTypeHandlers();
     loadNewMessageConfig();
@@ -992,7 +1001,7 @@ function startMonitoring() {
         if (data.success) {
             isMonitoring = true;
             updateButtonStates();
-            updateStatus('监控中...');
+            checkServerStatus();
             showToast('开始监控私信', 'success');
             addLog('开始监控私信', 'success');
         } else {
@@ -1016,6 +1025,7 @@ function stopMonitoring() {
         updateButtonStates();
         updateStatus('已停止');
         if (data.success) {
+            checkServerStatus();
             showToast('停止监控私信', 'warning');
             addLog('停止监控私信', 'warning');
         } else {
@@ -1035,7 +1045,7 @@ function stopMonitoring() {
 // 更新按钮状态
 function updateButtonStates() {
     document.getElementById('start-btn').disabled = isMonitoring || !isMessageLoggedIn;
-    document.getElementById('stop-btn').disabled = !isMonitoring || !isMessageLoggedIn;
+    document.getElementById('stop-btn').disabled = !isMonitoring;
     if (typeof setPlatformLoginRequired === 'function') {
         setPlatformLoginRequired(!isMessageLoggedIn);
     }
@@ -1087,7 +1097,14 @@ function checkServerStatus() {
         isMonitoring = data.monitoring;
         isMessageLoggedIn = !!data.message_config_set;
         updateButtonStates();
-        updateStatus(data.monitoring ? '监控中...' : '未启动');
+        messageAccountStates = data.message_account_states || {};
+        const enabledStates = Object.values(messageAccountStates).filter(state => state !== 'disabled');
+        const running = enabledStates.filter(state => state === 'running').length;
+        const label = enabledStates.length ? `监控中（${running}/${enabledStates.length} 个账号正在接收）` : '监控中...';
+        updateStatus(data.monitoring ? label : '未启动');
+        document.querySelectorAll('[data-message-account-state]').forEach(element => {
+            element.textContent = messageStateLabels[messageAccountStates[element.dataset.messageAccountState]] || '';
+        });
     })
     .catch(error => {
         if (sequence !== messageStatusSequence) return;
@@ -2392,7 +2409,10 @@ function updateAccountsList(accounts) {
         const details = document.createElement('div');
         details.className = 'account-details';
         details.textContent = `UID: ${account.uid || '未知'} · SESSDATA: ${account.sessdata_preview || ''}`;
-        info.append(name, details);
+        const state = document.createElement('div');
+        state.dataset.messageAccountState = account.name;
+        state.textContent = messageStateLabels[messageAccountStates[account.name]] || '';
+        info.append(name, details, state);
         const actions = document.createElement('div');
         actions.className = 'account-actions';
         const configure = document.createElement('button');
@@ -2411,7 +2431,11 @@ function updateAccountsList(accounts) {
         remove.className = 'btn-small btn-danger';
         remove.textContent = '删除';
         remove.onclick = () => deleteAccount(account.name);
-        actions.append(configure, toggle, remove);
+        const login = document.createElement('button');
+        login.className = 'btn-small btn-primary';
+        login.textContent = '重新登录';
+        login.onclick = () => openAddAccountModal(false, account.name);
+        actions.append(configure, login, toggle, remove);
         item.append(info, actions);
         container.append(item);
     });
@@ -2473,13 +2497,17 @@ function toggleMultiAccountMode(enabled) {
 }
 
 // 打开添加账号模态框
-function openAddAccountModal(keepExisting = false) {
+function openAddAccountModal(keepExisting = false, accountName = null) {
     const modal = document.getElementById('add-account-modal');
     if (modal) {
         modal.style.display = 'block';
         if (!keepExisting) {
-            // 清空输入框
-            document.getElementById('account-name').value = '';
+            reauthAccount = accountName;
+            modal.querySelector('h3').textContent = reauthAccount ? '重新登录' : '添加账号';
+            const nameInput = document.getElementById('account-name');
+            nameInput.value = accountName || '';
+            nameInput.readOnly = reauthAccount !== null;
+            document.getElementById('account-email').closest('.form-row').hidden = reauthAccount !== null;
             document.getElementById('account-sessdata').value = '';
             document.getElementById('account-bili-jct').value = '';
             document.getElementById('account-email').value = '';
@@ -2521,7 +2549,7 @@ function addAccount() {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            action: 'add',
+            action: reauthAccount !== null ? 'reauthenticate' : 'add',
             name: name,
             sessdata: sessdata,
             bili_jct: bili_jct,
@@ -2926,6 +2954,7 @@ function startQRCodePolling() {
 function pollQRCodeStatus() {
     if (!currentQRCodeKey || isQRCodeLoginSuccess) return;
     
+    const polledKey = currentQRCodeKey;
     fetch('/api/qrcode-login/poll', {
         method: 'POST',
         headers: {
@@ -2938,7 +2967,7 @@ function pollQRCodeStatus() {
     })
     .then(response => response.json())
     .then(data => {
-        console.log('扫码状态:', data); // 添加调试日志
+        if (currentQRCodeKey !== polledKey) return;
         
         // 如果已经成功，不再处理后续响应
         if (isQRCodeLoginSuccess) {
@@ -2981,6 +3010,7 @@ function pollQRCodeStatus() {
                 
                 // 3秒后关闭模态框并刷新配置
                 setTimeout(() => {
+                    if (currentQRCodeKey !== polledKey) return;
                     const loginContext = qrcodeLoginContext;
                     closeQRCodeLoginModal();
                     if (loginContext !== 'add-account') {

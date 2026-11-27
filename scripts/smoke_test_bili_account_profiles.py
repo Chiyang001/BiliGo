@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlencode
+from unittest.mock import patch
 
 DATA_DIR = tempfile.TemporaryDirectory()
 os.environ['BILIGO_DATA_DIR'] = DATA_DIR.name
@@ -173,6 +174,31 @@ def check_ui():
             page.set_viewport_size({'width': 1440, 'height': 1000})
             page.locator('[data-platform-tab="account"]').click()
             assert page.locator('.account-name').first.text_content().startswith(ACCOUNT_A)
+            page.locator('.account-item').first.get_by_role('button', name='重新登录').click()
+            assert page.locator('#account-name').input_value() == ACCOUNT_A
+            assert page.locator('#account-name').get_attribute('readonly') is not None
+            assert page.locator('#account-email').is_hidden()
+            page.route('**/api/qrcode-login/generate', lambda route: route.fulfill(json={
+                'success': True, 'qrcode_key': 'mock-key', 'url': 'https://example.invalid/qr',
+            }))
+            page.route('https://api.qrserver.com/**', lambda route: route.abort())
+
+            def complete_scan(route):
+                assert route.request.post_data_json == {'qrcode_key': 'mock-key', 'auto_save': False}
+                route.fulfill(json={'success': True, 'status': 'success',
+                                    'sessdata': 'fresh-A', 'bili_jct': 'fresh-token-A'})
+
+            page.route('**/api/qrcode-login/poll', complete_scan)
+            page.locator('#add-account-modal').get_by_role('button', name='扫码登录填充Cookie').click()
+            page.locator('#add-account-modal').wait_for(state='visible')
+            assert page.locator('#account-sessdata').input_value() == 'fresh-A'
+            with patch.object(bili.BilibiliAPI, '_warmup_im_session'), patch.object(bili.BilibiliAPI, 'get_my_uid', return_value=1001):
+                with page.expect_response(lambda r: r.url.endswith('/api/accounts') and r.request.method == 'POST') as saved:
+                    page.get_by_role('button', name='保存账号').click()
+                assert saved.value.json()['success']
+            assert bili.get_message_account(ACCOUNT_A)['sessdata'] == 'fresh-A'
+            assert bili.get_message_account(ACCOUNT_B)['sessdata'] == 'test-session'
+            assert bili.get_message_config(ACCOUNT_A)['default_reply_message'] == 'reply-A'
             page.locator('[data-platform-tab="control"]').click()
             page.wait_for_function("!document.querySelector('#start-btn').disabled")
             # Model a cached logged-out homepage, then return from account configuration.
